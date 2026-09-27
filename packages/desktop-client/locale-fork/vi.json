@@ -2659,6 +2659,7 @@
   "Unspent income: {{amount}} - more came in than the plan spends, and it leaves the plan.": "Thu nhập chưa chi: {{amount}} — thu nhập cao hơn khoản chi theo kế hoạch, phần dư sẽ không còn trong kế hoạch.",
   "Unsplit {{count}} transactions_one": "Bỏ tách {{count}} giao dịch",
   "Unsplit {{count}} transactions_other": "Bỏ tách {{count}} giao dịch",
+  "Unsupported template type: {{type}}": "Không hỗ trợ loại mẫu: {{type}}",
   "Unsupported template type: {{ type } satisfies TransObjectLiteral}": "Không hỗ trợ loại mẫu: {{ type } satisfies TransObjectLiteral}",
   "until": "đến",
   "Until": "Đến",
