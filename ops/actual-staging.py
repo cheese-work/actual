@@ -366,15 +366,13 @@ def assert_firewall_hook(chain, bridge, policy):
     try:
         index = next(
             index for index, rule in enumerate(rules)
-            if rule[:2] == ['-A', chain]
-            and firewall_value(rule, '-i') == bridge
-            and firewall_target(rule) == ('jump', policy)
+            if firewall_is_full_hook(rule, chain, bridge, policy)
         )
     except StopIteration as error:
         raise ValueError(f'missing {chain} isolation hook') from error
     assert_safe_preceding(
         rules[:index],
-        lambda rule: firewall_value(rule, '-i') in (None, bridge),
+        lambda rule: firewall_interface_may_match(firewall_value(rule, '-i'), bridge),
         f'{chain} isolation hook',
     )
 
@@ -385,10 +383,7 @@ def assert_firewall_deny(policy, subnet, destinations):
         try:
             index = next(
                 index for index, rule in enumerate(rules)
-                if rule[:2] == ['-A', policy]
-                and firewall_target(rule) == ('jump', 'DROP')
-                and firewall_address_equals(firewall_value(rule, '-s'), subnet)
-                and firewall_address_equals(firewall_value(rule, '-d'), destination)
+                if firewall_is_full_deny(rule, policy, subnet, destination)
             )
         except StopIteration as error:
             raise ValueError(f'missing {policy} deny for {destination}') from error
@@ -397,6 +392,25 @@ def assert_firewall_deny(policy, subnet, destinations):
             lambda rule: firewall_may_match(rule, subnet, destination),
             f'{policy} deny for {destination}',
         )
+
+
+def firewall_is_full_hook(rule, chain, bridge, policy):
+    return (
+        len(rule) == 6
+        and rule[:2] == ['-A', chain]
+        and firewall_value(rule, '-i') == bridge
+        and firewall_target(rule) == ('jump', policy)
+    )
+
+
+def firewall_is_full_deny(rule, policy, subnet, destination):
+    return (
+        len(rule) == 8
+        and rule[:2] == ['-A', policy]
+        and firewall_target(rule) == ('jump', 'DROP')
+        and firewall_address_equals(firewall_value(rule, '-s'), subnet)
+        and firewall_address_equals(firewall_value(rule, '-d'), destination)
+    )
 
 
 def firewall_value(rule, option):
@@ -426,6 +440,14 @@ def firewall_address_equals(actual, expected):
         return ipaddress.ip_network(actual, strict=False) == ipaddress.ip_network(expected, strict=False)
     except ValueError:
         return False
+
+
+def firewall_interface_may_match(actual, bridge):
+    if actual is None:
+        return True
+    if actual.endswith('+'):
+        return bridge.startswith(actual[:-1])
+    return '+' in actual or actual == bridge
 
 
 def firewall_may_match(rule, subnet, destination):

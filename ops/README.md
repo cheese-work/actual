@@ -39,9 +39,10 @@ archive or a production credential.
    `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks for that bridge. Earlier
    rules may only be unrelated-interface traffic or scoped
    `ESTABLISHED,RELATED` replies; no earlier jump, goto, RETURN, or NEW
-   accept is allowed. The input policy must DROP its subnet to the bridge
-   gateway; the forwarding policy must DROP its subnet to every production
-   container IP before any NEW accept or RETURN. Create
+   accept is allowed. Each hook must match only the bridge interface, and each
+   required DROP must match only the staging subnet and exact gateway or
+   production IP: no protocol, port, source-host, destination-host, or
+   connection-state predicate. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
 3. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,

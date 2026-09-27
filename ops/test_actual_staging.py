@@ -46,6 +46,51 @@ class CandidateTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def network_fixture(self):
+        network = {
+            'Internal': True,
+            'Driver': 'bridge',
+            'Options': {
+                'com.docker.network.bridge.enable_ip_masquerade': 'false',
+                'com.docker.network.bridge.name': 'act-stg0',
+            },
+            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
+        }
+        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
+        policies = {
+            'INPUT': '\n'.join((
+                '-P INPUT DROP',
+                '-A INPUT -i lo -j ACCEPT',
+                '-A INPUT -i act-stg0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
+                '-A INPUT -i act-stg0 -j ACTUAL_STAGING_INPUT',
+            )),
+            'DOCKER-USER': '\n'.join((
+                '-N DOCKER-USER',
+                '-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
+                '-A DOCKER-USER -i act-stg0 -j ACTUAL_STAGING_FORWARD',
+            )),
+            'ACTUAL_STAGING_INPUT': '\n'.join((
+                '-N ACTUAL_STAGING_INPUT',
+                '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 -j DROP',
+            )),
+            'ACTUAL_STAGING_FORWARD': '\n'.join((
+                '-N ACTUAL_STAGING_FORWARD',
+                '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 -j DROP',
+            )),
+        }
+        return network, production, policies
+
+    def assert_network_fixture(self, network, production, policies):
+        def firewall(*command, **kwargs):
+            if command[:2] == ('iptables', '-S'):
+                return policies[command[2]]
+            return ''
+
+        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
+                mock.patch.object(staging, 'prod', return_value=production), \
+                mock.patch.object(staging, 'run', side_effect=firewall):
+            staging.assert_network_isolation()
+
     def test_sanitize_revokes_all_copied_auth_but_keeps_budget(self):
         self.assertEqual(staging.budget_count(self.root), 1)
         self.assertEqual(staging.sanitize(self.root, '$argon2id$fixture'), 1)
@@ -369,113 +414,60 @@ class CandidateTests(unittest.TestCase):
             self.assertEqual(staging.promote(), candidate)
 
     def test_network_isolation_requires_ordered_input_and_forwarding_denies(self):
-        network = {
-            'Internal': True,
-            'Driver': 'bridge',
-            'Options': {
-                'com.docker.network.bridge.enable_ip_masquerade': 'false',
-                'com.docker.network.bridge.name': 'actual-staging-br0',
-            },
-            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
-        }
-        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
-        policies = {
-            'INPUT': '\n'.join((
-                '-P INPUT DROP',
-                '-A INPUT -i lo -j ACCEPT',
-                '-A INPUT -i actual-staging-br0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT',
-                '-A INPUT -i actual-staging-br0 -j ACTUAL_STAGING_INPUT',
-            )),
-            'DOCKER-USER': '\n'.join((
-                '-N DOCKER-USER',
-                '-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
-                '-A DOCKER-USER -i actual-staging-br0 -j ACTUAL_STAGING_FORWARD',
-            )),
-            'ACTUAL_STAGING_INPUT': '\n'.join((
-                '-N ACTUAL_STAGING_INPUT',
-                '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 -j DROP',
-            )),
-            'ACTUAL_STAGING_FORWARD': '\n'.join((
-                '-N ACTUAL_STAGING_FORWARD',
-                '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 -j DROP',
-            )),
-        }
-
-        def firewall(*command, **kwargs):
-            if command[:2] == ('iptables', '-S'):
-                return policies[command[2]]
-            return ''
-
-        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
-                mock.patch.object(staging, 'prod', return_value=production), \
-                mock.patch.object(staging, 'run', side_effect=firewall):
-            staging.assert_network_isolation()
+        self.assert_network_fixture(*self.network_fixture())
 
     def test_network_isolation_rejects_new_connection_accept_before_input_hook(self):
-        network = {
-            'Internal': True,
-            'Driver': 'bridge',
-            'Options': {
-                'com.docker.network.bridge.enable_ip_masquerade': 'false',
-                'com.docker.network.bridge.name': 'actual-staging-br0',
-            },
-            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
-        }
-        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
-        policies = {
-            'INPUT': '\n'.join((
-                '-P INPUT DROP',
-                '-A INPUT -i actual-staging-br0 -j ACCEPT',
-                '-A INPUT -i actual-staging-br0 -j ACTUAL_STAGING_INPUT',
-            )),
-            'DOCKER-USER': '-A DOCKER-USER -i actual-staging-br0 -j ACTUAL_STAGING_FORWARD',
-            'ACTUAL_STAGING_INPUT': '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 -j DROP',
-            'ACTUAL_STAGING_FORWARD': '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 -j DROP',
-        }
-
-        def firewall(*command, **kwargs):
-            if command[:2] == ('iptables', '-S'):
-                return policies[command[2]]
-            return ''
-
-        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
-                mock.patch.object(staging, 'prod', return_value=production), \
-                mock.patch.object(staging, 'run', side_effect=firewall):
-            with self.assertRaisesRegex(ValueError, 'INPUT isolation hook is shadowed'):
-                staging.assert_network_isolation()
+        network, production, policies = self.network_fixture()
+        policies['INPUT'] = '\n'.join((
+            '-P INPUT DROP',
+            '-A INPUT -i act-stg0 -j ACCEPT',
+            '-A INPUT -i act-stg0 -j ACTUAL_STAGING_INPUT',
+        ))
+        with self.assertRaisesRegex(ValueError, 'INPUT isolation hook is shadowed'):
+            self.assert_network_fixture(network, production, policies)
 
     def test_network_isolation_rejects_goto_before_input_hook(self):
-        network = {
-            'Internal': True,
-            'Driver': 'bridge',
-            'Options': {
-                'com.docker.network.bridge.enable_ip_masquerade': 'false',
-                'com.docker.network.bridge.name': 'actual-staging-br0',
-            },
-            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
-        }
-        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
-        policies = {
-            'INPUT': '\n'.join((
-                '-P INPUT DROP',
-                '-A INPUT -i actual-staging-br0 -g STAGING_BYPASS',
-                '-A INPUT -i actual-staging-br0 -j ACTUAL_STAGING_INPUT',
-            )),
-            'DOCKER-USER': '-A DOCKER-USER -i actual-staging-br0 -j ACTUAL_STAGING_FORWARD',
-            'ACTUAL_STAGING_INPUT': '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 -j DROP',
-            'ACTUAL_STAGING_FORWARD': '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 -j DROP',
-        }
+        network, production, policies = self.network_fixture()
+        policies['INPUT'] = '\n'.join((
+            '-P INPUT DROP',
+            '-A INPUT -i act-stg0 -g STAGING_BYPASS',
+            '-A INPUT -i act-stg0 -j ACTUAL_STAGING_INPUT',
+        ))
+        with self.assertRaisesRegex(ValueError, 'unsupported firewall transfer'):
+            self.assert_network_fixture(network, production, policies)
 
-        def firewall(*command, **kwargs):
-            if command[:2] == ('iptables', '-S'):
-                return policies[command[2]]
-            return ''
+    def test_network_isolation_rejects_narrow_required_rules(self):
+        narrowed = {
+            'INPUT': '-A INPUT -i act-stg0 -p tcp -m tcp --dport 443 -j ACTUAL_STAGING_INPUT',
+            'DOCKER-USER': '-A DOCKER-USER -i act-stg0 -s 172.25.0.2 -j ACTUAL_STAGING_FORWARD',
+            'ACTUAL_STAGING_INPUT': (
+                '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 '
+                '-m conntrack --ctstate ESTABLISHED,RELATED -j DROP'
+            ),
+            'ACTUAL_STAGING_FORWARD': (
+                '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 '
+                '-p tcp -m tcp --dport 443 -j DROP'
+            ),
+        }
+        for chain, rule in narrowed.items():
+            with self.subTest(chain=chain):
+                network, production, policies = self.network_fixture()
+                policies[chain] = rule
+                with self.assertRaisesRegex(ValueError, 'missing'):
+                    self.assert_network_fixture(network, production, policies)
 
-        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
-                mock.patch.object(staging, 'prod', return_value=production), \
-                mock.patch.object(staging, 'run', side_effect=firewall):
-            with self.assertRaisesRegex(ValueError, 'unsupported firewall transfer'):
-                staging.assert_network_isolation()
+    def test_network_isolation_rejects_wildcard_interface_transfers(self):
+        for interface in ('act-st+', 'act-+'):
+            for transfer in ('-j ACCEPT', '-g STAGING_BYPASS'):
+                with self.subTest(interface=interface, transfer=transfer):
+                    network, production, policies = self.network_fixture()
+                    policies['INPUT'] = '\n'.join((
+                        '-P INPUT DROP',
+                        f'-A INPUT -i {interface} {transfer}',
+                        '-A INPUT -i act-stg0 -j ACTUAL_STAGING_INPUT',
+                    ))
+                    with self.assertRaises(ValueError):
+                        self.assert_network_fixture(network, production, policies)
 
     def test_snapshot_cleans_failed_capture_spool(self):
         before = {
