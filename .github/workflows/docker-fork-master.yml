@@ -56,6 +56,9 @@ jobs:
     needs: build
     if: github.repository == 'cheese-work/actual'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
     concurrency:
       group: docker-fork-master-aliases
       cancel-in-progress: false
