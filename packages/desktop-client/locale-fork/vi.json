@@ -93,5 +93,10 @@
   "Settings": "Cài đặt",
   "Show in-app notifications (release notes and announcements)": "Hiển thị thông báo trong ứng dụng (ghi chú phát hành và thông báo)",
   "Switch file": "Chuyển tệp",
-  "You're up to date!": "Bạn đang dùng phiên bản mới nhất!"
+  "You're up to date!": "Bạn đang dùng phiên bản mới nhất!",
+  "<0>Formatting</0> does not affect how budget data is stored, and can be changed at any time.": "<0>Định dạng</0> không ảnh hưởng đến cách lưu dữ liệu ngân sách và có thể thay đổi bất cứ lúc nào.",
+  "Dates": "Ngày tháng",
+  "First day of the week": "Ngày đầu tiên trong tuần",
+  "Hide decimal places": "Ẩn chữ số thập phân",
+  "Numbers": "Các số"
 }
