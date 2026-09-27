@@ -78,5 +78,20 @@
   "<0>Language</0> support is not available. Please follow the instructions <3>here</3> to add missing translation files.": "<0>Chưa có hỗ trợ ngôn ngữ</0>. Vui lòng làm theo hướng dẫn <3>tại đây</3> để thêm các tệp bản dịch còn thiếu.",
   "No languages available": "Không có ngôn ngữ nào khả dụng",
   "Select language": "Chọn ngôn ngữ",
-  "System default": "Mặc định của hệ thống"
+  "System default": "Mặc định của hệ thống",
+  "<0>Actual</0> is a super fast privacy-focused app for managing your finances.": "<0>Actual</0> là ứng dụng quản lý tài chính cực nhanh, chú trọng quyền riêng tư.",
+  "<0>Budget ID:</0> {{budgetId}}": "<0>Mã ngân sách:</0> {{budgetId}}",
+  "<0>IDs</0> are the names Actual uses to identify your budget internally. There are several different IDs associated with your budget. The Budget ID is used to identify your budget file. The Sync ID is used to access the budget on the server.": "<0>Mã định danh</0> là tên Actual dùng để nhận diện nội bộ ngân sách của bạn. Ngân sách có một số mã định danh khác nhau. Mã ngân sách dùng để nhận diện tệp ngân sách; Mã đồng bộ dùng để truy cập ngân sách trên máy chủ.",
+  "<0>Sync ID:</0> {{syncId}}": "<0>Mã đồng bộ:</0> {{syncId}}",
+  "Budget name": "Tên ngân sách",
+  "Client version: {{version}}": "Phiên bản ứng dụng khách: {{version}}",
+  "Display a notification when updates are available": "Hiển thị thông báo khi có bản cập nhật",
+  "New version available: {versionInfo.latestVersion}": "Có phiên bản mới: {versionInfo.latestVersion}",
+  "Notifications": "Thông báo",
+  "Release Notes": "Ghi chú phát hành",
+  "Server version: {{version}}": "Phiên bản máy chủ: {{version}}",
+  "Settings": "Cài đặt",
+  "Show in-app notifications (release notes and announcements)": "Hiển thị thông báo trong ứng dụng (ghi chú phát hành và thông báo)",
+  "Switch file": "Chuyển tệp",
+  "You're up to date!": "Bạn đang dùng phiên bản mới nhất!"
 }
