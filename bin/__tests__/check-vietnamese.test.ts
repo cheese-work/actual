@@ -100,6 +100,24 @@ describe('Vietnamese coverage gate', () => {
     ]);
   });
 
+  it.each(['zero', 'one', 'two', 'few', 'many'])(
+    'rejects Vietnamese plural form %s when Intl.PluralRules does not allow it',
+    category => {
+      const pluralEnglish = {
+        '{{count}} items_one': '{{count}} item',
+        '{{count}} items_other': '{{count}} items',
+      };
+      expect(
+        checkVietnamese(pluralEnglish, {
+          '{{count}} items_other': '{{count}} món',
+          [`{{count}} items_${category}`]: '{{count}} món',
+        }),
+      ).toEqual([
+        `Unexpected Vietnamese plural form: {{count}} items_${category}`,
+      ]);
+    },
+  );
+
   it('rejects blank translations and invalid catalogs', () => {
     expect(checkVietnamese({ Budget: 'Budget' }, { Budget: '  ' })).toEqual([
       'Empty Vietnamese translation: Budget',

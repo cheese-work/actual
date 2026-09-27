@@ -134,7 +134,7 @@ export function checkVietnamese(
     english,
   ).filter(([key]) => !groupedKeys.has(key));
 
-  for (const [base, categories] of groups) {
+  for (const [base] of groups) {
     for (const category of vietnamesePluralCategories) {
       const key = `${base}_${category}`;
       if (!Object.hasOwn(english, key)) {
@@ -145,7 +145,6 @@ export function checkVietnamese(
     for (const category of pluralCategories) {
       const key = `${base}_${category}`;
       if (
-        categories.has(category) &&
         !vietnamesePluralCategories.has(category) &&
         Object.hasOwn(vietnamese, key)
       ) {
