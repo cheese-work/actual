@@ -1,0 +1,36 @@
+name: Vietnamese coverage
+
+on:
+  push:
+    branches:
+      - master
+      - 'agent/**'
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vietnamese-coverage:
+    if: github.repository == 'cheese-work/actual' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, cheese-x99]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Test coverage gate
+        run: yarn vitest run --project bin check-vietnamese
+      - name: Report unwrapped UI strings
+        run: yarn oxlint --quiet packages/desktop-client/src
+      - name: Require complete Vietnamese translations and matching placeholders
+        run: yarn check:i18n
