@@ -13,6 +13,67 @@ function isLocale(value: unknown): value is Record<string, string> {
   );
 }
 
+type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';
+
+const pluralCategories: PluralCategory[] = [
+  'zero',
+  'one',
+  'two',
+  'few',
+  'many',
+  'other',
+];
+const vietnamesePluralCategories = new Set(
+  new Intl.PluralRules('vi').resolvedOptions().pluralCategories,
+);
+
+function pluralGroups(
+  catalog: Record<string, string>,
+): Map<string, Set<PluralCategory>> {
+  const candidates = new Map<
+    string,
+    { categories: Set<PluralCategory>; usesCount: boolean }
+  >();
+  for (const [key, value] of Object.entries(catalog)) {
+    const match = /^(.*)_(zero|one|two|few|many|other)$/.exec(key);
+    if (!match) {
+      continue;
+    }
+    const [, base, category] = match;
+    const pluralCategory = category as PluralCategory;
+    const candidate = candidates.get(base) ?? {
+      categories: new Set<PluralCategory>(),
+      usesCount: false,
+    };
+    candidate.categories.add(pluralCategory);
+    candidate.usesCount ||= /\{\{\s*count(?:\s*,[^{}]*)?\s*\}\}/.test(value);
+    candidates.set(base, candidate);
+  }
+
+  return new Map(
+    [...candidates]
+      .filter(
+        ([, candidate]) => candidate.usesCount || candidate.categories.size > 1,
+      )
+      .map(([base, candidate]) => [base, candidate.categories]),
+  );
+}
+
+function requiredVietnameseKeys(english: Record<string, string>): string[] {
+  const groups = pluralGroups(english);
+  const pluralKeys = new Set(
+    [...groups].flatMap(([base, categories]) =>
+      [...categories].map(category => `${base}_${category}`),
+    ),
+  );
+  return [
+    ...Object.keys(english).filter(key => !pluralKeys.has(key)),
+    ...[...groups.keys()].flatMap(base =>
+      [...vietnamesePluralCategories].map(category => `${base}_${category}`),
+    ),
+  ];
+}
+
 function placeholders(value: string): string[] | null {
   const interpolationPattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
   const remaining = value.replace(interpolationPattern, '');
@@ -63,7 +124,40 @@ export function checkVietnamese(
   }
 
   const errors: string[] = [];
-  for (const [key, value] of Object.entries(english)) {
+  const groups = pluralGroups(english);
+  const groupedKeys = new Set(
+    [...groups].flatMap(([base, categories]) =>
+      [...categories].map(category => `${base}_${category}`),
+    ),
+  );
+  const entriesToCheck: Array<[string, string | undefined]> = Object.entries(
+    english,
+  ).filter(([key]) => !groupedKeys.has(key));
+
+  for (const [base, categories] of groups) {
+    for (const category of vietnamesePluralCategories) {
+      const key = `${base}_${category}`;
+      if (!Object.hasOwn(english, key)) {
+        errors.push(`Missing English plural form: ${key}`);
+      }
+      entriesToCheck.push([key, english[key]]);
+    }
+    for (const category of pluralCategories) {
+      const key = `${base}_${category}`;
+      if (
+        categories.has(category) &&
+        !vietnamesePluralCategories.has(category) &&
+        Object.hasOwn(vietnamese, key)
+      ) {
+        errors.push(`Unexpected Vietnamese plural form: ${key}`);
+      }
+    }
+  }
+
+  for (const [key, value] of entriesToCheck) {
+    if (value === undefined) {
+      continue;
+    }
     if (!Object.hasOwn(vietnamese, key)) {
       errors.push(`Missing Vietnamese key: ${key}`);
       continue;
@@ -111,6 +205,20 @@ function main() {
       ),
     );
     const errors = checkVietnamese(english, vietnamese);
+    const requiredKeys = isLocale(english)
+      ? requiredVietnameseKeys(english)
+      : [];
+    const presentKeys = isLocale(vietnamese)
+      ? requiredKeys.filter(key => Object.hasOwn(vietnamese, key)).length
+      : 0;
+    console.log(
+      `Vietnamese batch completeness: ${JSON.stringify({
+        complete: errors.length === 0,
+        presentKeys,
+        requiredKeys: requiredKeys.length,
+        errors: errors.length,
+      })}`,
+    );
     for (const error of errors) {
       console.error(error);
     }
@@ -120,7 +228,7 @@ function main() {
       return;
     }
     console.log(
-      `Vietnamese coverage: ${Object.keys(english).length} keys, 100%.`,
+      `Vietnamese coverage: ${requiredKeys.length} required keys, 100%.`,
     );
   } finally {
     fs.rmSync(output, { recursive: true, force: true });
