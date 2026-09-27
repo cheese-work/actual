@@ -36,6 +36,8 @@ jobs:
           download-translations: 'false'
       - name: Test coverage gate
         run: yarn vitest run --project bin check-vietnamese
+      - name: Test translation reporting rule
+        run: yarn workspace eslint-plugin-actual test no-untranslated-strings
       - name: Report unwrapped UI strings
         run: yarn oxlint --quiet packages/desktop-client/src
       - name: Require complete Vietnamese translations and matching placeholders
