@@ -27,9 +27,27 @@ function placeholders(value: string): string[] | null {
         .map(part => part.trim())
         .join(',')}}}`,
   );
-  const components = [
-    ...value.matchAll(/<\/?(?:\d+|[a-zA-Z][\w-]*)\s*\/?>/g),
-  ].map(match => match[0].replace(/\s/g, ''));
+  const components: string[] = [];
+  const openTags: string[] = [];
+  for (const match of value.matchAll(/<(\/?)(\d+|[a-zA-Z][\w-]*)\s*(\/?)>/g)) {
+    const [, closing, tagName, selfClosing] = match;
+    components.push(match[0].replace(/\s/g, ''));
+    if (closing) {
+      if (openTags.pop() !== tagName) {
+        return null;
+      }
+    } else if (
+      !selfClosing &&
+      !/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/.test(
+        tagName,
+      )
+    ) {
+      openTags.push(tagName);
+    }
+  }
+  if (openTags.length > 0) {
+    return null;
+  }
   return [...interpolation, ...components].sort();
 }
 

@@ -59,6 +59,9 @@ describe('Vietnamese coverage gate', () => {
     ['Budget', 'Ngân sách amount}}'],
     ['<0>account</0>', '<1>tài khoản</1>'],
     ['<0>account</0>', '<0>tài khoản'],
+    ['<0>account</0>', '</0>tài khoản<0>'],
+    ['<0><1>account</1></0>', '<0><1>tài khoản</0></1>'],
+    ['<italic>account</italic>', '</italic>tài khoản<italic>'],
     ['<br/>', 'Dòng'],
   ])('rejects changed placeholders: %s → %s', (source, translation) => {
     expect(checkVietnamese({ key: source }, { key: translation })).toEqual([
@@ -73,6 +76,39 @@ describe('Vietnamese coverage gate', () => {
         {
           key: '<0>tài khoản</0><br/> {{-amount,number }} {{name}}',
           obsolete: 'Cũ',
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects the reversed Themes tag pair that erases the rendered message', () => {
+    const key = '<0>Themes</0> change the user interface colors.';
+    expect(
+      checkVietnamese(
+        { [key]: key },
+        {
+          [key]: '</0>Giao diện<0> thay đổi màu sắc của giao diện người dùng.',
+        },
+      ),
+    ).toEqual([`Placeholder mismatch: ${key}`]);
+    expect(
+      checkVietnamese(
+        { [key]: key },
+        {
+          [key]: '<0>Giao diện</0> thay đổi màu sắc của giao diện người dùng.',
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('allows reordering complete components, nesting and self-closing tags', () => {
+    expect(
+      checkVietnamese(
+        {
+          key: '<0>Themes</0> change <1><italic>colors</italic></1><allocatedAmount/><br>',
+        },
+        {
+          key: '<1><italic>màu sắc</italic></1> đổi theo <0>Giao diện</0><allocatedAmount/><br>',
         },
       ),
     ).toEqual([]);
