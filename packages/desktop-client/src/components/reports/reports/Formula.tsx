@@ -370,7 +370,13 @@ function FormulaInner({ widget }: FormulaInnerProps) {
             >
               <Trans>Formula:</Trans>
             </div>
-            <Suspense fallback={<div style={{ padding: 10 }}>Loading...</div>}>
+            <Suspense
+              fallback={
+                <div style={{ padding: 10 }}>
+                  <Trans>Loading...</Trans>
+                </div>
+              }
+            >
               <FormulaEditor
                 value={formula}
                 onChange={setFormula}

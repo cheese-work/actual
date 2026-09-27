@@ -1,3 +1,5 @@
+import { Trans } from 'react-i18next';
+
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
@@ -18,14 +20,16 @@ export function DevelopmentTopBar() {
         flexShrink: 0,
       }}
     >
-      <View>This is a demo build of Actual.</View>
+      <View>
+        <Trans>This is a demo build of Actual.</Trans>
+      </View>
       <View>
         <Link
           variant="external"
           linkColor="purple"
           to={`https://github.com/actualbudget/actual/pull/${import.meta.env.REACT_APP_REVIEW_ID}`}
         >
-          Open the PR: #{import.meta.env.REACT_APP_REVIEW_ID}
+          <Trans>Open the PR:</Trans> #{import.meta.env.REACT_APP_REVIEW_ID}
         </Link>
       </View>
     </View>

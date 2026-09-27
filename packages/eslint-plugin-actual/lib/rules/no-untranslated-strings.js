@@ -44,7 +44,7 @@ module.exports = {
       }
 
       // very basic - but it'll catch most cases
-      return /^[A-Z][a-z].*[a-z](\p{P})?$/.test(trimmed);
+      return /^[A-Z][a-z](?:.*[a-z])?[\p{P}\p{Zs}]*$/u.test(trimmed);
     }
 
     function isInsideTrans(node) {

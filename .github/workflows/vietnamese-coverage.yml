@@ -24,6 +24,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+      - name: Provide repository-pinned Yarn
+        run: |
+          mkdir -p "$RUNNER_TEMP/actual-yarn"
+          printf '#!/usr/bin/env bash\nexec node "$GITHUB_WORKSPACE/.yarn/releases/yarn-4.17.1.cjs" "$@"\n' > "$RUNNER_TEMP/actual-yarn/yarn"
+          chmod +x "$RUNNER_TEMP/actual-yarn/yarn"
+          echo "$RUNNER_TEMP/actual-yarn" >> "$GITHUB_PATH"
       - name: Set up environment
         uses: ./.github/actions/setup
         with:
