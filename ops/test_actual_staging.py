@@ -1,5 +1,7 @@
 """Offline staging checks; run on X99 with python3 -m unittest discover -s ops."""
 import importlib.util
+import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -64,6 +66,42 @@ class CandidateTests(unittest.TestCase):
             stream.write(b'corruption')
         with self.assertRaises(sqlite3.DatabaseError):
             staging.budget_count(self.root)
+
+    def test_retention_removes_only_expired_completed_snapshots(self):
+        snapshots = self.root / 'snapshots'
+        snapshots.mkdir()
+        old = snapshots / 'actual-consistent-old'
+        old.mkdir()
+        recent = snapshots / 'actual-consistent-recent'
+        recent.mkdir()
+        partial = snapshots / '.actual-consistent-old.partial'
+        partial.mkdir()
+        old_time = 1
+        os.utime(old, (old_time, old_time))
+        os.utime(partial, (old_time, old_time))
+
+        staging.cleanup_snapshots(snapshots, now=15 * 86400, keep_days=14)
+
+        self.assertFalse(old.exists())
+        self.assertTrue(recent.exists())
+        self.assertTrue(partial.exists())
+
+    def test_systemd_units_keep_boot_recovery_and_refresh_separate(self):
+        units = staging.systemd_units(Path('/srv/actual/ops/actual-staging.py'))
+
+        self.assertIn('actual-prod-watchdog.service', units)
+        self.assertIn('ExecStart=/usr/bin/python3 /srv/actual/ops/actual-staging.py recover', units['actual-prod-watchdog.service'])
+        self.assertIn('OnCalendar=*-*-* 03:45:00', units['actual-staging-refresh.timer'])
+        self.assertIn('Persistent=true', units['actual-staging-freshness.timer'])
+        self.assertIn('OnUnitInactiveSec=5min', units['actual-staging-image-sync.timer'])
+
+    def test_candidate_verification_record_is_bound_to_candidate_identity(self):
+        candidate = {'snapshot': 'actual-consistent-1', 'image': f'{staging.IMAGE}{"a" * 64}'}
+        receipt = staging.verification_receipt(candidate)
+
+        self.assertEqual(receipt['snapshot'], candidate['snapshot'])
+        self.assertEqual(receipt['image'], candidate['image'])
+        self.assertIn('candidate_id', receipt)
 
 
 if __name__ == '__main__':
