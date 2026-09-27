@@ -10,15 +10,18 @@ container, or the live-directory tar archive as a restore source.
 - Every staging operation takes `/home/congvc/projects/oss/actual-budget/.actual-maintenance.lock`.
   The existing `backup.sh` cron and CHE-829 promotion must be changed to take
   that exact lock before this helper is enabled.
-- Snapshots use `docker stop --time 10` under a transient 30-second watchdog.
-  `actual-prod-watchdog.service` separately starts the exact unchanged
-  production container after boot or an interrupted refresh.
+- Snapshots send production `SIGTERM` only, wait no longer than 20 seconds
+  for capture, and never use Docker's kill-on-timeout stop path. A durable
+  original-ID/image record lets the 25-second watchdog and boot recovery start
+  only the exact production container interrupted by a refresh.
 - Snapshot manifests audit every file and every SQLite database. Restore fails
   on a changed archive, unsupported account schema, copied sessions, auth,
   OpenID state, integration secrets, source config, or unpinned image.
-- A candidate runs only on the internal `actual-staging-isolated` network and
-  `127.0.0.1:15009`. Promotion recreates `actual-staging` on
-  `127.0.0.1:15008`; a failed replacement recreates the prior generation.
+- A candidate runs only on `actual-staging-isolated` and
+  `127.0.0.1:15009`. The bridge must disable masquerading and have verified
+  `DOCKER-USER` DROP rules for both its gateway and every production container
+  IP. Promotion recreates `actual-staging` on `127.0.0.1:15008`; replacement
+  and state commits roll back together.
 - Promotion requires a private, authorized encrypted-budget verifier and a
   locally recorded tailnet ACL approval. Funnel is rejected. No generic CI
   runner or production bot has access.
@@ -30,7 +33,10 @@ archive or a production credential.
 
 1. Change the existing tar job and CHE-829 promotion to use the shared lock:
    `flock -n /home/congvc/projects/oss/actual-budget/.actual-maintenance.lock <existing-command>`.
-2. Create `actual-staging-isolated` as an internal Docker bridge. Create
+2. Create `actual-staging-isolated` as an internal Docker bridge with
+   `com.docker.network.bridge.enable_ip_masquerade=false`; add and verify
+   `DOCKER-USER` DROP rules from its subnet to its gateway and every production
+   container IP. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
 3. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
@@ -42,8 +48,11 @@ archive or a production credential.
    ```
 
 4. Install private executable `ROOT/verify-encrypted-budget`. It receives the
-   snapshot name and pinned image digest, performs the authorized login and
-   decrypt check without printing a secret, and exits nonzero on failure.
+   snapshot name, pinned image digest, and candidate identity, performs the
+   authorized login and decrypt check without printing a secret, and exits
+   nonzero on failure. Also create
+   `~/.config/actual-staging/alert.env` mode `0600` containing
+   `ACTUAL_ALERT_TARGET=<approved-target>` for scheduled alerts.
 
 ## Rehearsal sequence
 
@@ -52,16 +61,18 @@ output, container IDs, image digests, alert receipt, and cleanup evidence.
 
 1. `python3 ops/actual-staging.py install-units`
 2. `ACTUAL_ALERT_TARGET=<approved-target> python3 ops/actual-staging.py alert-test`
-3. `python3 ops/actual-staging.py refresh --image <published-pinned-digest>`
+3. `python3 ops/actual-staging.py refresh`
 4. Confirm the authorized encrypted-budget verifier, staging version, source
    count, tailnet-only access, prior-generation rollback, and production
    container identity.
 5. `python3 ops/actual-staging.py enable-units`
 
 The daily refresh is `03:45`; a five-minute image-sync timer pulls published
-`master` and refreshes only when its pinned digest changes. The freshness timer
-alerts after 26 hours. Completed snapshots are retained for 14 days; partial
-archives and active generations are never selected as restore sources.
+`master` and promotes it from the latest approved snapshot only, without a
+second production interruption or freshness reset. The freshness timer alerts
+after 26 hours or any recorded refresh failure. Completed snapshots are
+retained for 14 days; failed spools, partial archives, and expired unreferenced
+generations are removed.
 
 The X99 offline suite is:
 

@@ -30,6 +30,9 @@ MASTER = 'ghcr.io/cheese-work/actual-server:master'
 DIGEST = re.compile(r'^ghcr.io/cheese-work/actual-server@sha256:[0-9a-f]{64}$')
 ACTIVE_PORT = 15008
 CANDIDATE_PORT = 15009
+CAPTURE_SECONDS = 20
+RECOVERY_SECONDS = 5
+ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
 
 
 def run(*cmd, timeout=60):
@@ -117,6 +120,13 @@ def alert(message):
     )
 
 
+def alert_configured():
+    if ALERT_ENV.is_symlink() or not ALERT_ENV.is_file() or ALERT_ENV.stat().st_mode & 0o077:
+        raise ValueError('scheduled alert configuration must be a private regular file')
+    if not any(line.startswith('ACTUAL_ALERT_TARGET=') for line in ALERT_ENV.read_text().splitlines()):
+        raise ValueError('scheduled alert destination missing')
+
+
 def locked(action):
     ensure_dir(ROOT)
     if SHARED_LOCK.is_symlink():
@@ -136,18 +146,43 @@ def assert_prod_identity(before=None):
 
 
 def recover(before=None):
+    pending = ROOT / 'pending-prod.json'
+    if before is None:
+        if not pending.exists():
+            return
+        before = read_json(pending)
     current = assert_prod_identity(before)
     if not current['State']['Running']:
-        docker('start', PROD, timeout=15)
+        docker('start', PROD, timeout=RECOVERY_SECONDS)
     if not assert_prod_identity(before)['State']['Running']:
         raise RuntimeError('production restart failed')
+    pending.unlink(missing_ok=True)
 
 
 def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
-        '--on-active=30s', sys.executable, str(Path(__file__).resolve()), 'recover',
+        '--on-active=25s', sys.executable, str(Path(__file__).resolve()), 'recover',
         timeout=10,
+    )
+
+
+def graceful_stop(before, deadline):
+    docker('kill', '--signal', 'SIGTERM', PROD, timeout=RECOVERY_SECONDS)
+    while time.monotonic() < deadline:
+        if not assert_prod_identity(before)['State']['Running']:
+            return
+        time.sleep(0.2)
+    raise RuntimeError('production did not stop gracefully before capture deadline')
+
+
+def bounded_copy(source, destination, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError('copy cannot meet production recovery deadline')
+    subprocess.run(
+        ('cp', '-a', '--', str(source), str(destination)),
+        check=True, capture_output=True, text=True, timeout=remaining,
     )
 
 
@@ -158,23 +193,21 @@ def snapshot():
     stamp = str(time.time_ns())
     copied = ROOT / 'spool' / stamp
     copied.mkdir(mode=0o700)
+    write_json(ROOT / 'pending-prod.json', {'Id': before['Id'], 'Image': before['Image']})
     schedule_watchdog(stamp)
     started = time.monotonic()
+    capture_deadline = started + CAPTURE_SECONDS
     try:
-        docker('stop', '--time', '10', PROD, timeout=15)
-        if prod()['State']['Running']:
-            raise RuntimeError('graceful stop timed out')
+        graceful_stop(before, capture_deadline)
         files = audit(SOURCE)
         required = sum(size for size, _ in files.values())
         disk = shutil.disk_usage(ROOT)
         if disk.free - required < max(5 * 1024**3, disk.total // 5):
             raise RuntimeError('disk reserve insufficient')
-        shutil.copytree(SOURCE, copied / 'data', symlinks=False)
-        if time.monotonic() - started > 25:
-            raise RuntimeError('copy missed the watchdog deadline')
+        bounded_copy(SOURCE, copied / 'data', capture_deadline)
     finally:
         recover(before)
-    if time.monotonic() - started > 30:
+    if time.monotonic() - started > CAPTURE_SECONDS + RECOVERY_SECONDS:
         raise RuntimeError('production deadline exceeded')
     try:
         copied_files = audit(copied / 'data')
@@ -189,22 +222,23 @@ def snapshot():
         target = BACKUPS / f'actual-consistent-{stamp}'
         if partial.exists() or target.exists():
             raise RuntimeError('snapshot name collision')
-        shutil.copytree(copied, partial, symlinks=False)
         try:
+            shutil.copytree(copied, partial, symlinks=False)
             if audit(partial / 'data') != copied_files:
                 raise RuntimeError('archive checksum mismatch')
             partial.rename(target)
         except BaseException:
-            shutil.rmtree(partial)
+            shutil.rmtree(partial, ignore_errors=True)
             raise
         return target
     finally:
-        shutil.rmtree(copied)
+        shutil.rmtree(copied, ignore_errors=True)
 
 
 def sanitize(root, password_hash):
     if not password_hash.startswith('$argon2id$'):
         raise ValueError('staging-specific password hash required')
+    reject_inherited_configuration(root)
     with sqlite3.connect(root / 'server-files/account.sqlite') as db:
         tables = {
             'sessions': {'token', 'user_id', 'auth_method'},
@@ -232,6 +266,13 @@ def sanitize(root, password_hash):
             if db.execute(f'SELECT count(*) FROM {table}').fetchone()[0]:
                 raise ValueError('sanitation verification failed')
     return budget_count(root)
+
+
+def reject_inherited_configuration(root):
+    unsafe_names = {'.env', 'config.json', 'config.json5', 'secrets.json'}
+    for path in root.rglob('*'):
+        if path.is_file() and path.name in unsafe_names:
+            raise ValueError(f'inherited server configuration is not permitted: {path.relative_to(root)}')
 
 
 def staging_password_hash():
@@ -263,15 +304,34 @@ def approved_snapshot(path):
     count = budget_count(path / 'data')
     if count != manifest['budget_count']:
         raise ValueError('source snapshot count mismatch')
-    if (path / 'data/config.json').exists() or (path / 'data/.env').exists():
-        raise ValueError('source contains inherited server configuration')
+    reject_inherited_configuration(path / 'data')
     return path, manifest, count
 
 
-def create_container(name, data, image, port):
+def assert_network_isolation():
     network = json.loads(docker('network', 'inspect', 'actual-staging-isolated'))[0]
-    if not network['Internal'] or network['Driver'] != 'bridge':
-        raise ValueError('staging network must be an internal bridge')
+    options = network.get('Options', {})
+    config = network.get('IPAM', {}).get('Config', [])
+    if (not network.get('Internal') or network.get('Driver') != 'bridge'
+            or options.get('com.docker.network.bridge.enable_ip_masquerade') != 'false'
+            or len(config) != 1 or not config[0].get('Subnet') or not config[0].get('Gateway')):
+        raise ValueError('staging network lacks required host and production isolation')
+    production_ips = {
+        settings.get('IPAddress')
+        for settings in prod().get('NetworkSettings', {}).get('Networks', {}).values()
+        if settings.get('IPAddress')
+    }
+    if not production_ips:
+        raise ValueError('production container has no network identity to deny')
+    for destination in production_ips | {config[0]['Gateway']}:
+        run(
+            'iptables', '-C', 'DOCKER-USER', '-s', config[0]['Subnet'], '-d', destination,
+            '-j', 'DROP', timeout=10,
+        )
+
+
+def create_container(name, data, image, port):
+    assert_network_isolation()
     docker(
         'create', '--name', name, '--network', 'actual-staging-isolated', '--read-only',
         '--cap-drop=ALL', '--security-opt', 'no-new-privileges',
@@ -286,19 +346,37 @@ def remove_container(name):
     if name in containers():
         state = json.loads(docker('inspect', name))[0]['State']
         if state['Running']:
-            docker('stop', '--time', '10', name, timeout=15)
+            docker('kill', '--signal', 'SIGTERM', name, timeout=RECOVERY_SECONDS)
+            deadline = time.monotonic() + RECOVERY_SECONDS
+            while time.monotonic() < deadline:
+                if not json.loads(docker('inspect', name))[0]['State']['Running']:
+                    break
+                time.sleep(0.2)
+            else:
+                raise RuntimeError(f'{name} did not stop gracefully')
         docker('rm', name)
+
+
+def candidate_identity(candidate):
+    required = ('snapshot', 'image', 'generation', 'budget_count', 'inventory', 'manifest')
+    if any(key not in candidate for key in required):
+        raise ValueError('candidate identity is incomplete')
+    return {
+        key: candidate[key]
+        for key in required
+    }
 
 
 def verification_receipt(candidate):
     identity = json.dumps(
-        {'snapshot': candidate['snapshot'], 'image': candidate['image']},
+        candidate_identity(candidate),
         sort_keys=True, separators=(',', ':'),
     ).encode()
     return {
         'candidate_id': hashlib.sha256(identity).hexdigest(),
         'snapshot': candidate['snapshot'],
         'image': candidate['image'],
+        'generation': candidate['generation'],
         'verified_at': int(time.time()),
     }
 
@@ -308,11 +386,13 @@ def restore(snapshot_path, image):
         raise ValueError('only published fork digest allowed')
     path, manifest, expected = approved_snapshot(snapshot_path)
     base = ensure_dir(ROOT / 'generations')
-    candidate_data = base / path.name
+    generation = f'{path.name}-{image.rsplit(":", 1)[1][:12]}'
+    candidate_data = base / generation
     if candidate_data.exists():
         raise RuntimeError('candidate name collision')
     shutil.copytree(path / 'data', candidate_data, symlinks=False)
     try:
+        reject_inherited_configuration(candidate_data)
         if sanitize(candidate_data, staging_password_hash()) != expected:
             raise RuntimeError('restored snapshot count mismatch')
         remove_container(CANDIDATE)
@@ -320,8 +400,10 @@ def restore(snapshot_path, image):
         candidate = {
             'snapshot': path.name,
             'image': image,
+            'generation': generation,
             'budget_count': expected,
             'data': str(candidate_data),
+            'inventory': audit(candidate_data),
             'manifest': manifest,
         }
         write_json(ROOT / 'candidate.json', candidate)
@@ -340,17 +422,26 @@ def candidate_state():
         raise ValueError('candidate data outside staging root')
     if not DIGEST.fullmatch(candidate['image']):
         raise ValueError('candidate image is not a pinned digest')
+    if candidate.get('generation') != data.name:
+        raise ValueError('candidate generation identity changed')
+    if candidate.get('inventory') != audit(data) or candidate.get('budget_count') != budget_count(data):
+        raise ValueError('candidate data identity changed')
+    candidate_identity(candidate)
     return candidate
 
 
 def verify_candidate():
+    (ROOT / 'verified-candidate.json').unlink(missing_ok=True)
     candidate = candidate_state()
     verifier = ROOT / 'verify-encrypted-budget'
     if verifier.is_symlink() or not verifier.is_file() or verifier.stat().st_mode & 0o077:
         raise ValueError('authorized encrypted-budget verifier must be private and executable')
     if not os.access(verifier, os.X_OK):
         raise ValueError('authorized encrypted-budget verifier is not executable')
-    run(str(verifier), candidate['snapshot'], candidate['image'], timeout=120)
+    run(
+        str(verifier), candidate['snapshot'], candidate['image'], verification_receipt(candidate)['candidate_id'],
+        timeout=120,
+    )
     receipt = verification_receipt(candidate)
     write_json(ROOT / 'verified-candidate.json', receipt)
     return receipt
@@ -360,11 +451,20 @@ def assert_tailnet_authorization():
     authorization = read_json(ROOT / 'tailnet-authorized.json')
     if not authorization.get('host') or authorization.get('funnel') is not False:
         raise ValueError('tailnet ACL authorization missing or permits Funnel')
-    status = run('tailscale', 'serve', 'status', '--json', timeout=10)
-    if '127.0.0.1:15008' not in status or authorization['host'] not in status:
+    host = authorization['host']
+    try:
+        serve = json.loads(run('tailscale', 'serve', 'status', '--json', timeout=10))
+        funnel = json.loads(run('tailscale', 'funnel', 'status', '--json', timeout=10))
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ValueError('unsupported Tailscale Serve status') from error
+    expected = {'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{ACTIVE_PORT}'}}}
+    if not isinstance(serve.get('Web'), dict) or serve['Web'].get(f'{host}:443') != expected:
         raise ValueError('tailnet Serve endpoint does not match approved staging origin')
-    funnel = run('tailscale', 'funnel', 'status', '--json', timeout=10)
-    if 'https://' in funnel:
+    for status in (serve, funnel):
+        allow_funnel = status.get('AllowFunnel', {})
+        if not isinstance(allow_funnel, dict) or any(value is not False for value in allow_funnel.values()):
+            raise ValueError('Funnel must remain disabled for staging')
+    if funnel.get('Web', {}) and funnel.get('Web') != serve.get('Web'):
         raise ValueError('Funnel must remain disabled for staging')
 
 
@@ -376,7 +476,43 @@ def replace_staging(state):
     create_container(STAGING, data, state['image'], ACTIVE_PORT)
 
 
-def promote():
+def state_backup():
+    result = {}
+    for name in ('active.json', 'previous-active.json', 'last-success.json'):
+        path = ROOT / name
+        result[name] = path.read_bytes() if path.exists() else None
+    return result
+
+
+def restore_state(backup):
+    for name, content in backup.items():
+        path = ROOT / name
+        if content is None:
+            path.unlink(missing_ok=True)
+            continue
+        temporary = path.with_suffix(f'{path.suffix}.restore')
+        temporary.write_bytes(content)
+        temporary.chmod(0o600)
+        temporary.replace(path)
+
+
+def replace_transactionally(target, previous, commit):
+    saved = state_backup()
+    try:
+        replace_staging(target)
+        commit()
+    except BaseException:
+        try:
+            if previous:
+                replace_staging(previous)
+            else:
+                remove_container(STAGING)
+        finally:
+            restore_state(saved)
+        raise
+
+
+def promote(record_success=True):
     candidate = candidate_state()
     receipt = read_json(ROOT / 'verified-candidate.json')
     if receipt['candidate_id'] != verification_receipt(candidate)['candidate_id']:
@@ -384,26 +520,34 @@ def promote():
     assert_tailnet_authorization()
     previous = read_json(ROOT / 'active.json') if (ROOT / 'active.json').exists() else None
     remove_container(CANDIDATE)
-    try:
-        replace_staging(candidate)
-    except BaseException:
+
+    def commit():
         if previous:
-            replace_staging(previous)
-        raise
-    if previous:
-        write_json(ROOT / 'previous-active.json', previous)
-    write_json(ROOT / 'active.json', candidate)
-    write_json(ROOT / 'last-success.json', {'timestamp': time.time(), **verification_receipt(candidate)})
+            write_json(ROOT / 'previous-active.json', previous)
+        write_json(ROOT / 'active.json', candidate)
+        if record_success:
+            write_json(ROOT / 'last-success.json', {'timestamp': time.time(), **verification_receipt(candidate)})
+
+    replace_transactionally(candidate, previous, commit)
+    if record_success:
+        (ROOT / 'stale.json').unlink(missing_ok=True)
     return candidate
 
 
 def rollback():
     previous = read_json(ROOT / 'previous-active.json')
-    replace_staging(previous)
     current = read_json(ROOT / 'active.json') if (ROOT / 'active.json').exists() else None
-    if current:
+    if not current:
+        raise ValueError('active staging state is missing')
+    remove_container(CANDIDATE)
+    create_container(CANDIDATE, Path(previous['data']).resolve(strict=True), previous['image'], CANDIDATE_PORT)
+    remove_container(CANDIDATE)
+
+    def commit():
         write_json(ROOT / 'previous-active.json', current)
-    write_json(ROOT / 'active.json', previous)
+        write_json(ROOT / 'active.json', previous)
+
+    replace_transactionally(previous, current, commit)
 
 
 def resolve_master_image():
@@ -415,6 +559,25 @@ def resolve_master_image():
     return image
 
 
+def cleanup_runtime(now, cutoff):
+    protected = set()
+    for name in ('active.json', 'previous-active.json', 'candidate.json'):
+        path = ROOT / name
+        if path.exists():
+            state = read_json(path)
+            protected.add(state['generation'])
+    for directory, protected_names in (
+        (ROOT / 'spool', set()),
+        (ROOT / 'generations', protected),
+    ):
+        if not directory.exists():
+            continue
+        for path in directory.iterdir():
+            if path.is_dir() and not path.is_symlink() and path.name not in protected_names:
+                if path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
+
+
 def cleanup_snapshots(directory=BACKUPS, now=None, keep_days=14):
     now = time.time() if now is None else now
     cutoff = now - keep_days * 86400
@@ -422,11 +585,12 @@ def cleanup_snapshots(directory=BACKUPS, now=None, keep_days=14):
         if path.is_dir() and not path.is_symlink() and path.name.startswith('actual-consistent-'):
             if path.stat().st_mtime < cutoff:
                 shutil.rmtree(path)
+    cleanup_runtime(now, cutoff)
 
 
 def freshness():
     marker = ROOT / 'last-success.json'
-    if not marker.exists() or time.time() - read_json(marker)['timestamp'] > 26 * 3600:
+    if (ROOT / 'stale.json').exists() or not marker.exists() or time.time() - read_json(marker)['timestamp'] > 26 * 3600:
         alert('snapshot refresh stale over 26 hours')
         raise RuntimeError('staging stale')
 
@@ -441,7 +605,7 @@ def systemd_units(script):
         )),
         'actual-staging-refresh.service': '\n'.join((
             '[Unit]', 'Description=Refresh private Actual staging', '', '[Service]', 'Type=oneshot',
-            f'ExecStart={command} refresh', '',
+            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} refresh', '',
         )),
         'actual-staging-refresh.timer': '\n'.join((
             '[Unit]', 'Description=Daily private Actual staging refresh', '', '[Timer]',
@@ -450,7 +614,7 @@ def systemd_units(script):
         )),
         'actual-staging-image-sync.service': '\n'.join((
             '[Unit]', 'Description=Apply a newly published Actual master image', '', '[Service]', 'Type=oneshot',
-            f'ExecStart={command} sync-image', '',
+            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} sync-image', '',
         )),
         'actual-staging-image-sync.timer': '\n'.join((
             '[Unit]', 'Description=Detect newly published Actual master images', '', '[Timer]',
@@ -459,7 +623,7 @@ def systemd_units(script):
         )),
         'actual-staging-freshness.service': '\n'.join((
             '[Unit]', 'Description=Alert stale Actual staging', '', '[Service]', 'Type=oneshot',
-            f'ExecStart={command} freshness', '',
+            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} freshness', '',
         )),
         'actual-staging-freshness.timer': '\n'.join((
             '[Unit]', 'Description=Check Actual staging freshness', '', '[Timer]',
@@ -480,6 +644,7 @@ def install_units():
 
 def enable_units():
     assert_tailnet_authorization()
+    alert_configured()
     run(
         'systemctl', '--user', 'enable', '--now',
         'actual-prod-watchdog.service', 'actual-staging-refresh.timer',
@@ -487,8 +652,8 @@ def enable_units():
     )
 
 
-def refresh(image=None):
-    image = image or resolve_master_image()
+def refresh():
+    image = resolve_master_image()
     snapshot_path = snapshot()
     restore(snapshot_path, image)
     verify_candidate()
@@ -500,9 +665,14 @@ def refresh(image=None):
 def sync_image():
     image = resolve_master_image()
     active = ROOT / 'active.json'
-    if active.exists() and read_json(active).get('image') == image:
+    if not active.exists():
+        return 'awaiting-daily-snapshot'
+    state = read_json(active)
+    if state.get('image') == image:
         return 'unchanged'
-    return refresh(image)
+    restore(BACKUPS / state['snapshot'], image)
+    verify_candidate()
+    return promote(record_success=False)
 
 
 def main():
@@ -540,10 +710,17 @@ def main():
         elif args.action == 'rollback':
             print(locked(rollback))
         elif args.action == 'refresh':
-            print(locked(lambda: refresh(args.image)))
+            if args.image:
+                parser.error('refresh does not accept --image; image-only rollout uses sync-image')
+            print(locked(refresh))
         elif args.action == 'sync-image':
             print(locked(sync_image))
     except Exception:
+        if args.action == 'refresh':
+            try:
+                write_json(ROOT / 'stale.json', {'timestamp': time.time(), 'reason': 'refresh failed'})
+            except Exception:
+                print('STALE STATE WRITE FAILED', file=sys.stderr)
         if args.action not in ('recover', 'freshness', 'alert-test'):
             try:
                 alert(f'{args.action} failed; prior staging preserved')
