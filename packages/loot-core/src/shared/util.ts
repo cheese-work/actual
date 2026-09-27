@@ -487,7 +487,13 @@ export function integerToCurrencyWithCurrency(
   currencyCode: string,
 ) {
   const currency = getCurrency(currencyCode);
-  const amount = integerToCurrencyWithDecimal(integerAmount, currencyCode);
+  const amount = integerToCurrency(
+    integerAmount,
+    getNumberFormat({
+      ...numberFormatConfig,
+      decimalPlaces: currencyCode === 'VND' ? 0 : 2,
+    }).formatter,
+  );
   if (!currency.symbol) {
     return amount;
   }

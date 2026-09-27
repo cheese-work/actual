@@ -70,6 +70,7 @@ export function CurrencySettings() {
         ['USD', t('US Dollar')],
         ['UYU', t('Uruguayan Peso')],
         ['UZS', t('Uzbek Soum')],
+        ['VND', t('Vietnamese Dong')],
       ]),
     [t],
   );
@@ -111,7 +112,9 @@ export function CurrencySettings() {
     if (code !== '') {
       const cur = getCurrency(code);
       setNumberFormatPref(cur.numberFormat);
-      setHideFractionPref(cur.decimalPlaces === 0 ? 'true' : 'false');
+      setHideFractionPref(
+        cur.code === 'VND' || cur.decimalPlaces === 0 ? 'true' : 'false',
+      );
       setSpaceEnabledPref(cur.symbolFirst ? 'false' : 'true');
       setSymbolPositionPref(cur.symbolFirst ? 'before' : 'after');
     }

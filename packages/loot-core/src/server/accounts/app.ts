@@ -22,7 +22,7 @@ import { undoable, withUndo } from '#server/undo';
 import { isNonProductionEnvironment } from '#shared/environment';
 import { dayFromDate } from '#shared/months';
 import * as monthUtils from '#shared/months';
-import { amountToCurrencyInteger } from '#shared/util';
+import { amountToInteger } from '#shared/util';
 import type { ImportTransactionsOpts } from '#types/api-handlers';
 import type {
   AccountEntity,
@@ -589,7 +589,7 @@ async function createAccount({
 
     await db.insertTransaction({
       account: id,
-      amount: amountToCurrencyInteger(balance, currency),
+      amount: amountToInteger(balance),
       category: offBudget ? null : payee.category,
       payee: payee.id,
       date: monthUtils.currentDay(),

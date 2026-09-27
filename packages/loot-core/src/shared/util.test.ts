@@ -1,5 +1,6 @@
 import {
   amountToCurrencyInteger,
+  amountToInteger,
   currencyToAmount,
   getNumberFormat,
   integerToCurrencyWithCurrency,
@@ -273,9 +274,10 @@ describe('utility functions', () => {
   });
 
   describe('integerToCurrencyWithCurrency', () => {
-    test('uses the account currency symbol and decimal places', () => {
+    test('uses the account currency symbol without changing storage precision', () => {
       expect(integerToCurrencyWithCurrency(1234, 'USD')).toBe('$12.34');
-      expect(integerToCurrencyWithCurrency(1234, 'VND')).toBe('1,234 ₫');
+      expect(amountToInteger(50000)).toBe(5000000);
+      expect(integerToCurrencyWithCurrency(5000000, 'VND')).toBe('50,000 ₫');
     });
   });
 
