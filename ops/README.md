@@ -35,11 +35,13 @@ archive or a production credential.
    `flock -n /home/congvc/projects/oss/actual-budget/.actual-maintenance.lock <existing-command>`.
 2. Create `actual-staging-isolated` as an internal Docker bridge with
    `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
-   name. Add ordered `INPUT -> ACTUAL_STAGING_INPUT` and
-   `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks for that bridge. The input
-   policy must DROP its subnet to the bridge gateway; the forwarding policy
-   must DROP its subnet to every production container IP before any ACCEPT or
-   RETURN. Create
+   name. Add `INPUT -> ACTUAL_STAGING_INPUT` and
+   `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks for that bridge. Earlier
+   rules may only be unrelated-interface traffic or scoped
+   `ESTABLISHED,RELATED` replies; no earlier jump, goto, RETURN, or NEW
+   accept is allowed. The input policy must DROP its subnet to the bridge
+   gateway; the forwarding policy must DROP its subnet to every production
+   container IP before any NEW accept or RETURN. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
 3. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
@@ -59,8 +61,10 @@ archive or a production credential.
 
 ## Rehearsal sequence
 
-Run only under the recorded 30-second interruption approval. Preserve command
-output, container IDs, image digests, alert receipt, and cleanup evidence.
+Run only under the recorded 30-second interruption approval. The transient
+watchdog fires after 20 seconds with timer accuracy forced to 1 microsecond;
+if arming fails, snapshot capture does not start. Preserve command output,
+container IDs, image digests, alert receipt, and cleanup evidence.
 
 1. `python3 ops/actual-staging.py install-units`
 2. `ACTUAL_ALERT_TARGET=<approved-target> python3 ops/actual-staging.py alert-test`

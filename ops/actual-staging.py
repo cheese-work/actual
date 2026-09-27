@@ -7,10 +7,12 @@ images and never uses production credentials or integrations.
 import argparse
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -179,7 +181,7 @@ def recover(before=None, deadline=None):
 def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
-        '--on-active=20s', '--property=AccuracySec=1us',
+        '--on-active=20s', '--timer-property=AccuracySec=1us',
         sys.executable, str(Path(__file__).resolve()), 'recover',
         timeout=10,
     )
@@ -351,30 +353,118 @@ def assert_network_isolation():
 
 
 def firewall_rules(chain):
-    return run('iptables', '-S', chain, timeout=10).splitlines()
+    prefix = f'-A {chain} '
+    return [
+        shlex.split(line)
+        for line in run('iptables', '-S', chain, timeout=10).splitlines()
+        if line.startswith(prefix)
+    ]
 
 
 def assert_firewall_hook(chain, bridge, policy):
-    expected = f'-A {chain} -i {bridge} -j {policy}'
     rules = firewall_rules(chain)
     try:
-        index = rules.index(expected)
-    except ValueError as error:
+        index = next(
+            index for index, rule in enumerate(rules)
+            if rule[:2] == ['-A', chain]
+            and firewall_value(rule, '-i') == bridge
+            and firewall_target(rule) == ('jump', policy)
+        )
+    except StopIteration as error:
         raise ValueError(f'missing {chain} isolation hook') from error
-    if index:
-        raise ValueError(f'{chain} isolation hook is shadowed')
+    assert_safe_preceding(
+        rules[:index],
+        lambda rule: firewall_value(rule, '-i') in (None, bridge),
+        f'{chain} isolation hook',
+    )
 
 
 def assert_firewall_deny(policy, subnet, destinations):
     rules = firewall_rules(policy)
     for destination in destinations:
-        expected = f'-A {policy} -s {subnet} -d {destination} -j DROP'
         try:
-            index = rules.index(expected)
-        except ValueError as error:
+            index = next(
+                index for index, rule in enumerate(rules)
+                if rule[:2] == ['-A', policy]
+                and firewall_target(rule) == ('jump', 'DROP')
+                and firewall_address_equals(firewall_value(rule, '-s'), subnet)
+                and firewall_address_equals(firewall_value(rule, '-d'), destination)
+            )
+        except StopIteration as error:
             raise ValueError(f'missing {policy} deny for {destination}') from error
-        if any('-j ACCEPT' in rule or '-j RETURN' in rule for rule in rules[:index]):
-            raise ValueError(f'{policy} deny is shadowed')
+        assert_safe_preceding(
+            rules[:index],
+            lambda rule: firewall_may_match(rule, subnet, destination),
+            f'{policy} deny for {destination}',
+        )
+
+
+def firewall_value(rule, option):
+    indexes = [index for index, value in enumerate(rule) if value == option]
+    if len(indexes) != 1:
+        return None
+    index = indexes[0]
+    if index == 0 or index + 1 == len(rule) or rule[index - 1] == '!':
+        return None
+    return rule[index + 1]
+
+
+def firewall_target(rule):
+    target = firewall_value(rule, '-j')
+    if target:
+        return 'jump', target
+    target = firewall_value(rule, '-g')
+    if target:
+        return 'goto', target
+    return None, None
+
+
+def firewall_address_equals(actual, expected):
+    if actual is None:
+        return False
+    try:
+        return ipaddress.ip_network(actual, strict=False) == ipaddress.ip_network(expected, strict=False)
+    except ValueError:
+        return False
+
+
+def firewall_may_match(rule, subnet, destination):
+    return firewall_network_overlaps(firewall_value(rule, '-s'), subnet) and firewall_network_overlaps(
+        firewall_value(rule, '-d'), destination,
+    )
+
+
+def firewall_network_overlaps(actual, expected):
+    if actual is None:
+        return True
+    try:
+        return ipaddress.ip_network(actual, strict=False).overlaps(ipaddress.ip_network(expected, strict=False))
+    except ValueError:
+        return True
+
+
+def firewall_is_reply_allowance(rule):
+    target_kind, target = firewall_target(rule)
+    states = firewall_value(rule, '--ctstate') or firewall_value(rule, '--state')
+    return (
+        target_kind == 'jump'
+        and target == 'ACCEPT'
+        and states is not None
+        and set(states.split(',')) <= {'ESTABLISHED', 'RELATED'}
+    )
+
+
+def assert_safe_preceding(rules, applies, description):
+    for rule in rules:
+        if not applies(rule):
+            continue
+        target_kind, target = firewall_target(rule)
+        if target_kind == 'goto' or target_kind is None:
+            raise ValueError(f'unsupported firewall transfer before {description}')
+        if target == 'ACCEPT' and not firewall_is_reply_allowance(rule):
+            raise ValueError(f'{description} is shadowed')
+        if target not in ('ACCEPT', 'DROP', 'REJECT', 'LOG', 'NFLOG'):
+            raise ValueError(f'unsupported firewall transfer before {description}')
 
 
 def create_container(name, data, image, port):
