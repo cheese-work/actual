@@ -8,6 +8,7 @@ import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import { integerToCurrencyWithCurrency } from '@actual-app/core/shared/util';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
 import type { TransactionEntity } from '@actual-app/core/types/models';
 
@@ -135,11 +136,12 @@ export function TransactionListWithBalances({
                 balanceCleared={balanceCleared}
                 balanceUncleared={balanceUncleared}
                 alwaysShowCleared={isReconciling}
+                currencyCode={currencyCode}
               />
             ) : (
               <>
                 <View style={{ flexBasis: '33%' }} />
-                <Balance balance={balance} />
+                <Balance balance={balance} currencyCode={currencyCode} />
                 <View
                   style={{
                     flexBasis: '33%',
@@ -228,6 +230,7 @@ type BalanceWithClearedProps = {
   >;
   balance: TransactionListWithBalancesProps['balance'];
   alwaysShowCleared?: boolean;
+  currencyCode?: string;
 };
 
 function BalanceWithCleared({
@@ -235,6 +238,7 @@ function BalanceWithCleared({
   balanceCleared,
   balance,
   alwaysShowCleared = false,
+  currencyCode,
 }: BalanceWithClearedProps) {
   const { t } = useTranslation();
   const unclearedAmount = useSheetValue<
@@ -262,6 +266,11 @@ function BalanceWithCleared({
           {props => (
             <CellValueText
               {...props}
+              formatter={
+                currencyCode
+                  ? value => integerToCurrencyWithCurrency(value, currencyCode)
+                  : undefined
+              }
               style={{
                 fontSize: 12,
                 textAlign: 'center',
@@ -272,7 +281,7 @@ function BalanceWithCleared({
           )}
         </TransactionListBalanceCellValue>
       </View>
-      <Balance balance={balance} />
+      <Balance balance={balance} currencyCode={currencyCode} />
       <View
         style={{
           display: !showCleared ? 'none' : undefined,
@@ -290,6 +299,11 @@ function BalanceWithCleared({
           {props => (
             <CellValueText
               {...props}
+              formatter={
+                currencyCode
+                  ? value => integerToCurrencyWithCurrency(value, currencyCode)
+                  : undefined
+              }
               style={{
                 fontSize: 12,
                 textAlign: 'center',
@@ -306,9 +320,10 @@ function BalanceWithCleared({
 
 type BalanceProps = {
   balance: TransactionListWithBalancesProps['balance'];
+  currencyCode?: string;
 };
 
-function Balance({ balance }: BalanceProps) {
+function Balance({ balance, currencyCode }: BalanceProps) {
   const { t } = useTranslation();
   return (
     <View style={{ flexBasis: '33%' }}>
@@ -317,6 +332,11 @@ function Balance({ balance }: BalanceProps) {
         {props => (
           <CellValueText
             {...props}
+            formatter={
+              currencyCode
+                ? value => integerToCurrencyWithCurrency(value, currencyCode)
+                : undefined
+            }
             style={{
               fontSize: 18,
               textAlign: 'center',

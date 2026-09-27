@@ -179,6 +179,7 @@ export function TransactionList({
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [learnCategories = 'true'] = useSyncedPref('learn-categories');
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
   const isLearnCategoriesEnabled = String(learnCategories) === 'true';
 
   const transactionsLatest = useRef<readonly TransactionEntity[]>([]);
@@ -528,7 +529,7 @@ export function TransactionList({
         showCategory
         showGroup={showGroup}
         columnOrder={columnOrder}
-        currencyCode={account?.currency}
+        currencyCode={account?.currency || defaultCurrencyCode || undefined}
         currentAccountId={account && account.id}
         currentCategoryId={category && category.id}
         isAdding={isAdding}

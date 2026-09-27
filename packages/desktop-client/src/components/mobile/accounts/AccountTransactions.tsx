@@ -72,6 +72,7 @@ function TransactionListWithPreviews({
 
   const [showRunningBalances] = useSyncedPref(`show-balances-${account.id}`);
   const [hideReconciled] = useSyncedPref(`hide-reconciled-${account.id}`);
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
 
   const [searchParams, setSearchParams] = useSearchParams();
   const parsedReconcileAmount = parseInt(
@@ -337,7 +338,7 @@ function TransactionListWithPreviews({
         onRefresh={onRefresh}
         isReconciling={isReconciling}
         onToggleTransactionCleared={onToggleTransactionCleared}
-        currencyCode={account.currency}
+        currencyCode={account.currency || defaultCurrencyCode || undefined}
       />
     </>
   );

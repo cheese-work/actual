@@ -1,11 +1,13 @@
 import React from 'react';
 
+import { generateAccount } from '@actual-app/core/mocks';
 import type { ScheduleEntity } from '@actual-app/core/types/models';
 import { render, screen } from '@testing-library/react';
 
 import { useCachedSchedules } from '#hooks/useCachedSchedules';
 import { useSelectedItems } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import { TestProviders } from '#mocks';
 
 import { SelectedBalance } from './Balance';
@@ -20,6 +22,10 @@ vi.mock('#hooks/useSheetValue', () => ({
 
 vi.mock('#hooks/useCachedSchedules', () => ({
   useCachedSchedules: vi.fn(),
+}));
+
+vi.mock('#hooks/useSyncedPref', () => ({
+  useSyncedPref: vi.fn(),
 }));
 
 function makeSchedule(
@@ -57,6 +63,7 @@ describe('SelectedBalance – normal transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useCachedSchedules).mockReturnValue(mockedSchedules([]));
+    vi.mocked(useSyncedPref).mockReturnValue([undefined, vi.fn()]);
   });
 
   test('shows balance for selected normal transactions', () => {
@@ -85,12 +92,49 @@ describe('SelectedBalance – normal transactions', () => {
 
     expect(screen.getByText('Selected balance:')).toBeInTheDocument();
   });
+
+  test('uses the account currency instead of Main currency', () => {
+    vi.mocked(useSyncedPref).mockReturnValue(['VND', vi.fn()]);
+    vi.mocked(useSheetValue)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(1234);
+
+    render(
+      <TestProviders>
+        <SelectedBalance
+          selectedItems={new Set(['tx-123'])}
+          account={{ ...generateAccount('USD'), currency: 'USD' }}
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByText('$12.34')).toBeInTheDocument();
+  });
+
+  test('inherits Main currency for an empty account currency', () => {
+    vi.mocked(useSyncedPref).mockReturnValue(['VND', vi.fn()]);
+    vi.mocked(useSheetValue)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(5000000);
+
+    render(
+      <TestProviders>
+        <SelectedBalance
+          selectedItems={new Set(['tx-123'])}
+          account={{ ...generateAccount('Inherited'), currency: '' }}
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByText('50,000 ₫')).toBeInTheDocument();
+  });
 });
 
 describe('SelectedBalance – preview (scheduled) transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useSheetValue).mockReturnValue(null);
+    vi.mocked(useSyncedPref).mockReturnValue([undefined, vi.fn()]);
   });
 
   test('includes the schedule amount when a preview transaction is selected', () => {

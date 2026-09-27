@@ -11,6 +11,7 @@ import { q } from '@actual-app/core/shared/query';
 import type { Query } from '@actual-app/core/shared/query';
 import { getScheduledAmount } from '@actual-app/core/shared/schedules';
 import { isPreviewId } from '@actual-app/core/shared/transactions';
+import { integerToCurrencyWithCurrency } from '@actual-app/core/shared/util';
 import type { AccountEntity } from '@actual-app/core/types/models';
 import { useHover } from 'usehooks-ts';
 
@@ -21,18 +22,21 @@ import { useCachedSchedules } from '#hooks/useCachedSchedules';
 import { useFormat } from '#hooks/useFormat';
 import { useSelectedItems } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
+import { useSyncedPref } from '#hooks/useSyncedPref';
 import type { Binding } from '#spreadsheet';
 
 type DetailedBalanceProps = {
   name: string;
   balance: number;
   isExactBalance?: boolean;
+  currencyCode?: string;
 };
 
 function DetailedBalance({
   name,
   balance,
   isExactBalance = true,
+  currencyCode,
 }: DetailedBalanceProps) {
   const format = useFormat();
   return (
@@ -48,7 +52,9 @@ function DetailedBalance({
       <PrivacyFilter>
         <FinancialText style={{ fontWeight: 600 }}>
           {!isExactBalance && '~ '}
-          {format(balance, 'financial')}
+          {currencyCode
+            ? integerToCurrencyWithCurrency(balance, currencyCode)
+            : format(balance, 'financial')}
         </FinancialText>
       </PrivacyFilter>
     </Text>
@@ -65,6 +71,7 @@ export function SelectedBalance({
   account,
 }: SelectedBalanceProps) {
   const { t } = useTranslation();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
 
   const name = `selected-balance-${[...selectedItems].join('-')}`;
 
@@ -127,6 +134,7 @@ export function SelectedBalance({
       name={t('Selected balance:')}
       balance={balance}
       isExactBalance={isExactBalance}
+      currencyCode={account?.currency || defaultCurrencyCode || undefined}
     />
   );
 }
@@ -135,7 +143,10 @@ type FilteredBalanceProps = {
   filteredAmount?: number | null;
 };
 
-function FilteredBalance({ filteredAmount }: FilteredBalanceProps) {
+function FilteredBalance({
+  filteredAmount,
+  currencyCode,
+}: FilteredBalanceProps & { currencyCode?: string }) {
   const { t } = useTranslation();
 
   return (
@@ -143,15 +154,17 @@ function FilteredBalance({ filteredAmount }: FilteredBalanceProps) {
       name={t('Filtered balance:')}
       balance={filteredAmount ?? 0}
       isExactBalance
+      currencyCode={currencyCode}
     />
   );
 }
 
 type MoreBalancesProps = {
   balanceQuery: { name: `balance-query-${string}`; query: Query };
+  currencyCode?: string;
 };
 
-function MoreBalances({ balanceQuery }: MoreBalancesProps) {
+function MoreBalances({ balanceQuery, currencyCode }: MoreBalancesProps) {
   const { t } = useTranslation();
 
   const cleared = useSheetValue<'balance', `balance-query-${string}-cleared`>({
@@ -169,8 +182,16 @@ function MoreBalances({ balanceQuery }: MoreBalancesProps) {
 
   return (
     <>
-      <DetailedBalance name={t('Cleared total:')} balance={cleared ?? 0} />
-      <DetailedBalance name={t('Uncleared total:')} balance={uncleared ?? 0} />
+      <DetailedBalance
+        name={t('Cleared total:')}
+        balance={cleared ?? 0}
+        currencyCode={currencyCode}
+      />
+      <DetailedBalance
+        name={t('Uncleared total:')}
+        balance={uncleared ?? 0}
+        currencyCode={currencyCode}
+      />
     </>
   );
 }
@@ -193,6 +214,8 @@ export function Balances({
   filteredAmount,
 }: BalancesProps) {
   const selectedItems = useSelectedItems();
+  const [defaultCurrencyCode] = useSyncedPref('defaultCurrencyCode');
+  const currencyCode = account?.currency || defaultCurrencyCode || undefined;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const isButtonHovered = useHover(buttonRef as RefObject<HTMLButtonElement>);
 
@@ -229,6 +252,11 @@ export function Balances({
           {props => (
             <CellValueText
               {...props}
+              formatter={
+                currencyCode
+                  ? value => integerToCurrencyWithCurrency(value, currencyCode)
+                  : undefined
+              }
               style={{
                 fontSize: 22,
                 fontWeight: 400,
@@ -258,12 +286,19 @@ export function Balances({
         />
       </Button>
 
-      {showExtraBalances && <MoreBalances balanceQuery={balanceQuery} />}
+      {showExtraBalances && (
+        <MoreBalances balanceQuery={balanceQuery} currencyCode={currencyCode} />
+      )}
 
       {selectedItems.size > 0 && (
         <SelectedBalance selectedItems={selectedItems} account={account} />
       )}
-      {isFiltered && <FilteredBalance filteredAmount={filteredAmount} />}
+      {isFiltered && (
+        <FilteredBalance
+          filteredAmount={filteredAmount}
+          currencyCode={currencyCode}
+        />
+      )}
     </View>
   );
 }
