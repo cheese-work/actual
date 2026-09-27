@@ -156,6 +156,29 @@ describe('Accounts', () => {
   });
 });
 
+describe('Currency setup', () => {
+  test('finalizes once without a retry changing the selected currencies', async () => {
+    await runHandler(handlers['currency-setup-finalize'], {
+      budgetCurrencyCode: 'USD',
+      displayCurrencyCode: 'VND',
+    });
+    await runHandler(handlers['currency-setup-finalize'], {
+      budgetCurrencyCode: 'USD',
+      displayCurrencyCode: 'EUR',
+    });
+
+    expect(
+      await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
+        "SELECT id, value FROM preferences WHERE id IN ('budgetCurrencyCode', 'currencySetupFinalized', 'displayCurrencyCode') ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 'budgetCurrencyCode', value: 'USD' },
+      { id: 'currencySetupFinalized', value: 'true' },
+      { id: 'displayCurrencyCode', value: 'VND' },
+    ]);
+  });
+});
+
 describe('Budget', () => {
   test('new budgets should be created', async () => {
     const spreadsheet = await sheet.loadSpreadsheet(db);
