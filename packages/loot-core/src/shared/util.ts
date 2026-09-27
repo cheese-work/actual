@@ -2,7 +2,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
 
-import { getDecimalPlaces } from './currencies';
+import { getCurrency, getDecimalPlaces } from './currencies';
 
 export function last<T>(arr: Array<T>) {
   return arr[arr.length - 1];
@@ -480,6 +480,20 @@ export function integerToCurrencyWithDecimal(
   }
 
   return integerToCurrency(integerAmount);
+}
+
+export function integerToCurrencyWithCurrency(
+  integerAmount: IntegerAmount,
+  currencyCode: string,
+) {
+  const currency = getCurrency(currencyCode);
+  const amount = integerToCurrencyWithDecimal(integerAmount, currencyCode);
+  if (!currency.symbol) {
+    return amount;
+  }
+  return currency.symbolFirst
+    ? `${currency.symbol}${amount}`
+    : `${amount} ${currency.symbol}`;
 }
 
 export function amountToCurrencyInteger(amount: number, code: string): number {

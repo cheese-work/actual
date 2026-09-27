@@ -89,6 +89,7 @@ type TransactionListWithBalancesProps = {
   isReconciling?: boolean;
   onToggleTransactionCleared?: (transaction: TransactionEntity) => void;
   filtered?: boolean;
+  currencyCode?: string;
 };
 
 export function TransactionListWithBalances({
@@ -109,6 +110,7 @@ export function TransactionListWithBalances({
   isReconciling = false,
   onToggleTransactionCleared,
   filtered = false,
+  currencyCode,
 }: TransactionListWithBalancesProps) {
   const selectedInst = useSelected('transactions', [...transactions], []);
 
@@ -175,6 +177,7 @@ export function TransactionListWithBalances({
             showMakeTransfer={showMakeTransfer}
             isReconciling={isReconciling}
             onToggleTransactionCleared={onToggleTransactionCleared}
+            currencyCode={currencyCode}
           />
         </PullToRefresh>
       </SelectedProvider>

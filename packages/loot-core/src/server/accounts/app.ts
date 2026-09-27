@@ -22,7 +22,7 @@ import { undoable, withUndo } from '#server/undo';
 import { isNonProductionEnvironment } from '#shared/environment';
 import { dayFromDate } from '#shared/months';
 import * as monthUtils from '#shared/months';
-import { amountToInteger } from '#shared/util';
+import { amountToCurrencyInteger } from '#shared/util';
 import type { ImportTransactionsOpts } from '#types/api-handlers';
 import type {
   AccountEntity,
@@ -95,15 +95,20 @@ export type AccountHandlers = {
 async function updateAccount({
   id,
   name,
+  currency,
   last_reconciled,
   account_group_id,
 }: Pick<AccountEntity, 'id'> &
   Partial<
-    Pick<AccountEntity, 'name' | 'last_reconciled' | 'account_group_id'>
+    Pick<
+      AccountEntity,
+      'name' | 'currency' | 'last_reconciled' | 'account_group_id'
+    >
   >) {
   await db.update('accounts', {
     id,
     ...(name !== undefined && { name }),
+    ...(currency !== undefined && { currency }),
     ...(last_reconciled && { last_reconciled }),
     ...(account_group_id !== undefined && { account_group_id }),
   });
@@ -134,6 +139,7 @@ async function getAccounts(): Promise<AccountEntity[]> {
         account_sync_source: dbAccount.account_sync_source ?? null,
         last_sync: dbAccount.last_sync ?? null,
         bank_sync_status: dbAccount.bank_sync_status ?? null,
+        currency: dbAccount.currency ?? '',
         account_group_id: dbAccount.account_group_id ?? null,
       }) satisfies AccountEntity,
   );
@@ -558,16 +564,19 @@ async function createAccount({
   balance = 0,
   offBudget = false,
   closed = false,
+  currency = '',
 }: {
   name: string;
   balance?: number | undefined;
   offBudget?: boolean | undefined;
   closed?: boolean | undefined;
+  currency?: string | undefined;
 }) {
   const id: AccountEntity['id'] = await db.insertAccount({
     name,
     offbudget: offBudget ? 1 : 0,
     closed: closed ? 1 : 0,
+    currency,
   });
 
   await db.insertPayee({
@@ -580,7 +589,7 @@ async function createAccount({
 
     await db.insertTransaction({
       account: id,
-      amount: amountToInteger(balance),
+      amount: amountToCurrencyInteger(balance, currency),
       category: offBudget ? null : payee.category,
       payee: payee.id,
       date: monthUtils.currentDay(),

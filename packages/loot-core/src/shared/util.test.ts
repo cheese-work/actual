@@ -2,6 +2,7 @@ import {
   amountToCurrencyInteger,
   currencyToAmount,
   getNumberFormat,
+  integerToCurrencyWithCurrency,
   integerToCurrencyWithDecimal,
   looselyParseAmount,
   setNumberFormat,
@@ -268,6 +269,13 @@ describe('utility functions', () => {
     test('no currency argument preserves existing behavior', () => {
       expect(integerToCurrencyWithDecimal(1234)).toBe('12.34');
       expect(integerToCurrencyWithDecimal(1200)).toBe('12.00');
+    });
+  });
+
+  describe('integerToCurrencyWithCurrency', () => {
+    test('uses the account currency symbol and decimal places', () => {
+      expect(integerToCurrencyWithCurrency(1234, 'USD')).toBe('$12.34');
+      expect(integerToCurrencyWithCurrency(1234, 'VND')).toBe('1,234 ₫');
     });
   });
 

@@ -146,7 +146,7 @@ export function CurrencySettings() {
           }}
         >
           <View style={{ display: 'flex', flexDirection: 'row', gap: '1.5em' }}>
-            <Column title={t('Default Currency')}>
+            <Column title={t('Main currency')}>
               <Select
                 value={selectedCurrencyCode}
                 onChange={handleCurrencyChange}

@@ -11,9 +11,11 @@ import {
 import { SvgLockClosed, SvgNotesPaper } from '@actual-app/components/icons/v2';
 import { Menu } from '@actual-app/components/menu';
 import { Popover } from '@actual-app/components/popover';
+import { Select } from '@actual-app/components/select';
 import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import { currencies } from '@actual-app/core/shared/currencies';
 import type { AccountEntity } from '@actual-app/core/types/models';
 
 import {
@@ -150,6 +152,19 @@ export function AccountMenuModal({
               flexDirection: 'column',
             }}
           >
+            <View style={{ paddingBottom: 10 }}>
+              <Select
+                aria-label={t('Currency')}
+                value={account.currency}
+                onChange={currency => onSave?.({ ...account, currency })}
+                options={currencies.map(option => [
+                  option.code,
+                  option.code
+                    ? `${option.code} - ${option.name} (${option.symbol})`
+                    : t('Main currency'),
+                ])}
+              />
+            </View>
             <View
               style={{
                 overflowY: 'auto',

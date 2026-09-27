@@ -24,6 +24,8 @@ export type AccountEntity = {
   account_sync_source: AccountSyncSource | null;
   last_sync: string | null;
   bank_sync_status: BankSyncStatus | null;
+  // Empty means the budget's synced main currency.
+  currency?: string;
 };
 
 export type AccountSyncSource = BankSyncProviders;

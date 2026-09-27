@@ -337,6 +337,7 @@ function TransactionListWithPreviews({
         onRefresh={onRefresh}
         isReconciling={isReconciling}
         onToggleTransactionCleared={onToggleTransactionCleared}
+        currencyCode={account.currency}
       />
     </>
   );

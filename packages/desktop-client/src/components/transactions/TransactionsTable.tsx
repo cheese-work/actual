@@ -67,6 +67,7 @@ import {
   amountToCurrency,
   currencyToAmount,
   integerToCurrency,
+  integerToCurrencyWithCurrency,
   titleFirst,
 } from '@actual-app/core/shared/util';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
@@ -200,12 +201,17 @@ function measureAmountColumnWidth(values: string[], minWidth: number) {
 export function useAmountColumnWidths(
   transactions: TransactionEntity[],
   balances: Record<TransactionEntity['id'], IntegerAmount> | null,
+  currencyCode?: string,
 ): AmountColumnWidths {
+  const formatAmount = (amount: IntegerAmount) =>
+    currencyCode
+      ? integerToCurrencyWithCurrency(amount, currencyCode)
+      : integerToCurrency(amount);
   const debitCreditValues = transactions.map(t =>
-    integerToCurrency(Math.abs(t.amount ?? 0)),
+    formatAmount(Math.abs(t.amount ?? 0)),
   );
   const balanceValues = balances
-    ? Object.values(balances).map(balance => integerToCurrency(balance))
+    ? Object.values(balances).map(formatAmount)
     : [];
 
   return {
@@ -229,6 +235,7 @@ type TransactionHeaderProps = {
   ascDesc: 'asc' | 'desc';
   field: string;
   amountColumnWidths: AmountColumnWidths;
+  currencyCode?: string;
 };
 
 const TransactionHeader = memo(
@@ -982,6 +989,7 @@ type TransactionProps = {
   };
   editing: boolean;
   columns: TransactionTableColumnId[];
+  currencyCode?: string;
   showZeroInDeposit?: boolean;
   style?: CSSProperties;
   selected?: boolean;
@@ -1099,8 +1107,13 @@ const Transaction = memo(function Transaction({
   onDrop,
   index,
   amountColumnWidths,
+  currencyCode,
 }: TransactionProps) {
   const { t } = useTranslation();
+  const formatAmount = (amount: IntegerAmount) =>
+    currencyCode
+      ? integerToCurrencyWithCurrency(amount, currencyCode)
+      : integerToCurrency(amount);
 
   const dispatch = useDispatch();
   const dispatchSelected = useSelectedDispatch();
@@ -2041,7 +2054,7 @@ const Transaction = memo(function Transaction({
             value={
               runningBalance == null || isChild || isTemporaryId(id)
                 ? ''
-                : integerToCurrency(runningBalance)
+                : formatAmount(runningBalance)
             }
             valueStyle={{
               color:
@@ -2209,7 +2222,7 @@ const Transaction = memo(function Transaction({
                 textAlign: 'right',
               }}
             >
-              {integerToCurrency(amount)}
+              {formatAmount(amount)}
             </Text>
           </View>
         )}
@@ -2326,6 +2339,7 @@ type TransactionErrorProps = {
   onAddSplit: () => void;
   onDistributeRemainder: () => void;
   style?: CSSProperties;
+  currencyCode?: string;
 };
 
 function TransactionError({
@@ -2334,7 +2348,12 @@ function TransactionError({
   onAddSplit,
   onDistributeRemainder,
   style,
+  currencyCode,
 }: TransactionErrorProps) {
+  const formatAmount = (amount: IntegerAmount) =>
+    currencyCode
+      ? integerToCurrencyWithCurrency(amount, currencyCode)
+      : integerToCurrency(amount);
   switch (error.type) {
     case 'SplitTransactionError':
       if (error.version === 1) {
@@ -2352,9 +2371,7 @@ function TransactionError({
             <Text style={{ whiteSpace: 'nowrap' }}>
               <Trans>Amount left:</Trans>{' '}
               <Text style={{ fontWeight: 500 }}>
-                {integerToCurrency(
-                  isDeposit ? error.difference : -error.difference,
-                )}
+                {formatAmount(isDeposit ? error.difference : -error.difference)}
               </Text>
             </Text>
             <View style={{ flex: 1 }} />
@@ -2599,6 +2616,7 @@ type TransactionTableInnerProps = {
   payees: PayeeEntity[];
   balances: Record<TransactionEntity['id'], IntegerAmount> | null;
   columns: TransactionTableColumnId[];
+  currencyCode?: string;
   showReconciled: boolean;
   currentAccountId: AccountEntity['id'];
   currentCategoryId: CategoryEntity['id'];
@@ -2727,6 +2745,7 @@ function TransactionTableInner({
   const amountColumnWidths = useAmountColumnWidths(
     transactionsToRender,
     props.balances,
+    props.currencyCode,
   );
 
   const renderRow: TableProps<TransactionEntity>['renderItem'] = ({
@@ -2827,6 +2846,7 @@ function TransactionTableInner({
         showZeroInDeposit={isChildDeposit}
         balance={balances?.[trans.id] ?? 0}
         amountColumnWidths={amountColumnWidths}
+        currencyCode={props.currencyCode}
         focusedField={editing ? tableNavigator.focusedField : undefined}
         accounts={accounts}
         categoryGroups={categoryGroups}
@@ -2859,6 +2879,7 @@ function TransactionTableInner({
               onDistributeRemainder={() =>
                 props.onDistributeRemainder(trans.id)
               }
+              currencyCode={props.currencyCode}
             />
           )
         }
@@ -3009,6 +3030,7 @@ export type TransactionTableProps = {
   // still control the availability of the account/category/group/balance/
   // cleared columns in the current view.
   columnOrder?: TransactionTableColumnId[];
+  currencyCode?: string;
   currentAccountId: AccountEntity['id'];
   currentCategoryId: CategoryEntity['id'];
   isAdding: boolean;

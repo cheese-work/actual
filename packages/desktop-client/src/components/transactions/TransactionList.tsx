@@ -528,6 +528,7 @@ export function TransactionList({
         showCategory
         showGroup={showGroup}
         columnOrder={columnOrder}
+        currencyCode={account?.currency}
         currentAccountId={account && account.id}
         currentCategoryId={category && category.id}
         isAdding={isAdding}

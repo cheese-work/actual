@@ -9,9 +9,11 @@ import { FormError } from '@actual-app/components/form-error';
 import { InitialFocus } from '@actual-app/components/initial-focus';
 import { InlineField } from '@actual-app/components/inline-field';
 import { Input } from '@actual-app/components/input';
+import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import { currencies } from '@actual-app/core/shared/currencies';
 import { toRelaxedNumber } from '@actual-app/core/shared/util';
 
 import { useCreateAccountMutation } from '#accounts';
@@ -40,6 +42,7 @@ export function CreateLocalAccountModal() {
   const [name, setName] = useState('');
   const [offbudget, setOffbudget] = useState(false);
   const [balance, setBalance] = useState('0');
+  const [currency, setCurrency] = useState('');
 
   const [nameError, setNameError] = useState(null);
   const [balanceError, setBalanceError] = useState(false);
@@ -72,6 +75,7 @@ export function CreateLocalAccountModal() {
           name,
           balance: toRelaxedNumber(balance),
           offBudget: offbudget,
+          currency,
         },
         {
           onSuccess: id => {
@@ -223,6 +227,20 @@ export function CreateLocalAccountModal() {
                   <Trans>Balance must be a number</Trans>
                 </FormError>
               )}
+
+              <InlineField label={t('Currency')} width="100%">
+                <Select
+                  value={currency}
+                  onChange={setCurrency}
+                  options={currencies.map(option => [
+                    option.code,
+                    option.code
+                      ? `${option.code} - ${option.name} (${option.symbol})`
+                      : t('Main currency'),
+                  ])}
+                  style={{ flex: 1 }}
+                />
+              </InlineField>
 
               <ModalButtons>
                 <Button onPress={() => state.close()}>

@@ -18,7 +18,10 @@ import { TextOneLine } from '@actual-app/components/text-one-line';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { isPreviewId } from '@actual-app/core/shared/transactions';
-import { integerToCurrency } from '@actual-app/core/shared/util';
+import {
+  integerToCurrency,
+  integerToCurrencyWithCurrency,
+} from '@actual-app/core/shared/util';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
 import type {
   AccountEntity,
@@ -74,6 +77,7 @@ type TransactionListItemProps = ListBoxItemRenderProps & {
   onPress: (transaction: TransactionEntity) => void;
   onLongPress: (transaction: TransactionEntity) => void;
   onToggleCleared?: (transaction: TransactionEntity) => void;
+  currencyCode?: string;
 };
 
 export function TransactionListItem({
@@ -83,6 +87,7 @@ export function TransactionListItem({
   onPress,
   onLongPress,
   onToggleCleared,
+  currencyCode,
   transaction,
   ...itemProps
 }: TransactionListItemProps) {
@@ -319,7 +324,9 @@ export function TransactionListItem({
                   ...textStyle,
                 }}
               >
-                {integerToCurrency(amount)}
+                {currencyCode
+                  ? integerToCurrencyWithCurrency(amount, currencyCode)
+                  : integerToCurrency(amount)}
               </Text>
               {showRunningBalance && runningBalance !== undefined && (
                 <Text
@@ -334,7 +341,12 @@ export function TransactionListItem({
                     }),
                   }}
                 >
-                  {integerToCurrency(runningBalance)}
+                  {currencyCode
+                    ? integerToCurrencyWithCurrency(
+                        runningBalance,
+                        currencyCode,
+                      )
+                    : integerToCurrency(runningBalance)}
                 </Text>
               )}
             </View>

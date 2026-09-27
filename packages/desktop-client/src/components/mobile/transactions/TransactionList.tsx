@@ -90,6 +90,7 @@ type TransactionListProps = {
   showMakeTransfer?: boolean;
   isReconciling?: boolean;
   onToggleTransactionCleared?: (transaction: TransactionEntity) => void;
+  currencyCode?: string;
 };
 
 export function TransactionList({
@@ -103,6 +104,7 @@ export function TransactionList({
   showMakeTransfer = false,
   isReconciling = false,
   onToggleTransactionCleared,
+  currencyCode,
 }: TransactionListProps) {
   const locale = useLocale();
   const { t } = useTranslation();
@@ -190,6 +192,7 @@ export function TransactionList({
               showRunningBalances,
               isReconciling,
               onToggleTransactionCleared,
+              currencyCode,
               t,
             ]}
             renderEmptyState={() =>
@@ -245,6 +248,7 @@ export function TransactionList({
                           onPress={trans => onTransactionPress(trans)}
                           onLongPress={trans => onTransactionPress(trans, true)}
                           onToggleCleared={onToggleTransactionCleared}
+                          currencyCode={currencyCode}
                         />
                       )}
                     </ListBoxItem>
