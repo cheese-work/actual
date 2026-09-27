@@ -50,6 +50,19 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/actual-server:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/actual-server:master
             ghcr.io/${{ github.repository_owner }}/actual:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/actual:master
+
+      - name: Check current master
+        id: current-master
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_sha=$(git ls-remote https://github.com/cheese-work/actual.git refs/heads/master | cut -f1)
+          echo "is_current=$([[ "$latest_sha" == "$GITHUB_SHA" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Update master tags
+        if: steps.current-master.outputs.is_current == 'true'
+        shell: bash
+        run: |
+          docker buildx imagetools create --tag ghcr.io/cheese-work/actual-server:master ghcr.io/cheese-work/actual-server:${GITHUB_SHA}
+          docker buildx imagetools create --tag ghcr.io/cheese-work/actual:master ghcr.io/cheese-work/actual:${GITHUB_SHA}
