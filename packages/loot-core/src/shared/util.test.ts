@@ -262,8 +262,8 @@ describe('utility functions', () => {
       expect(integerToCurrencyWithDecimal(123400, 'IRR')).toBe('1,234');
     });
 
-    test('VND uses 0dp', () => {
-      expect(integerToCurrencyWithDecimal(5000000, 'VND')).toBe('50,000');
+    test('VND keeps 2dp display precision with fixed-scale storage', () => {
+      expect(integerToCurrencyWithDecimal(5000000, 'VND')).toBe('50,000.00');
     });
 
     test('unknown currency XYZ defaults to 2dp', () => {
@@ -296,7 +296,7 @@ describe('utility functions', () => {
     it.each<[number, string, string]>([
       [12.34, 'USD', '12.34'],
       [1234, 'JPY', '1,234'],
-      [50000, 'VND', '50,000'],
+      [50000, 'VND', '50,000.00'],
     ])(
       'round-trips fixed storage scale before applying %s display precision: %s %s',
       (amount, currency, displayedAmount) => {
