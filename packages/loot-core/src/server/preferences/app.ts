@@ -13,12 +13,14 @@ import {
 } from '#server/prefs';
 import { getServer } from '#server/server-config';
 import { undoable } from '#server/undo';
+import { finalizeCurrencySetup } from '#shared/currency-setup';
 import { stringToInteger } from '#shared/util';
 import type { GlobalPrefs, MetadataPrefs, SyncedPrefs } from '#types/prefs';
 
 export type PreferencesHandlers = {
   'preferences/save': typeof saveSyncedPrefs;
   'preferences/get': typeof getSyncedPrefs;
+  'currency-setup-finalize': typeof finalizeCurrencySetupPreferences;
   'save-global-prefs': typeof saveGlobalPrefs;
   'load-global-prefs': typeof loadGlobalPrefs;
   'save-prefs': typeof saveMetadataPrefs;
@@ -32,12 +34,17 @@ const FORMULA_FORMAT_SYNCED_PREFS = new Set<keyof SyncedPrefs>([
   'numberFormat',
   'hideFraction',
   'defaultCurrencyCode',
+  'displayCurrencyCode',
   'currencySymbolPosition',
   'currencySpaceBetweenAmountAndSymbol',
 ]);
 
 app.method('preferences/save', mutator(undoable(saveSyncedPrefs)));
 app.method('preferences/get', getSyncedPrefs);
+app.method(
+  'currency-setup-finalize',
+  mutator(finalizeCurrencySetupPreferences),
+);
 app.method('save-global-prefs', saveGlobalPrefs);
 app.method('load-global-prefs', loadGlobalPrefs);
 app.method('save-prefs', saveMetadataPrefs);
@@ -74,6 +81,26 @@ async function getSyncedPrefs(): Promise<SyncedPrefs> {
     carry[id as keyof SyncedPrefs] = value;
     return carry;
   }, {});
+}
+
+async function finalizeCurrencySetupPreferences({
+  budgetCurrencyCode,
+  displayCurrencyCode,
+}: {
+  budgetCurrencyCode: string;
+  displayCurrencyCode: string;
+}) {
+  const changes = finalizeCurrencySetup(
+    await getSyncedPrefs(),
+    budgetCurrencyCode,
+    displayCurrencyCode,
+  );
+
+  await Promise.all(
+    Object.entries(changes).map(([id, value]) =>
+      db.update('preferences', { id, value }),
+    ),
+  );
 }
 
 async function saveGlobalPrefs(prefs: GlobalPrefs) {

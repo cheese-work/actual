@@ -1,5 +1,6 @@
 import {
   amountToCurrencyInteger,
+  amountToInteger,
   currencyToAmount,
   getNumberFormat,
   integerToCurrencyWithDecimal,
@@ -280,27 +281,23 @@ describe('utility functions', () => {
       expect(amountToCurrencyInteger(12.34, 'USD')).toBe(1234);
     });
 
-    test('JPY uses 0dp (multiply by 1)', () => {
-      expect(amountToCurrencyInteger(1234, 'JPY')).toBe(1234);
+    test('JPY keeps the shared 2dp storage scale', () => {
+      expect(amountToCurrencyInteger(1234, 'JPY')).toBe(123400);
     });
 
-    test('IRR uses 0dp (multiply by 1)', () => {
-      expect(amountToCurrencyInteger(1234, 'IRR')).toBe(1234);
+    test('VND keeps the shared 2dp storage scale', () => {
+      expect(amountToCurrencyInteger(50000, 'VND')).toBe(5000000);
     });
 
     it.each<[number, string]>([
       [12.34, 'USD'],
-      [1234, 'JPY'],
-      [5678, 'IRR'],
+      [12.34, 'VND'],
     ])(
       'round-trip amountToCurrencyInteger/integerToCurrencyWithDecimal: %s %s',
       (amount, currency) => {
         setNumberFormat({ format: 'comma-dot', hideFraction: false });
         const encoded = amountToCurrencyInteger(amount, currency);
-        const decoded = parseFloat(
-          integerToCurrencyWithDecimal(encoded, currency).replace(/,/g, ''),
-        );
-        expect(decoded).toBeCloseTo(amount, 8);
+        expect(encoded).toBe(amountToInteger(amount));
       },
     );
   });
