@@ -165,6 +165,7 @@ type LiveTransactionTableProps = {
   showGroup?: boolean;
   showCleared: boolean;
   isAdding: boolean;
+  currencyCode?: string;
   onTransactionsChange?: (newTrans: TransactionEntity[]) => void;
   onCloseAddTransaction?: () => void;
   onApplyRules?: (
@@ -627,6 +628,38 @@ describe('Transactions', () => {
         );
       }
     });
+  });
+
+  test('formats payment and deposit cells in the account currency', () => {
+    const transactions = generateTransactions(2);
+    transactions[0].amount = -1234;
+    transactions[1].amount = 1234;
+
+    const { container } = renderTransactions({
+      transactions,
+      currencyCode: 'USD',
+    });
+
+    expect(queryField(container, 'debit', 'div', 0).textContent).toBe('$12.34');
+    expect(queryField(container, 'credit', 'div', 1).textContent).toBe(
+      '$12.34',
+    );
+  });
+
+  test('stores VND register entry in two-decimal integer units', async () => {
+    const { container, getTransactions, updateProps } = renderTransactions({
+      currencyCode: 'VND',
+    });
+
+    updateProps({ isAdding: true });
+    const input = await editNewField(container, 'debit');
+    await userEvent.clear(input);
+    await userEvent.type(input, '50000[Enter]');
+
+    expect(getTransactions()[0].amount).toBe(-5000000);
+    expect(queryField(container, 'debit', 'div', 0).textContent).toBe(
+      '50,000 ₫',
+    );
   });
 
   describe('Group column', () => {

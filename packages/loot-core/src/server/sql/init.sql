@@ -23,7 +23,6 @@ CREATE TABLE accounts
     type TEXT,
     subtype TEXT,
     bank TEXT,
-    currency TEXT,
     offbudget INTEGER DEFAULT 0,
     closed INTEGER DEFAULT 0,
     tombstone INTEGER DEFAULT 0);

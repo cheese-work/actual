@@ -65,6 +65,7 @@ import {
 } from '@actual-app/core/shared/transactions';
 import {
   amountToCurrency,
+  amountToInteger,
   currencyToAmount,
   integerToCurrency,
   integerToCurrencyWithCurrency,
@@ -1114,6 +1115,8 @@ const Transaction = memo(function Transaction({
     currencyCode
       ? integerToCurrencyWithCurrency(amount, currencyCode)
       : integerToCurrency(amount);
+  const formatInputAmount = (value: string) =>
+    value ? formatAmount(amountToInteger(currencyToAmount(value) || 0)) : '';
 
   const dispatch = useDispatch();
   const dispatchSelected = useSelectedDispatch();
@@ -1987,10 +1990,7 @@ const Transaction = memo(function Transaction({
             exposed={focusedField === 'debit'}
             focused={focusedField === 'debit'}
             value={debit === '' && credit === '' ? amountToCurrency(0) : debit}
-            formatter={value =>
-              // reformat value so since we might have kept decimals
-              value ? amountToCurrency(currencyToAmount(value) || 0) : ''
-            }
+            formatter={formatInputAmount}
             valueStyle={valueStyle}
             textAlign="right"
             title={debit}
@@ -2022,10 +2022,7 @@ const Transaction = memo(function Transaction({
             exposed={focusedField === 'credit'}
             focused={focusedField === 'credit'}
             value={credit}
-            formatter={value =>
-              // reformat value so since we might have kept decimals
-              value ? amountToCurrency(currencyToAmount(value) || 0) : ''
-            }
+            formatter={formatInputAmount}
             valueStyle={valueStyle}
             textAlign="right"
             title={credit}
