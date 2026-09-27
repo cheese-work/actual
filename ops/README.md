@@ -34,9 +34,12 @@ archive or a production credential.
 1. Change the existing tar job and CHE-829 promotion to use the shared lock:
    `flock -n /home/congvc/projects/oss/actual-budget/.actual-maintenance.lock <existing-command>`.
 2. Create `actual-staging-isolated` as an internal Docker bridge with
-   `com.docker.network.bridge.enable_ip_masquerade=false`; add and verify
-   `DOCKER-USER` DROP rules from its subnet to its gateway and every production
-   container IP. Create
+   `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
+   name. Add ordered `INPUT -> ACTUAL_STAGING_INPUT` and
+   `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks for that bridge. The input
+   policy must DROP its subnet to the bridge gateway; the forwarding policy
+   must DROP its subnet to every production container IP before any ACCEPT or
+   RETURN. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
 3. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
@@ -70,9 +73,9 @@ output, container IDs, image digests, alert receipt, and cleanup evidence.
 The daily refresh is `03:45`; a five-minute image-sync timer pulls published
 `master` and promotes it from the latest approved snapshot only, without a
 second production interruption or freshness reset. The freshness timer alerts
-after 26 hours or any recorded refresh failure. Completed snapshots are
-retained for 14 days; failed spools, partial archives, and expired unreferenced
-generations are removed.
+after 26 hours or any recorded refresh failure and runs retention even when a
+refresh failed. Completed snapshots are retained for 14 days; failed spools,
+partial archives, and expired unreferenced generations are removed.
 
 The X99 offline suite is:
 

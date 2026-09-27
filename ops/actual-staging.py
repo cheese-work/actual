@@ -31,7 +31,8 @@ DIGEST = re.compile(r'^ghcr.io/cheese-work/actual-server@sha256:[0-9a-f]{64}$')
 ACTIVE_PORT = 15008
 CANDIDATE_PORT = 15009
 CAPTURE_SECONDS = 20
-RECOVERY_SECONDS = 5
+RECOVERY_SECONDS = 10
+INTERRUPTION_SECONDS = CAPTURE_SECONDS + RECOVERY_SECONDS
 ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
 
 
@@ -43,8 +44,17 @@ def docker(*cmd, timeout=60):
     return run('docker', *cmd, timeout=timeout)
 
 
-def prod():
-    return json.loads(docker('inspect', PROD))[0]
+def remaining_timeout(deadline, maximum=60):
+    if deadline is None:
+        return maximum
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError('production recovery deadline exceeded')
+    return min(maximum, remaining)
+
+
+def prod(timeout=60):
+    return json.loads(docker('inspect', PROD, timeout=timeout))[0]
 
 
 def containers():
@@ -78,11 +88,13 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
-def audit(root):
+def audit(root, deadline=None):
     result = {}
     if root.is_symlink() or not root.is_dir():
         raise ValueError('unsafe snapshot root')
     for base, dirs, files in os.walk(root, followlinks=False):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError('source audit missed production recovery deadline')
         for name in dirs + files:
             path = Path(base, name)
             if path.is_symlink() or not (path.is_dir() or path.is_file()):
@@ -92,7 +104,11 @@ def audit(root):
             digest = hashlib.sha256()
             with path.open('rb') as stream:
                 for block in iter(lambda: stream.read(1048576), b''):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise RuntimeError('source audit missed production recovery deadline')
                     digest.update(block)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise RuntimeError('source audit missed production recovery deadline')
             result[str(path.relative_to(root))] = [path.stat().st_size, digest.hexdigest()]
     return result
 
@@ -136,8 +152,8 @@ def locked(action):
         return action()
 
 
-def assert_prod_identity(before=None):
-    current = prod()
+def assert_prod_identity(before=None, deadline=None):
+    current = prod(timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
     if current['HostConfig']['Binds'] != [f'{SOURCE}:/data:rw']:
         raise RuntimeError('unexpected production mount; refusing restart')
     if before and (current['Id'] != before['Id'] or current['Image'] != before['Image']):
@@ -145,16 +161,17 @@ def assert_prod_identity(before=None):
     return current
 
 
-def recover(before=None):
+def recover(before=None, deadline=None):
     pending = ROOT / 'pending-prod.json'
     if before is None:
         if not pending.exists():
             return
         before = read_json(pending)
-    current = assert_prod_identity(before)
+    deadline = deadline or time.monotonic() + RECOVERY_SECONDS
+    current = assert_prod_identity(before, deadline)
     if not current['State']['Running']:
-        docker('start', PROD, timeout=RECOVERY_SECONDS)
-    if not assert_prod_identity(before)['State']['Running']:
+        docker('start', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
+    if not assert_prod_identity(before, deadline)['State']['Running']:
         raise RuntimeError('production restart failed')
     pending.unlink(missing_ok=True)
 
@@ -162,15 +179,16 @@ def recover(before=None):
 def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
-        '--on-active=25s', sys.executable, str(Path(__file__).resolve()), 'recover',
+        '--on-active=20s', '--property=AccuracySec=1us',
+        sys.executable, str(Path(__file__).resolve()), 'recover',
         timeout=10,
     )
 
 
 def graceful_stop(before, deadline):
-    docker('kill', '--signal', 'SIGTERM', PROD, timeout=RECOVERY_SECONDS)
+    docker('kill', '--signal', 'SIGTERM', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
     while time.monotonic() < deadline:
-        if not assert_prod_identity(before)['State']['Running']:
+        if not assert_prod_identity(before, deadline)['State']['Running']:
             return
         time.sleep(0.2)
     raise RuntimeError('production did not stop gracefully before capture deadline')
@@ -197,19 +215,20 @@ def snapshot():
     schedule_watchdog(stamp)
     started = time.monotonic()
     capture_deadline = started + CAPTURE_SECONDS
+    recovery_deadline = started + INTERRUPTION_SECONDS
     try:
-        graceful_stop(before, capture_deadline)
-        files = audit(SOURCE)
-        required = sum(size for size, _ in files.values())
-        disk = shutil.disk_usage(ROOT)
-        if disk.free - required < max(5 * 1024**3, disk.total // 5):
-            raise RuntimeError('disk reserve insufficient')
-        bounded_copy(SOURCE, copied / 'data', capture_deadline)
-    finally:
-        recover(before)
-    if time.monotonic() - started > CAPTURE_SECONDS + RECOVERY_SECONDS:
-        raise RuntimeError('production deadline exceeded')
-    try:
+        try:
+            graceful_stop(before, capture_deadline)
+            files = audit(SOURCE, capture_deadline)
+            required = sum(size for size, _ in files.values())
+            disk = shutil.disk_usage(ROOT)
+            if disk.free - required < max(5 * 1024**3, disk.total // 5):
+                raise RuntimeError('disk reserve insufficient')
+            bounded_copy(SOURCE, copied / 'data', capture_deadline)
+        finally:
+            recover(before, recovery_deadline)
+        if time.monotonic() > recovery_deadline:
+            raise RuntimeError('production deadline exceeded')
         copied_files = audit(copied / 'data')
         if copied_files != files:
             raise RuntimeError('spooled snapshot checksum mismatch')
@@ -312,9 +331,10 @@ def assert_network_isolation():
     network = json.loads(docker('network', 'inspect', 'actual-staging-isolated'))[0]
     options = network.get('Options', {})
     config = network.get('IPAM', {}).get('Config', [])
+    bridge = options.get('com.docker.network.bridge.name')
     if (not network.get('Internal') or network.get('Driver') != 'bridge'
             or options.get('com.docker.network.bridge.enable_ip_masquerade') != 'false'
-            or len(config) != 1 or not config[0].get('Subnet') or not config[0].get('Gateway')):
+            or not bridge or len(config) != 1 or not config[0].get('Subnet') or not config[0].get('Gateway')):
         raise ValueError('staging network lacks required host and production isolation')
     production_ips = {
         settings.get('IPAddress')
@@ -323,11 +343,38 @@ def assert_network_isolation():
     }
     if not production_ips:
         raise ValueError('production container has no network identity to deny')
-    for destination in production_ips | {config[0]['Gateway']}:
-        run(
-            'iptables', '-C', 'DOCKER-USER', '-s', config[0]['Subnet'], '-d', destination,
-            '-j', 'DROP', timeout=10,
-        )
+    subnet = config[0]['Subnet']
+    assert_firewall_hook('INPUT', bridge, 'ACTUAL_STAGING_INPUT')
+    assert_firewall_deny('ACTUAL_STAGING_INPUT', subnet, {config[0]['Gateway']})
+    assert_firewall_hook('DOCKER-USER', bridge, 'ACTUAL_STAGING_FORWARD')
+    assert_firewall_deny('ACTUAL_STAGING_FORWARD', subnet, production_ips)
+
+
+def firewall_rules(chain):
+    return run('iptables', '-S', chain, timeout=10).splitlines()
+
+
+def assert_firewall_hook(chain, bridge, policy):
+    expected = f'-A {chain} -i {bridge} -j {policy}'
+    rules = firewall_rules(chain)
+    try:
+        index = rules.index(expected)
+    except ValueError as error:
+        raise ValueError(f'missing {chain} isolation hook') from error
+    if index:
+        raise ValueError(f'{chain} isolation hook is shadowed')
+
+
+def assert_firewall_deny(policy, subnet, destinations):
+    rules = firewall_rules(policy)
+    for destination in destinations:
+        expected = f'-A {policy} -s {subnet} -d {destination} -j DROP'
+        try:
+            index = rules.index(expected)
+        except ValueError as error:
+            raise ValueError(f'missing {policy} deny for {destination}') from error
+        if any('-j ACCEPT' in rule or '-j RETURN' in rule for rule in rules[:index]):
+            raise ValueError(f'{policy} deny is shadowed')
 
 
 def create_container(name, data, image, port):
@@ -381,6 +428,28 @@ def verification_receipt(candidate):
     }
 
 
+def account_fingerprint(path):
+    with sqlite3.connect(f'file:{path}?mode=ro', uri=True) as source, sqlite3.connect(':memory:') as database:
+        source.backup(database)
+        database.execute('DELETE FROM sessions')
+        if database.execute(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'",
+        ).fetchone()[0]:
+            database.execute("DELETE FROM sqlite_sequence WHERE name = 'sessions'")
+        dump = '\n'.join(database.iterdump()).encode()
+    return hashlib.sha256(dump).hexdigest()
+
+
+def staging_inventory(root):
+    inventory = audit(root)
+    account = root / 'server-files/account.sqlite'
+    key = str(account.relative_to(root))
+    if key not in inventory:
+        raise ValueError('missing account database')
+    inventory[key] = ['session-tolerant-sqlite', account_fingerprint(account)]
+    return inventory
+
+
 def restore(snapshot_path, image):
     if not DIGEST.fullmatch(image):
         raise ValueError('only published fork digest allowed')
@@ -403,7 +472,7 @@ def restore(snapshot_path, image):
             'generation': generation,
             'budget_count': expected,
             'data': str(candidate_data),
-            'inventory': audit(candidate_data),
+            'inventory': staging_inventory(candidate_data),
             'manifest': manifest,
         }
         write_json(ROOT / 'candidate.json', candidate)
@@ -424,7 +493,7 @@ def candidate_state():
         raise ValueError('candidate image is not a pinned digest')
     if candidate.get('generation') != data.name:
         raise ValueError('candidate generation identity changed')
-    if candidate.get('inventory') != audit(data) or candidate.get('budget_count') != budget_count(data):
+    if candidate.get('inventory') != staging_inventory(data) or candidate.get('budget_count') != budget_count(data):
         raise ValueError('candidate data identity changed')
     candidate_identity(candidate)
     return candidate
@@ -442,6 +511,7 @@ def verify_candidate():
         str(verifier), candidate['snapshot'], candidate['image'], verification_receipt(candidate)['candidate_id'],
         timeout=120,
     )
+    candidate = candidate_state()
     receipt = verification_receipt(candidate)
     write_json(ROOT / 'verified-candidate.json', receipt)
     return receipt
@@ -581,14 +651,18 @@ def cleanup_runtime(now, cutoff):
 def cleanup_snapshots(directory=BACKUPS, now=None, keep_days=14):
     now = time.time() if now is None else now
     cutoff = now - keep_days * 86400
-    for path in directory.iterdir():
-        if path.is_dir() and not path.is_symlink() and path.name.startswith('actual-consistent-'):
-            if path.stat().st_mtime < cutoff:
-                shutil.rmtree(path)
+    if directory.exists():
+        for path in directory.iterdir():
+            if (path.is_dir() and not path.is_symlink()
+                    and (path.name.startswith('actual-consistent-')
+                         or (path.name.startswith('.actual-consistent-') and path.name.endswith('.partial')))):
+                if path.stat().st_mtime < cutoff:
+                    shutil.rmtree(path)
     cleanup_runtime(now, cutoff)
 
 
 def freshness():
+    cleanup_snapshots()
     marker = ROOT / 'last-success.json'
     if (ROOT / 'stale.json').exists() or not marker.exists() or time.time() - read_json(marker)['timestamp'] > 26 * 3600:
         alert('snapshot refresh stale over 26 hours')
@@ -601,7 +675,8 @@ def systemd_units(script):
         'actual-prod-watchdog.service': '\n'.join((
             '[Unit]', 'Description=Recover unchanged Actual production container after boot',
             'After=default.target', '', '[Service]', 'Type=oneshot',
-            f'ExecStart={command} recover', '', '[Install]', 'WantedBy=default.target', '',
+            'Restart=on-failure', 'RestartSec=2s', f'ExecStart={command} recover', '',
+            '[Install]', 'WantedBy=default.target', '',
         )),
         'actual-staging-refresh.service': '\n'.join((
             '[Unit]', 'Description=Refresh private Actual staging', '', '[Service]', 'Type=oneshot',
@@ -653,13 +728,14 @@ def enable_units():
 
 
 def refresh():
-    image = resolve_master_image()
-    snapshot_path = snapshot()
-    restore(snapshot_path, image)
-    verify_candidate()
-    promoted = promote()
-    cleanup_snapshots()
-    return promoted
+    try:
+        image = resolve_master_image()
+        snapshot_path = snapshot()
+        restore(snapshot_path, image)
+        verify_candidate()
+        return promote()
+    finally:
+        cleanup_snapshots()
 
 
 def sync_image():
@@ -690,7 +766,7 @@ def main():
         if args.action == 'recover':
             recover()
         elif args.action == 'freshness':
-            freshness()
+            locked(freshness)
         elif args.action == 'alert-test':
             alert('alert delivery test')
         elif args.action == 'install-units':

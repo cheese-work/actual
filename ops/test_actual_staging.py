@@ -3,7 +3,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
 import tempfile
 import time
 import unittest
@@ -86,17 +88,28 @@ class CandidateTests(unittest.TestCase):
 
         self.assertFalse(old.exists())
         self.assertTrue(recent.exists())
-        self.assertTrue(partial.exists())
+        self.assertFalse(partial.exists())
 
     def test_systemd_units_keep_boot_recovery_and_refresh_separate(self):
         units = staging.systemd_units(Path('/srv/actual/ops/actual-staging.py'))
 
         self.assertIn('actual-prod-watchdog.service', units)
         self.assertIn('ExecStart=/usr/bin/python3 /srv/actual/ops/actual-staging.py recover', units['actual-prod-watchdog.service'])
+        self.assertIn('Restart=on-failure', units['actual-prod-watchdog.service'])
         self.assertIn('EnvironmentFile=%h/.config/actual-staging/alert.env', units['actual-staging-refresh.service'])
         self.assertIn('OnCalendar=*-*-* 03:45:00', units['actual-staging-refresh.timer'])
         self.assertIn('Persistent=true', units['actual-staging-freshness.timer'])
         self.assertIn('OnUnitInactiveSec=5min', units['actual-staging-image-sync.timer'])
+
+    def test_watchdog_uses_precise_twenty_second_timer(self):
+        with mock.patch.object(staging, 'run') as run:
+            staging.schedule_watchdog('fixture')
+        self.assertIn('--on-active=20s', run.call_args.args)
+        self.assertIn('--property=AccuracySec=1us', run.call_args.args)
+
+    def test_remaining_timeout_never_extends_recovery_deadline(self):
+        with mock.patch.object(staging.time, 'monotonic', return_value=99.9):
+            self.assertAlmostEqual(staging.remaining_timeout(100, 10), 0.1)
 
     def test_candidate_verification_record_is_bound_to_candidate_identity(self):
         candidate = {
@@ -165,7 +178,9 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'prod', side_effect=[before, running]), \
                 mock.patch.object(staging, 'docker') as docker:
             staging.recover()
-        docker.assert_called_once_with('start', staging.PROD, timeout=staging.RECOVERY_SECONDS)
+        docker.assert_called_once()
+        self.assertEqual(docker.call_args.args, ('start', staging.PROD))
+        self.assertLessEqual(docker.call_args.kwargs['timeout'], staging.RECOVERY_SECONDS)
         self.assertFalse((self.root / 'pending-prod.json').exists())
 
     def test_tailnet_requires_single_bound_proxy_and_no_funnel(self):
@@ -272,6 +287,172 @@ class CandidateTests(unittest.TestCase):
         inherited.write_text('SYNTHETIC_ONLY=1')
         with self.assertRaisesRegex(ValueError, 'inherited server configuration'):
             staging.sanitize(self.root, '$argon2id$fixture')
+
+    def test_staging_inventory_allows_session_but_not_budget_mutation(self):
+        candidate_data = self.root / 'generations' / 'actual-consistent-fixture-aaaaaaaaaaaa'
+        candidate_data.mkdir(parents=True)
+        shutil.copytree(self.root / 'server-files', candidate_data / 'server-files')
+        shutil.copytree(self.root / 'user-files', candidate_data / 'user-files')
+        with sqlite3.connect(candidate_data / 'server-files/account.sqlite') as database:
+            database.execute("DELETE FROM sessions")
+        candidate = {
+            'snapshot': 'actual-consistent-fixture',
+            'image': f'{staging.IMAGE}{"a" * 64}',
+            'generation': candidate_data.name,
+            'budget_count': 1,
+            'data': str(candidate_data),
+            'inventory': staging.staging_inventory(candidate_data),
+            'manifest': {'files': {}},
+        }
+        (self.root / 'candidate.json').write_text(json.dumps(candidate))
+        with mock.patch.object(staging, 'ROOT', self.root):
+            with sqlite3.connect(candidate_data / 'server-files/account.sqlite') as database:
+                database.execute("INSERT INTO sessions VALUES ('session', 'owner', 'password')")
+            self.assertEqual(staging.candidate_state(), candidate)
+            with sqlite3.connect(candidate_data / 'server-files/account.sqlite') as database:
+                database.execute("INSERT INTO files VALUES ('mutated-budget', 0)")
+            with self.assertRaisesRegex(ValueError, 'candidate data identity changed'):
+                staging.candidate_state()
+
+    def test_account_fingerprint_allows_session_sequence_changes_only(self):
+        account = self.root / 'sequence.sqlite'
+        with sqlite3.connect(account) as database:
+            database.executescript('''
+                CREATE TABLE files(id TEXT, deleted INTEGER);
+                INSERT INTO files VALUES ('fixture', 0);
+                CREATE TABLE sessions(id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT);
+            ''')
+        expected = staging.account_fingerprint(account)
+        with sqlite3.connect(account) as database:
+            database.execute("INSERT INTO sessions(token) VALUES ('session')")
+        self.assertEqual(staging.account_fingerprint(account), expected)
+        with sqlite3.connect(account) as database:
+            database.execute("INSERT INTO files VALUES ('mutated-budget', 0)")
+        self.assertNotEqual(staging.account_fingerprint(account), expected)
+
+    def test_verifier_session_mutation_can_promote_quiesced_candidate(self):
+        candidate_data = self.root / 'generations' / 'actual-consistent-fixture-aaaaaaaaaaaa'
+        candidate_data.mkdir(parents=True)
+        account = candidate_data / 'server-files' / 'account.sqlite'
+        account.parent.mkdir()
+        with sqlite3.connect(account) as database:
+            database.executescript('''
+                CREATE TABLE files(id TEXT, deleted INTEGER);
+                INSERT INTO files VALUES ('fixture', 0);
+                CREATE TABLE sessions(token TEXT, user_id TEXT, auth_method TEXT);
+            ''')
+        candidate = {
+            'snapshot': 'actual-consistent-fixture',
+            'image': f'{staging.IMAGE}{"a" * 64}',
+            'generation': candidate_data.name,
+            'budget_count': 1,
+            'data': str(candidate_data),
+            'inventory': staging.staging_inventory(candidate_data),
+            'manifest': {'files': {}},
+        }
+        (self.root / 'candidate.json').write_text(json.dumps(candidate))
+        verifier = self.root / 'verify-encrypted-budget'
+        verifier.write_text('fixture')
+        verifier.chmod(0o700)
+
+        def authorized_login(*command, **kwargs):
+            with sqlite3.connect(account) as database:
+                database.execute("INSERT INTO sessions VALUES ('session', 'owner', 'password')")
+            return ''
+
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'run', side_effect=authorized_login), \
+                mock.patch.object(staging, 'assert_tailnet_authorization'), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging, 'replace_staging'):
+            self.assertEqual(staging.verify_candidate()['candidate_id'], staging.verification_receipt(candidate)['candidate_id'])
+            self.assertEqual(staging.promote(), candidate)
+
+    def test_network_isolation_requires_ordered_input_and_forwarding_denies(self):
+        network = {
+            'Internal': True,
+            'Driver': 'bridge',
+            'Options': {
+                'com.docker.network.bridge.enable_ip_masquerade': 'false',
+                'com.docker.network.bridge.name': 'actual-staging-br0',
+            },
+            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
+        }
+        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
+        policies = {
+            'INPUT': '-A INPUT -i actual-staging-br0 -j ACTUAL_STAGING_INPUT',
+            'DOCKER-USER': '-A DOCKER-USER -i actual-staging-br0 -j ACTUAL_STAGING_FORWARD',
+            'ACTUAL_STAGING_INPUT': '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1 -j DROP',
+            'ACTUAL_STAGING_FORWARD': '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2 -j DROP',
+        }
+
+        def firewall(*command, **kwargs):
+            if command[:2] == ('iptables', '-S'):
+                return policies[command[2]]
+            return ''
+
+        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
+                mock.patch.object(staging, 'prod', return_value=production), \
+                mock.patch.object(staging, 'run', side_effect=firewall):
+            staging.assert_network_isolation()
+
+    def test_network_isolation_rejects_nonfirst_input_hook(self):
+        network = {
+            'Internal': True,
+            'Driver': 'bridge',
+            'Options': {
+                'com.docker.network.bridge.enable_ip_masquerade': 'false',
+                'com.docker.network.bridge.name': 'actual-staging-br0',
+            },
+            'IPAM': {'Config': [{'Subnet': '172.25.0.0/24', 'Gateway': '172.25.0.1'}]},
+        }
+        production = {'NetworkSettings': {'Networks': {'production': {'IPAddress': '172.20.0.2'}}}}
+        policies = {
+            'INPUT': '\n'.join((
+                '-A INPUT -j ACCEPT',
+                '-A INPUT -i actual-staging-br0 -j ACTUAL_STAGING_INPUT',
+            )),
+            'DOCKER-USER': '-A DOCKER-USER -i actual-staging-br0 -j ACTUAL_STAGING_FORWARD',
+            'ACTUAL_STAGING_INPUT': '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1 -j DROP',
+            'ACTUAL_STAGING_FORWARD': '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2 -j DROP',
+        }
+
+        def firewall(*command, **kwargs):
+            if command[:2] == ('iptables', '-S'):
+                return policies[command[2]]
+            return ''
+
+        with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
+                mock.patch.object(staging, 'prod', return_value=production), \
+                mock.patch.object(staging, 'run', side_effect=firewall):
+            with self.assertRaisesRegex(ValueError, 'INPUT isolation hook is shadowed'):
+                staging.assert_network_isolation()
+
+    def test_snapshot_cleans_failed_capture_spool(self):
+        before = {
+            'Id': 'original',
+            'Image': 'image',
+            'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
+            'State': {'Running': True},
+        }
+
+        def failed_copy(source, destination, deadline):
+            destination.mkdir()
+            (destination / 'financial-fixture').write_text('synthetic-only')
+            raise subprocess.TimeoutExpired(['cp'], 1)
+
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', self.root / 'backups'), \
+                mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
+                mock.patch.object(staging, 'schedule_watchdog'), \
+                mock.patch.object(staging, 'graceful_stop'), \
+                mock.patch.object(staging, 'audit', return_value={'fixture': [1, 'hash']}), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
+                mock.patch.object(staging, 'bounded_copy', side_effect=failed_copy), \
+                mock.patch.object(staging, 'recover'):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                staging.snapshot()
+        self.assertFalse(list((self.root / 'spool').rglob('financial-fixture')))
 
 
 if __name__ == '__main__':
