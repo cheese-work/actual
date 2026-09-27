@@ -12,6 +12,7 @@ import {
   savePrefs as _saveMetadataPrefs,
 } from '#server/prefs';
 import { getServer } from '#server/server-config';
+import { batchMessages } from '#server/sync';
 import { undoable } from '#server/undo';
 import { finalizeCurrencySetup } from '#shared/currency-setup';
 import { stringToInteger } from '#shared/util';
@@ -96,11 +97,11 @@ async function finalizeCurrencySetupPreferences({
     displayCurrencyCode,
   );
 
-  await Promise.all(
-    Object.entries(changes).map(([id, value]) =>
-      db.update('preferences', { id, value }),
-    ),
-  );
+  await batchMessages(async () => {
+    for (const [id, value] of Object.entries(changes)) {
+      await db.update('preferences', { id, value });
+    }
+  });
 }
 
 async function saveGlobalPrefs(prefs: GlobalPrefs) {

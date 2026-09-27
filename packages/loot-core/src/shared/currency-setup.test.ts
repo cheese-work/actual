@@ -1,3 +1,5 @@
+import type { SyncedPrefs } from '#types/prefs';
+
 import {
   finalizeCurrencySetup,
   getCurrencySetup,
@@ -44,4 +46,25 @@ describe('currency setup', () => {
     });
     expect(finalizeCurrencySetup(finalized, 'USD', 'EUR')).toEqual({});
   });
+
+  it.each<[SyncedPrefs]>([
+    [{ budgetCurrencyCode: 'JPY' }],
+    [{ displayCurrencyCode: 'EUR' }],
+    [{ currencySetupFinalized: 'true' }],
+    [{ budgetCurrencyCode: 'JPY', displayCurrencyCode: 'EUR' }],
+    [{ budgetCurrencyCode: 'JPY', currencySetupFinalized: 'true' }],
+    [{ displayCurrencyCode: 'EUR', currencySetupFinalized: 'true' }],
+  ])(
+    'repairs partial setup without replacing persisted selections: %o',
+    prefs => {
+      const changes = finalizeCurrencySetup(prefs, 'USD', 'VND');
+      const completed = { ...prefs, ...changes };
+
+      expect(getCurrencySetup(completed)).toEqual({
+        budgetCurrencyCode: prefs.budgetCurrencyCode ?? 'USD',
+        displayCurrencyCode: prefs.displayCurrencyCode ?? 'VND',
+        finalized: true,
+      });
+    },
+  );
 });

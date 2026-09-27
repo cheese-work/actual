@@ -464,7 +464,7 @@ export function integerToCurrencyWithDecimal(
     return integerToCurrency(
       integerAmount,
       getNumberFormat({ ...numberFormatConfig, decimalPlaces: dp }).formatter,
-      dp,
+      2,
     );
   }
 

@@ -177,6 +177,30 @@ describe('Currency setup', () => {
       { id: 'displayCurrencyCode', value: 'VND' },
     ]);
   });
+
+  test('repairs an interrupted finalized marker without changing the retry selection', async () => {
+    await runMutator(async () => {
+      await db.update('preferences', {
+        id: 'currencySetupFinalized',
+        value: 'true',
+      });
+    });
+
+    await runHandler(handlers['currency-setup-finalize'], {
+      budgetCurrencyCode: 'USD',
+      displayCurrencyCode: 'VND',
+    });
+
+    expect(
+      await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
+        "SELECT id, value FROM preferences WHERE id IN ('budgetCurrencyCode', 'currencySetupFinalized', 'displayCurrencyCode') ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 'budgetCurrencyCode', value: 'USD' },
+      { id: 'currencySetupFinalized', value: 'true' },
+      { id: 'displayCurrencyCode', value: 'VND' },
+    ]);
+  });
 });
 
 describe('Budget', () => {

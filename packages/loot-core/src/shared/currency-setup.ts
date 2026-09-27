@@ -8,11 +8,15 @@ export type CurrencySetup = {
 
 export function getCurrencySetup(prefs: SyncedPrefs): CurrencySetup {
   const legacyCurrencyCode = prefs.defaultCurrencyCode ?? '';
+  const finalized =
+    prefs.currencySetupFinalized === 'true' &&
+    prefs.budgetCurrencyCode != null &&
+    prefs.displayCurrencyCode != null;
 
   return {
     budgetCurrencyCode: prefs.budgetCurrencyCode ?? legacyCurrencyCode,
     displayCurrencyCode: prefs.displayCurrencyCode ?? legacyCurrencyCode,
-    finalized: prefs.currencySetupFinalized === 'true',
+    finalized,
   };
 }
 
@@ -33,8 +37,10 @@ export function finalizeCurrencySetup(
   }
 
   return {
-    budgetCurrencyCode,
-    displayCurrencyCode,
-    currencySetupFinalized: 'true',
+    ...(prefs.budgetCurrencyCode == null && { budgetCurrencyCode }),
+    ...(prefs.displayCurrencyCode == null && { displayCurrencyCode }),
+    ...(prefs.currencySetupFinalized !== 'true' && {
+      currencySetupFinalized: 'true',
+    }),
   };
 }
