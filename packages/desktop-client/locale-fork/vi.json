@@ -265,5 +265,9 @@
   "This account has no transactions so it will be permanently deleted.": "Tài khoản này chưa có giao dịch nào nên sẽ bị xóa vĩnh viễn.",
   "This account has transactions so we can't permanently delete it.": "Tài khoản này có giao dịch nên không thể xóa vĩnh viễn.",
   "Transfer is required": "Cần chọn tài khoản để chuyển số dư.",
-  "You can also <2>force close</2> the account which will delete it and all its transactions permanently. Doing so may change your budget unexpectedly since money in it may vanish.": "Bạn cũng có thể <2>buộc đóng</2> tài khoản này; thao tác này sẽ xóa vĩnh viễn tài khoản cùng toàn bộ giao dịch. Việc này có thể khiến ngân sách thay đổi ngoài dự kiến vì số tiền trong tài khoản có thể biến mất."
+  "You can also <2>force close</2> the account which will delete it and all its transactions permanently. Doing so may change your budget unexpectedly since money in it may vanish.": "Bạn cũng có thể <2>buộc đóng</2> tài khoản này; thao tác này sẽ xóa vĩnh viễn tài khoản cùng toàn bộ giao dịch. Việc này có thể khiến ngân sách thay đổi ngoài dự kiến vì số tiền trong tài khoản có thể biến mất.",
+  "Confirm Unlink": "Xác nhận ngắt liên kết",
+  "Are you sure you want to unlink <1>{accountName}</1>?": "Bạn có chắc muốn ngắt liên kết <1>{accountName}</1> không?",
+  "Transactions will no longer be synchronized with this account and must be manually entered. You will not be able to edit the bank sync settings for this account and the settings will close.": "Giao dịch sẽ không còn được đồng bộ với tài khoản này và phải được nhập thủ công. Bạn sẽ không thể chỉnh sửa cài đặt đồng bộ ngân hàng cho tài khoản này và cài đặt sẽ đóng lại.",
+  "Transactions will no longer be synchronized with this account and must be manually entered.": "Giao dịch sẽ không còn được đồng bộ với tài khoản này và phải được nhập thủ công."
 }
