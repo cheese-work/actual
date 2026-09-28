@@ -32,12 +32,22 @@ type CellValueProps<
   }) => ReactNode;
   binding: Binding<SheetName, FieldName>;
   type?: FormatType;
+  /** Effective account currency (see getEffectiveAccountCurrency) to format
+   * this value in, instead of the Main currency. Ignored for non-financial
+   * `type`s. */
+  currency?: string | null;
 };
 
 export function CellValue<
   SheetName extends SheetNames,
   FieldName extends SheetFields<SheetName>,
->({ type, binding, children, ...props }: CellValueProps<SheetName, FieldName>) {
+>({
+  type,
+  binding,
+  children,
+  currency,
+  ...props
+}: CellValueProps<SheetName, FieldName>) {
   const { fullSheetName } = useSheetName(binding);
   const sheetValue = useSheetValue(binding);
 
@@ -48,6 +58,7 @@ export function CellValue<
       type={type}
       name={fullSheetName}
       value={sheetValue}
+      currency={currency}
       {...props}
     />
   );
@@ -67,6 +78,10 @@ type CellValueTextProps<
     value: Spreadsheets[SheetName][FieldName],
     type?: FormatType,
   ) => string;
+  /** Effective account currency (see getEffectiveAccountCurrency) to format
+   * this value in, instead of the Main currency. Ignored for non-financial
+   * `type`s, and when `formatter` is provided. */
+  currency?: string | null;
 };
 
 export function CellValueText<
@@ -77,6 +92,7 @@ export function CellValueText<
   name,
   value,
   formatter,
+  currency,
   style,
   ...props
 }: CellValueTextProps<SheetName, FieldName>) {
@@ -92,6 +108,20 @@ export function CellValueText<
     ...props,
   };
 
+  const renderValue = () => {
+    if (formatter) {
+      return formatter(value, type);
+    }
+    if (
+      currency &&
+      (type === 'financial' || type === 'financial-with-sign') &&
+      typeof value === 'number'
+    ) {
+      return format.forCurrency(value, currency, type);
+    }
+    return format(value, type);
+  };
+
   if (isFinancial) {
     return (
       <FinancialText
@@ -104,7 +134,7 @@ export function CellValueText<
         <PrivacyFilter
           activationFilters={[PRIVACY_FILTER_TYPES.includes(type)]}
         >
-          {formatter ? formatter(value, type) : format(value, type)}
+          {renderValue()}
         </PrivacyFilter>
       </FinancialText>
     );
@@ -113,7 +143,7 @@ export function CellValueText<
   return (
     <Text {...sharedProps}>
       <PrivacyFilter activationFilters={[PRIVACY_FILTER_TYPES.includes(type)]}>
-        {formatter ? formatter(value, type) : format(value, type)}
+        {renderValue()}
       </PrivacyFilter>
     </Text>
   );

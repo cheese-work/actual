@@ -16,6 +16,7 @@ import { css } from '@emotion/css';
 import { useReopenAccountMutation, useUpdateAccountMutation } from '#accounts';
 import { isAccountFailedSync } from '#accounts/syncStatus';
 import { useContextMenu } from '#hooks/useContextMenu';
+import { useEffectiveAccountCurrency } from '#hooks/useEffectiveAccountCurrency';
 import { useUpdatedAccounts } from '#hooks/useUpdatedAccounts';
 import { openAccountCloseModal, pushModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
@@ -47,6 +48,7 @@ export function AccountRow({
   const updatedAccounts = useUpdatedAccounts();
   const isUpdated = !isClosed && updatedAccounts.includes(account.id);
   const [isEditing, setIsEditing] = useState(false);
+  const accountCurrency = useEffectiveAccountCurrency(account.currency);
   const href = `/accounts/${account.id}`;
   const isActive = location.pathname === href;
 
@@ -196,6 +198,7 @@ export function AccountRow({
               <Text style={styles.visuallyHidden}>{statusLabel}</Text>
               <SidebarBalance
                 binding={bindings.accountBalance(account.id)}
+                currency={accountCurrency}
                 style={{
                   fontSize: 12,
                   color: 'inherit',
