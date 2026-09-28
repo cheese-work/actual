@@ -19,7 +19,8 @@ concurrency:
 
 jobs:
   check-version:
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
+    if: github.repository == 'actualbudget/actual'
     name: Check if publish is needed
     outputs:
       should-publish: ${{ steps.check.outputs.should-publish }}
@@ -49,7 +50,7 @@ jobs:
 
   publish:
     needs: check-version
-    if: needs.check-version.outputs.should-publish == 'true'
+    if: github.repository == 'actualbudget/actual' && needs.check-version.outputs.should-publish == 'true'
     # must use GitHub hosted runners as NPM will not allow publishing from
     # self-hosted
     runs-on: ubuntu-latest
