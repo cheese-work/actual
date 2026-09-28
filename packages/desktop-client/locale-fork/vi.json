@@ -269,5 +269,13 @@
   "Confirm Unlink": "Xác nhận ngắt liên kết",
   "Are you sure you want to unlink <1>{accountName}</1>?": "Bạn có chắc muốn ngắt liên kết <1>{accountName}</1> không?",
   "Transactions will no longer be synchronized with this account and must be manually entered. You will not be able to edit the bank sync settings for this account and the settings will close.": "Giao dịch sẽ không còn được đồng bộ với tài khoản này và phải được nhập thủ công. Bạn sẽ không thể chỉnh sửa cài đặt đồng bộ ngân hàng cho tài khoản này và cài đặt sẽ đóng lại.",
-  "Transactions will no longer be synchronized with this account and must be manually entered.": "Giao dịch sẽ không còn được đồng bộ với tài khoản này và phải được nhập thủ công."
+  "Transactions will no longer be synchronized with this account and must be manually entered.": "Giao dịch sẽ không còn được đồng bộ với tài khoản này và phải được nhập thủ công.",
+  "Create Local Account": "Tạo tài khoản cục bộ",
+  "Name": "Tên",
+  "Balance": "Số dư",
+  "Create": "Tạo",
+  "Balance must be a number": "Số dư phải là một số",
+  "Once the account is created, you can also <2>import QIF/OFX/QFX files</2> into it.": "Sau khi tạo tài khoản, bạn cũng có thể <2>nhập tệp QIF/OFX/QFX</2> vào tài khoản đó.",
+  "Off-budget accounts (like investments, loans, or your house) are tracked but not part of your spending budget.": "Tài khoản ngoài ngân sách (như đầu tư, khoản vay hoặc nhà cửa) được theo dõi nhưng không thuộc ngân sách chi tiêu của bạn.",
+  "This cannot be changed later. See <2>Accounts Overview</2> for more information.": "Bạn không thể thay đổi điều này sau. Xem <2>Tổng quan tài khoản</2> để biết thêm thông tin."
 }
