@@ -21,8 +21,8 @@ permissions:
 
 jobs:
   cut-release-branch:
-    if: github.repository_owner == 'actualbudget'
-    runs-on: depot-ubuntu-latest
+    if: github.repository == 'actualbudget/actual'
+    runs-on: ubuntu-latest
     environment: release
     env:
       GH_TOKEN: ${{ github.token }}
