@@ -64,7 +64,10 @@ archive or a production credential.
    authorized login and decrypt check without printing a secret, and exits
    nonzero on failure. Also create
    `~/.config/actual-staging/alert.env` mode `0600` containing
-   `ACTUAL_ALERT_TARGET=<approved-target>` for scheduled alerts.
+   `ACTUAL_ALERT_TARGET=<approved-target>` for scheduled alerts. Create
+   `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
+   signs each manifest into private `ROOT/snapshot-signatures/`, outside the
+   writable archive store.
 
 ## Rehearsal sequence
 

@@ -7,6 +7,7 @@ images and never uses production credentials or integrations.
 import argparse
 import fcntl
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -89,6 +90,25 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
+def pending_path(capture):
+    if not capture.isdecimal():
+        raise ValueError('invalid capture identity')
+    return ROOT / f'pending-prod-{capture}.json'
+
+
+def pending_record(capture):
+    path = pending_path(capture)
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError('pending production recovery record is unsafe')
+    return path, read_json(path)
+
+
+def set_pending_state(capture, state):
+    path, record = pending_record(capture)
+    record['state'] = state
+    write_json(path, record)
+
+
 def audit(root, deadline=None):
     result = {}
     if root.is_symlink() or not root.is_dir():
@@ -153,6 +173,48 @@ def alert_configured():
         raise ValueError('scheduled alert destination missing')
 
 
+def snapshot_auth_key():
+    path = ROOT / 'snapshot-auth.key'
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError('snapshot authentication key must be a private regular file')
+    key = path.read_bytes()
+    if len(key) < 32:
+        raise ValueError('snapshot authentication key is too short')
+    return key
+
+
+def manifest_signature(snapshot, manifest):
+    payload = snapshot.encode() + b'\0' + json.dumps(
+        manifest, sort_keys=True, separators=(',', ':'),
+    ).encode()
+    return hmac.new(snapshot_auth_key(), payload, hashlib.sha256).hexdigest()
+
+
+def signature_path(snapshot):
+    if not re.fullmatch(r'actual-consistent-[0-9]+', snapshot):
+        raise ValueError('invalid snapshot name')
+    return ROOT / 'snapshot-signatures' / f'{snapshot}.json'
+
+
+def sign_snapshot(snapshot, manifest):
+    path = signature_path(snapshot)
+    ensure_dir(path.parent)
+    write_json(
+        path,
+        {'snapshot': snapshot, 'signature': manifest_signature(snapshot, manifest)},
+    )
+
+
+def verify_snapshot_signature(snapshot, manifest):
+    path = signature_path(snapshot)
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+        raise ValueError('snapshot signature is unsafe or missing')
+    signature = read_json(path)
+    if signature.get('snapshot') != snapshot or not hmac.compare_digest(
+            signature.get('signature', ''), manifest_signature(snapshot, manifest)):
+        raise ValueError('snapshot manifest signature mismatch')
+
+
 def locked(action):
     ensure_dir(ROOT)
     lock_path = ROOT / '.actual-staging.lock'
@@ -172,34 +234,43 @@ def assert_prod_identity(before=None, deadline=None):
     return current
 
 
-def recover(before=None, deadline=None):
-    pending = ROOT / 'pending-prod.json'
+def recover(before=None, deadline=None, capture=None, complete=False):
+    if before is None and capture is None:
+        for path in sorted(ROOT.glob('pending-prod-*.json')):
+            recover(capture=path.stem.removeprefix('pending-prod-'))
+        return
+    pending = None
     if before is None:
-        if not pending.exists():
+        if not pending_path(capture).exists():
             return
-        before = read_json(pending)
+        pending, before = pending_record(capture)
     deadline = deadline or time.monotonic() + RECOVERY_SECONDS
     current = assert_prod_identity(before, deadline)
     if not current['State']['Running']:
         docker('start', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
     if not assert_prod_identity(before, deadline)['State']['Running']:
         raise RuntimeError('production restart failed')
-    pending.unlink(missing_ok=True)
+    if pending and (complete or before.get('state') == 'stopped'):
+        pending.unlink()
 
 
 def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
         '--on-active=20s', '--timer-property=AccuracySec=1us',
-        sys.executable, str(Path(__file__).resolve()), 'recover',
+        sys.executable, str(Path(__file__).resolve()), 'recover', '--capture', stamp,
         timeout=10,
     )
 
 
-def graceful_stop(before, deadline):
+def graceful_stop(before, deadline, capture=None):
+    if capture:
+        set_pending_state(capture, 'stopping')
     docker('kill', '--signal', 'SIGTERM', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
     while time.monotonic() < deadline:
         if not assert_prod_identity(before, deadline)['State']['Running']:
+            if capture:
+                set_pending_state(capture, 'stopped')
             return
         time.sleep(0.2)
     raise RuntimeError('production did not stop gracefully before capture deadline')
@@ -222,14 +293,17 @@ def snapshot():
     stamp = str(time.time_ns())
     copied = ROOT / 'spool' / stamp
     copied.mkdir(mode=0o700)
-    write_json(ROOT / 'pending-prod.json', {'Id': before['Id'], 'Image': before['Image']})
+    write_json(
+        pending_path(stamp),
+        {'Id': before['Id'], 'Image': before['Image'], 'state': 'armed'},
+    )
     schedule_watchdog(stamp)
     started = time.monotonic()
     capture_deadline = started + CAPTURE_SECONDS
     recovery_deadline = started + INTERRUPTION_SECONDS
     try:
         try:
-            graceful_stop(before, capture_deadline)
+            graceful_stop(before, capture_deadline, stamp)
             files = audit(SOURCE, capture_deadline)
             required = sum(size for size, _ in files.values())
             disk = shutil.disk_usage(ROOT)
@@ -238,7 +312,7 @@ def snapshot():
             bounded_copy(SOURCE, copied / 'data', capture_deadline)
             remove_sqlite_shared_memory(copied / 'data')
         finally:
-            recover(before, recovery_deadline)
+            recover(capture=stamp, deadline=recovery_deadline, complete=True)
         if time.monotonic() > recovery_deadline:
             raise RuntimeError('production deadline exceeded')
         copied_files = audit(copied / 'data')
@@ -259,6 +333,7 @@ def snapshot():
             if audit(partial / 'data') != copied_files:
                 raise RuntimeError('archive checksum mismatch')
             partial.rename(target)
+            sign_snapshot(target.name, read_json(target / 'manifest.json'))
         except BaseException:
             shutil.rmtree(partial, ignore_errors=True)
             raise
@@ -331,6 +406,7 @@ def approved_snapshot(path):
     if BACKUPS.resolve() not in path.parents or not path.name.startswith('actual-consistent-'):
         raise ValueError('snapshot outside approved store')
     manifest = read_json(path / 'manifest.json')
+    verify_snapshot_signature(path.name, manifest)
     if audit(path / 'data') != manifest['files']:
         raise ValueError('archive checksum mismatch')
     count = budget_count(path / 'data')
@@ -898,10 +974,11 @@ def main():
     )
     parser.add_argument('--snapshot', type=Path)
     parser.add_argument('--image')
+    parser.add_argument('--capture')
     args = parser.parse_args()
     try:
         if args.action == 'recover':
-            recover()
+            recover(capture=args.capture)
         elif args.action == 'freshness':
             locked(freshness)
         elif args.action == 'alert-test':

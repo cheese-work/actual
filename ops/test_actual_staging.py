@@ -158,6 +158,7 @@ class CandidateTests(unittest.TestCase):
             staging.schedule_watchdog('fixture')
         self.assertIn('--on-active=20s', run.call_args.args)
         self.assertIn('--timer-property=AccuracySec=1us', run.call_args.args)
+        self.assertEqual(run.call_args.args[-2:], ('--capture', 'fixture'))
 
     def test_staging_lock_does_not_contend_with_existing_tar_lock(self):
         shared_lock = self.root / '.actual-maintenance.lock'
@@ -225,7 +226,7 @@ class CandidateTests(unittest.TestCase):
                 staging.recover(before)
         docker.assert_not_called()
 
-    def test_recover_uses_durable_original_identity(self):
+    def test_recover_uses_capture_specific_durable_identity(self):
         before = {
             'Id': 'original',
             'Image': 'original-image',
@@ -233,15 +234,54 @@ class CandidateTests(unittest.TestCase):
             'State': {'Running': False},
         }
         running = {**before, 'State': {'Running': True}}
-        (self.root / 'pending-prod.json').write_text(json.dumps({'Id': before['Id'], 'Image': before['Image']}))
+        (self.root / 'pending-prod-1.json').write_text(json.dumps({
+            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopped',
+        }))
+        (self.root / 'pending-prod-1.json').chmod(0o600)
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'prod', side_effect=[before, running]), \
                 mock.patch.object(staging, 'docker') as docker:
-            staging.recover()
+            staging.recover(capture='1')
         docker.assert_called_once()
         self.assertEqual(docker.call_args.args, ('start', staging.PROD))
         self.assertLessEqual(docker.call_args.kwargs['timeout'], staging.RECOVERY_SECONDS)
-        self.assertFalse((self.root / 'pending-prod.json').exists())
+        self.assertFalse((self.root / 'pending-prod-1.json').exists())
+
+    def test_old_watchdog_cannot_consume_new_capture_record(self):
+        before = {
+            'Id': 'original',
+            'Image': 'original-image',
+            'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
+            'State': {'Running': True},
+        }
+        (self.root / 'pending-prod-2.json').write_text(json.dumps({
+            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopping',
+        }))
+        (self.root / 'pending-prod-2.json').chmod(0o600)
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'prod', return_value=before), \
+                mock.patch.object(staging, 'docker') as docker:
+            staging.recover(capture='1')
+        docker.assert_not_called()
+        self.assertTrue((self.root / 'pending-prod-2.json').exists())
+
+    def test_running_capture_record_is_not_cleared_by_watchdog(self):
+        before = {
+            'Id': 'original',
+            'Image': 'original-image',
+            'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
+            'State': {'Running': True},
+        }
+        (self.root / 'pending-prod-1.json').write_text(json.dumps({
+            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopping',
+        }))
+        (self.root / 'pending-prod-1.json').chmod(0o600)
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'prod', return_value=before), \
+                mock.patch.object(staging, 'docker') as docker:
+            staging.recover(capture='1')
+        docker.assert_not_called()
+        self.assertTrue((self.root / 'pending-prod-1.json').exists())
 
     def test_tailnet_requires_single_bound_proxy_and_no_funnel(self):
         host = 'staging-fixture.tailnet.ts.net'
@@ -529,7 +569,7 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'recover') as recover:
             with self.assertRaises(subprocess.TimeoutExpired):
                 staging.snapshot()
-        recover.assert_called_once_with(before, mock.ANY)
+        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY, complete=True)
         self.assertFalse(list((self.root / 'spool').rglob('financial-fixture')))
 
     def test_quiesced_snapshot_preserves_wal_multidatabase_tree(self):
@@ -571,6 +611,7 @@ class CandidateTests(unittest.TestCase):
                     mock.patch.object(staging, 'schedule_watchdog'), \
                     mock.patch.object(staging, 'graceful_stop'), \
                     mock.patch.object(staging, 'recover'), \
+                    mock.patch.object(staging, 'snapshot_auth_key', return_value=b'k' * 32), \
                     mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)):
                 snapshot = staging.snapshot()
         finally:
@@ -635,11 +676,11 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'recover') as recover:
             with self.assertRaises(KeyboardInterrupt):
                 staging.snapshot()
-        recover.assert_called_once_with(before, mock.ANY)
+        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY, complete=True)
 
     def test_approved_snapshot_rejects_tampered_multidatabase_archive(self):
         backups = self.root / 'backups'
-        snapshot = backups / 'actual-consistent-fixture'
+        snapshot = backups / 'actual-consistent-1'
         shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
         shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
         manifest = {
@@ -647,10 +688,39 @@ class CandidateTests(unittest.TestCase):
             'budget_count': staging.budget_count(snapshot / 'data'),
         }
         (snapshot / 'manifest.json').write_text(json.dumps(manifest))
-        with sqlite3.connect(snapshot / 'data/user-files/group-fixture.sqlite') as database:
-            database.execute('INSERT INTO messages_binary VALUES (?)', (b'tampered',))
-        with mock.patch.object(staging, 'BACKUPS', backups):
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with sqlite3.connect(snapshot / 'data/user-files/group-fixture.sqlite') as database:
+                database.execute('INSERT INTO messages_binary VALUES (?)', (b'tampered',))
             with self.assertRaisesRegex(ValueError, 'archive checksum mismatch'):
+                staging.approved_snapshot(snapshot)
+
+    def test_approved_snapshot_rejects_rewritten_manifest(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with sqlite3.connect(snapshot / 'data/user-files/group-fixture.sqlite') as database:
+                database.execute('INSERT INTO messages_binary VALUES (?)', (b'tampered',))
+            rewritten = {
+                'files': staging.audit(snapshot / 'data'),
+                'budget_count': staging.budget_count(snapshot / 'data'),
+            }
+            (snapshot / 'manifest.json').write_text(json.dumps(rewritten))
+            with self.assertRaisesRegex(ValueError, 'snapshot manifest signature mismatch'):
                 staging.approved_snapshot(snapshot)
 
 
