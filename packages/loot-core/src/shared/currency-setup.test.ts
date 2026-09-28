@@ -43,8 +43,30 @@ describe('currency setup', () => {
     expect(finalizeCurrencySetup(finalized, 'EUR')).toEqual({});
   });
 
+  it('writes the confirmed currency even when defaultCurrencyCode already exists', () => {
+    const changes = finalizeCurrencySetup({ defaultCurrencyCode: 'USD' }, 'VND');
+
+    expect(changes).toEqual({
+      defaultCurrencyCode: 'VND',
+      currencySetupFinalized: 'true',
+    });
+  });
+
+  it('treats an empty defaultCurrencyCode as unset, not finalized', () => {
+    const changes = finalizeCurrencySetup(
+      { defaultCurrencyCode: '' },
+      'VND',
+    );
+    const completed = { defaultCurrencyCode: '', ...changes };
+
+    expect(changes.defaultCurrencyCode).toBe('VND');
+    expect(getCurrencySetup(completed)).toEqual({
+      defaultCurrencyCode: 'VND',
+      finalized: true,
+    });
+  });
+
   it.each<[SyncedPrefs]>([
-    [{ defaultCurrencyCode: 'JPY' }],
     [{ currencySetupFinalized: 'true' }],
     [{ defaultCurrencyCode: 'JPY', currencySetupFinalized: 'true' }],
   ])(
