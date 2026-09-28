@@ -186,13 +186,43 @@ export function TransactionList({
     transactionsLatest.current = transactions;
   }, [transactions]);
 
+  // The server rejects writes that break an invariant (e.g. a transfer
+  // between accounts in different currencies) with an actionable APIError.
+  // Show it and refetch to drop the optimistic update.
+  const onSaveError = useCallback(
+    (error: unknown) => {
+      if (
+        typeof error !== 'object' ||
+        error === null ||
+        !('type' in error) ||
+        error.type !== 'APIError' ||
+        !('message' in error) ||
+        typeof error.message !== 'string'
+      ) {
+        throw error;
+      }
+      dispatch(
+        addNotification({
+          notification: { type: 'error', message: error.message },
+        }),
+      );
+      onRefetch();
+    },
+    [dispatch, onRefetch],
+  );
+
   const onAdd = useCallback(
     async (newTransactions: TransactionEntity[]) => {
       newTransactions = realizeTempTransactions(newTransactions);
-      await saveDiff({ added: newTransactions }, isLearnCategoriesEnabled);
+      try {
+        await saveDiff({ added: newTransactions }, isLearnCategoriesEnabled);
+      } catch (error) {
+        onSaveError(error);
+        return;
+      }
       onRefetch();
     },
-    [isLearnCategoriesEnabled, onRefetch],
+    [isLearnCategoriesEnabled, onRefetch, onSaveError],
   );
 
   const onSave = useCallback(
@@ -208,7 +238,12 @@ export function TransactionList({
           const dateChanged = !!changes.diff.updated[0].date;
           if (dateChanged) {
             changes.diff.updated[0].sort_order = Date.now();
-            await saveDiff(changes.diff, isLearnCategoriesEnabled);
+            try {
+              await saveDiff(changes.diff, isLearnCategoriesEnabled);
+            } catch (error) {
+              onSaveError(error);
+              return;
+            }
             onRefetch();
           } else {
             onChange(changes.newTransaction, changes.data);
@@ -217,14 +252,14 @@ export function TransactionList({
               changes,
               onChange,
               isLearnCategoriesEnabled,
-            );
+            ).catch(onSaveError);
           }
         }
       };
 
       await saveTransaction();
     },
-    [isLearnCategoriesEnabled, onChange, onRefetch],
+    [isLearnCategoriesEnabled, onChange, onRefetch, onSaveError],
   );
 
   const onAddSplit = useCallback(

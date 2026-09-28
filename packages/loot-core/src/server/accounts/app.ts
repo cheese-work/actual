@@ -40,6 +40,10 @@ import type {
   TransactionEntity,
 } from '#types/models';
 
+import {
+  assertAccountCurrencyChange,
+  assertTransactionCurrencies,
+} from './currency-guard';
 import * as link from './link';
 import { getStartingBalancePayee } from './payees';
 import * as bankSync from './sync';
@@ -105,6 +109,7 @@ async function updateAccount({
       'name' | 'currency' | 'last_reconciled' | 'account_group_id'
     >
   >) {
+  await assertAccountCurrencyChange(id, { currency });
   await db.update('accounts', {
     id,
     ...(name !== undefined && { name }),
@@ -572,6 +577,7 @@ async function createAccount({
   closed?: boolean | undefined;
   currency?: string | null | undefined;
 }) {
+  await assertAccountCurrencyChange(null, { currency, offbudget: offBudget });
   const id: AccountEntity['id'] = await db.insertAccount({
     name,
     offbudget: offBudget ? 1 : 0,
@@ -683,22 +689,32 @@ async function closeAccount({
         throw APIError('transfer account can not be the account being closed');
       }
 
-      await db.update('accounts', { id, closed: 1 });
-
       // If there is a balance we need to transfer it to the specified
       // account (and possibly categorize it)
-      if (balance !== 0 && transferAccountId) {
-        const transferPayee = await db.first<Pick<db.DbPayee, 'id'>>(
-          'SELECT id FROM payees WHERE transfer_acct = ?',
-          [transferAccountId],
+      const transferPayee =
+        balance !== 0 && transferAccountId
+          ? await db.first<Pick<db.DbPayee, 'id'>>(
+              'SELECT id FROM payees WHERE transfer_acct = ?',
+              [transferAccountId],
+            )
+          : null;
+
+      if (balance !== 0 && transferAccountId && !transferPayee) {
+        throw new Error(
+          `Transfer payee with account ID ${transferAccountId} not found.`,
         );
+      }
 
-        if (!transferPayee) {
-          throw new Error(
-            `Transfer payee with account ID ${transferAccountId} not found.`,
-          );
-        }
+      // Reject a cross-currency balance transfer before closing anything
+      if (transferPayee) {
+        await assertTransactionCurrencies({
+          added: [{ account: id, payee: transferPayee.id }],
+        });
+      }
 
+      await db.update('accounts', { id, closed: 1 });
+
+      if (transferPayee) {
         await mainApp.handlers['transaction-add']({
           id: uuidv4(),
           payee: transferPayee.id,
