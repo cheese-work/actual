@@ -168,6 +168,14 @@ class CandidateTests(unittest.TestCase):
         self.assertIn('--property=Restart=on-failure', run.call_args.args)
         self.assertEqual(run.call_args.args[-2:], ('--capture', 'fixture'))
 
+    def test_recover_cli_serializes_with_snapshot_lock(self):
+        with mock.patch.object(staging.sys, 'argv', ['actual-staging.py', 'recover', '--capture', '1']), \
+                mock.patch.object(staging, 'locked', side_effect=lambda action: action()) as locked, \
+                mock.patch.object(staging, 'recover') as recover:
+            staging.main()
+        locked.assert_called_once()
+        recover.assert_called_once_with(capture='1')
+
     def test_staging_lock_does_not_contend_with_existing_tar_lock(self):
         shared_lock = self.root / '.actual-maintenance.lock'
         with shared_lock.open('a') as tar_lock:

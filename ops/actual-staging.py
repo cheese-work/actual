@@ -1032,7 +1032,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == 'recover':
-            recover(capture=args.capture)
+            locked(lambda: recover(capture=args.capture))
         elif args.action == 'freshness':
             locked(freshness)
         elif args.action == 'alert-test':
