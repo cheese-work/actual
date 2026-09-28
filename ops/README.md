@@ -46,7 +46,7 @@ archive or a production credential.
    `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
    name. Add `INPUT -> ACTUAL_STAGING_INPUT` and
    position-one `FORWARD -> ACTUAL_STAGING_FORWARD`, `INPUT ->
-   ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
+ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    for that bridge. The `FORWARD` hook must precede `ts-forward`; the helper
    fails closed if it is missing or displaced. Earlier
    rules may only be unrelated-interface traffic or scoped
@@ -62,7 +62,7 @@ archive or a production credential.
    then write private `ROOT/tailnet-authorized.json`:
 
    ```json
-   {"host":"staging-hostname.tailnet.ts.net","funnel":false}
+   { "host": "staging-hostname.tailnet.ts.net", "funnel": false }
    ```
 
 3. Install private executable `ROOT/verify-encrypted-budget`. It receives the
