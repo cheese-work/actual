@@ -35,7 +35,6 @@ const FORMULA_FORMAT_SYNCED_PREFS = new Set<keyof SyncedPrefs>([
   'numberFormat',
   'hideFraction',
   'defaultCurrencyCode',
-  'displayCurrencyCode',
   'currencySymbolPosition',
   'currencySpaceBetweenAmountAndSymbol',
 ]);
@@ -85,16 +84,13 @@ async function getSyncedPrefs(): Promise<SyncedPrefs> {
 }
 
 async function finalizeCurrencySetupPreferences({
-  budgetCurrencyCode,
-  displayCurrencyCode,
+  defaultCurrencyCode,
 }: {
-  budgetCurrencyCode: string;
-  displayCurrencyCode: string;
+  defaultCurrencyCode: string;
 }) {
   const changes = finalizeCurrencySetup(
     await getSyncedPrefs(),
-    budgetCurrencyCode,
-    displayCurrencyCode,
+    defaultCurrencyCode,
   );
 
   await batchMessages(async () => {

@@ -1,21 +1,17 @@
 import type { SyncedPrefs } from '#types/prefs';
 
 export type CurrencySetup = {
-  budgetCurrencyCode: string;
-  displayCurrencyCode: string;
+  defaultCurrencyCode: string;
   finalized: boolean;
 };
 
 export function getCurrencySetup(prefs: SyncedPrefs): CurrencySetup {
-  const legacyCurrencyCode = prefs.defaultCurrencyCode ?? '';
   const finalized =
     prefs.currencySetupFinalized === 'true' &&
-    prefs.budgetCurrencyCode != null &&
-    prefs.displayCurrencyCode != null;
+    prefs.defaultCurrencyCode != null;
 
   return {
-    budgetCurrencyCode: prefs.budgetCurrencyCode ?? legacyCurrencyCode,
-    displayCurrencyCode: prefs.displayCurrencyCode ?? legacyCurrencyCode,
+    defaultCurrencyCode: prefs.defaultCurrencyCode ?? '',
     finalized,
   };
 }
@@ -24,21 +20,19 @@ export function getEffectiveAccountCurrency(
   accountCurrency: string | null | undefined,
   prefs: SyncedPrefs,
 ): string {
-  return accountCurrency ?? getCurrencySetup(prefs).budgetCurrencyCode;
+  return accountCurrency ?? getCurrencySetup(prefs).defaultCurrencyCode;
 }
 
 export function finalizeCurrencySetup(
   prefs: SyncedPrefs,
-  budgetCurrencyCode: string,
-  displayCurrencyCode: string,
+  defaultCurrencyCode: string,
 ): Partial<SyncedPrefs> {
   if (getCurrencySetup(prefs).finalized) {
     return {};
   }
 
   return {
-    ...(prefs.budgetCurrencyCode == null && { budgetCurrencyCode }),
-    ...(prefs.displayCurrencyCode == null && { displayCurrencyCode }),
+    ...(prefs.defaultCurrencyCode == null && { defaultCurrencyCode }),
     ...(prefs.currencySetupFinalized !== 'true' && {
       currencySetupFinalized: 'true',
     }),

@@ -20,7 +20,7 @@ type AcceptanceApi = {
   >;
   getAccounts(): Promise<Array<{ id: string; name: string }>>;
   getPreferences(): Promise<{
-    budgetCurrencyCode?: string;
+    defaultCurrencyCode?: string;
     currencySetupFinalized?: string;
   }>;
   downloadBudget(syncId: string): Promise<unknown>;
@@ -137,7 +137,7 @@ async function expectUnsetCurrencySetup(page: Page): Promise<void> {
   });
 
   expect(state.preferences.currencySetupFinalized).toBeUndefined();
-  expect(state.preferences.budgetCurrencyCode).toBeUndefined();
+  expect(state.preferences.defaultCurrencyCode).toBeUndefined();
   expect(state.accountCurrencies.length).toBeGreaterThan(0);
   expect(state.accountCurrencies.every(currency => currency === null)).toBe(
     true,

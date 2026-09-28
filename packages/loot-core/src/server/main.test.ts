@@ -193,24 +193,21 @@ describe('Accounts', () => {
 });
 
 describe('Currency setup', () => {
-  test('finalizes once without a retry changing the selected currencies', async () => {
+  test('finalizes once without a retry changing the selected currency', async () => {
     await runHandler(handlers['currency-setup-finalize'], {
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'VND',
+      defaultCurrencyCode: 'USD',
     });
     await runHandler(handlers['currency-setup-finalize'], {
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'EUR',
+      defaultCurrencyCode: 'EUR',
     });
 
     expect(
       await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
-        "SELECT id, value FROM preferences WHERE id IN ('budgetCurrencyCode', 'currencySetupFinalized', 'displayCurrencyCode') ORDER BY id",
+        "SELECT id, value FROM preferences WHERE id IN ('currencySetupFinalized', 'defaultCurrencyCode') ORDER BY id",
       ),
     ).toEqual([
-      { id: 'budgetCurrencyCode', value: 'USD' },
       { id: 'currencySetupFinalized', value: 'true' },
-      { id: 'displayCurrencyCode', value: 'VND' },
+      { id: 'defaultCurrencyCode', value: 'USD' },
     ]);
   });
 
@@ -223,18 +220,16 @@ describe('Currency setup', () => {
     });
 
     await runHandler(handlers['currency-setup-finalize'], {
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'VND',
+      defaultCurrencyCode: 'USD',
     });
 
     expect(
       await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
-        "SELECT id, value FROM preferences WHERE id IN ('budgetCurrencyCode', 'currencySetupFinalized', 'displayCurrencyCode') ORDER BY id",
+        "SELECT id, value FROM preferences WHERE id IN ('currencySetupFinalized', 'defaultCurrencyCode') ORDER BY id",
       ),
     ).toEqual([
-      { id: 'budgetCurrencyCode', value: 'USD' },
       { id: 'currencySetupFinalized', value: 'true' },
-      { id: 'displayCurrencyCode', value: 'VND' },
+      { id: 'defaultCurrencyCode', value: 'USD' },
     ]);
   });
 });

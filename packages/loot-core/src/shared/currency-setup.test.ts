@@ -7,62 +7,54 @@ import {
 } from './currency-setup';
 
 describe('currency setup', () => {
-  it('keeps denomination and display currency independent', () => {
+  it('reads the finalized main currency', () => {
     const prefs = {
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'VND',
+      defaultCurrencyCode: 'USD',
       currencySetupFinalized: 'true',
     };
 
     expect(getCurrencySetup(prefs)).toEqual({
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'VND',
+      defaultCurrencyCode: 'USD',
       finalized: true,
     });
   });
 
   it('uses the legacy currency before finalization', () => {
     expect(getCurrencySetup({ defaultCurrencyCode: 'USD' })).toEqual({
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'USD',
+      defaultCurrencyCode: 'USD',
       finalized: false,
     });
   });
 
-  it('inherits the budget denomination only for unset accounts', () => {
-    const prefs = { budgetCurrencyCode: 'USD' };
+  it('inherits the main currency only for unset accounts', () => {
+    const prefs = { defaultCurrencyCode: 'USD' };
 
     expect(getEffectiveAccountCurrency(null, prefs)).toBe('USD');
     expect(getEffectiveAccountCurrency('VND', prefs)).toBe('VND');
   });
 
-  it('finalizes once without changing a later display selection', () => {
-    const finalized = finalizeCurrencySetup({}, 'USD', 'VND');
+  it('finalizes once without changing a later selection', () => {
+    const finalized = finalizeCurrencySetup({}, 'USD');
 
     expect(finalized).toEqual({
-      budgetCurrencyCode: 'USD',
-      displayCurrencyCode: 'VND',
+      defaultCurrencyCode: 'USD',
       currencySetupFinalized: 'true',
     });
-    expect(finalizeCurrencySetup(finalized, 'USD', 'EUR')).toEqual({});
+    expect(finalizeCurrencySetup(finalized, 'EUR')).toEqual({});
   });
 
   it.each<[SyncedPrefs]>([
-    [{ budgetCurrencyCode: 'JPY' }],
-    [{ displayCurrencyCode: 'EUR' }],
+    [{ defaultCurrencyCode: 'JPY' }],
     [{ currencySetupFinalized: 'true' }],
-    [{ budgetCurrencyCode: 'JPY', displayCurrencyCode: 'EUR' }],
-    [{ budgetCurrencyCode: 'JPY', currencySetupFinalized: 'true' }],
-    [{ displayCurrencyCode: 'EUR', currencySetupFinalized: 'true' }],
+    [{ defaultCurrencyCode: 'JPY', currencySetupFinalized: 'true' }],
   ])(
-    'repairs partial setup without replacing persisted selections: %o',
+    'repairs partial setup without replacing a persisted selection: %o',
     prefs => {
-      const changes = finalizeCurrencySetup(prefs, 'USD', 'VND');
+      const changes = finalizeCurrencySetup(prefs, 'USD');
       const completed = { ...prefs, ...changes };
 
       expect(getCurrencySetup(completed)).toEqual({
-        budgetCurrencyCode: prefs.budgetCurrencyCode ?? 'USD',
-        displayCurrencyCode: prefs.displayCurrencyCode ?? 'VND',
+        defaultCurrencyCode: prefs.defaultCurrencyCode ?? 'USD',
         finalized: true,
       });
     },

@@ -29,8 +29,6 @@ export type SyncedPrefs = Partial<
     | 'currencySymbolPosition'
     | 'currencySpaceBetweenAmountAndSymbol'
     | 'defaultCurrencyCode'
-    | 'budgetCurrencyCode'
-    | 'displayCurrencyCode'
     | 'currencySetupFinalized'
     | `show-account-${string}-net-worth-chart`
     | `side-nav.show-balance-history-${string}`
