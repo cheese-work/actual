@@ -52,6 +52,7 @@
     "build": "vite build && tsgo --emitDeclarationOnly && vite build --config vite.browser.config.mts",
     "test": "vitest --run",
     "e2e": "playwright test",
+    "e2e:upstream-server": "yarn build && playwright test --config=playwright.upstream-server.config.ts",
     "typecheck": "tsgo -b && tsc-strict"
   },
   "dependencies": {
