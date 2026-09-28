@@ -236,5 +236,8 @@
   "Synced": "Đã đồng bộ",
   "Sync error": "Lỗi đồng bộ",
   "Syncing": "Đang đồng bộ",
-  "Not linked": "Chưa liên kết"
+  "Not linked": "Chưa liên kết",
+  "1 account needs attention": "1 tài khoản cần xử lý",
+  "{{count}} accounts need attention_one": "{{count}} tài khoản cần xử lý",
+  "{{count}} accounts need attention_other": "{{count}} tài khoản cần xử lý"
 }
