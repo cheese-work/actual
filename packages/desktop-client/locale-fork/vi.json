@@ -229,6 +229,8 @@
   "Are you sure you want to delete the group \"{{name}}\"? Any accounts in it will be kept but left ungrouped.": "Bạn có chắc muốn xóa nhóm \"{{name}}\" không? Các tài khoản trong nhóm sẽ được giữ lại nhưng không còn thuộc nhóm nào.",
   "Collapse {{group}}": "Thu gọn {{group}}",
   "Expand {{group}}": "Mở rộng {{group}}",
+  "Collapse {{section}}": "Thu gọn {{section}}",
+  "Expand {{section}}": "Mở rộng {{section}}",
   "Group name": "Tên nhóm",
   "Accounts": "Tài khoản",
   "Collapse all groups": "Thu gọn tất cả các nhóm",
