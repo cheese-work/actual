@@ -176,5 +176,19 @@
   "Uncategorized": "Chưa phân loại",
   "All Accounts": "Tất cả tài khoản",
   "Selected transactions": "Giao dịch đã chọn",
-  "No transactions": "Không có giao dịch"
+  "No transactions": "Không có giao dịch",
+  "No open accounts could be found. Did you close the account? If so, unlink the account.": "Không tìm thấy tài khoản nào đang hoạt động. Bạn đã đóng tài khoản này chưa? Nếu đã đóng, hãy ngắt liên kết tài khoản.",
+  "Your password or something else has changed with your bank and you need to login again.": "Mật khẩu hoặc thông tin khác tại ngân hàng của bạn đã thay đổi; bạn cần đăng nhập lại.",
+  "Item is no longer authorized. You need to login again.": "Kết nối này không còn được cấp quyền. Bạn cần đăng nhập lại.",
+  "Rate limit exceeded for this item. Please try again later.": "Kết nối này đã vượt quá giới hạn yêu cầu. Vui lòng thử lại sau.",
+  "The request timed out. Please try again later.": "Yêu cầu đã hết thời gian chờ. Vui lòng thử lại sau.",
+  "Your SimpleFIN Access Token is no longer valid. Please reset and generate a new token.": "Mã truy cập SimpleFIN của bạn không còn hợp lệ. Vui lòng đặt lại và tạo mã mới.",
+  "The account needs your attention at <2>SimpleFIN</2>.": "Tài khoản này cần bạn xử lý tại <2>SimpleFIN</2>.",
+  "This account was not found in SimpleFIN. Try unlinking and relinking the account.": "Không tìm thấy tài khoản này trong SimpleFIN. Hãy thử ngắt liên kết rồi liên kết lại tài khoản.",
+  "An internal error occurred. Try to log in again, or get <2>in touch</2> for support.": "Đã xảy ra lỗi nội bộ. Hãy thử đăng nhập lại hoặc <2>liên hệ</2> để được hỗ trợ.",
+  "This account is experiencing connection problems. Let's fix it.": "Tài khoản này đang gặp sự cố kết nối. Hãy khắc phục.",
+  "The server returned the following error:": "Máy chủ trả về lỗi sau:",
+  "Unlink": "Ngắt liên kết",
+  "Reauthorize": "Cấp quyền lại",
+  "Unlink account": "Ngắt liên kết tài khoản"
 }
