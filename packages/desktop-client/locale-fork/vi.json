@@ -226,6 +226,8 @@
   "Find account": "Tìm tài khoản",
   "Close search": "Đóng tìm kiếm",
   "Rename group": "Đổi tên nhóm",
+  "Move group up": "Di chuyển nhóm lên",
+  "Move group down": "Di chuyển nhóm xuống",
   "Delete group": "Xóa nhóm",
   "Are you sure you want to delete the group \"{{name}}\"? Any accounts in it will be kept but left ungrouped.": "Bạn có chắc muốn xóa nhóm \"{{name}}\" không? Các tài khoản trong nhóm sẽ được giữ lại nhưng không còn thuộc nhóm nào.",
   "Collapse {{group}}": "Thu gọn {{group}}",
