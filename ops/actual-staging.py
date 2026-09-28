@@ -19,6 +19,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -33,10 +34,21 @@ MASTER = 'ghcr.io/cheese-work/actual-server:master'
 DIGEST = re.compile(r'^ghcr.io/cheese-work/actual-server@sha256:[0-9a-f]{64}$')
 ACTIVE_PORT = 15008
 CANDIDATE_PORT = 15009
+STAGING_SERVE_PORT = 15018
+PRODUCTION_SERVE_PROXY = 'http://127.0.0.1:8765'
 CAPTURE_SECONDS = 20
 RECOVERY_SECONDS = 10
 INTERRUPTION_SECONDS = CAPTURE_SECONDS + RECOVERY_SECONDS
 ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
+ALERT_ISSUE = 'CHE-828'
+ALERT_ASSIGNEE = '[@c00-hermes-devops](mention://agent/b2b52f93-32e6-4caf-80ad-1b48cf60b821)'
+ALERT_MESSAGES = {
+    'alert delivery test',
+    'production remains down after SIGTERM',
+    'production restart failed',
+    'snapshot refresh stale over 26 hours',
+    'staging action failed; prior state preserved',
+}
 MANIFEST_BYTES = 8 * 1024**2
 COPY_BLOCK_BYTES = 1024**2
 
@@ -171,19 +183,27 @@ def budget_count(root):
 
 def alert(message):
     target = os.environ.get('ACTUAL_ALERT_TARGET')
-    if not target:
-        raise RuntimeError('alert destination missing')
-    run(
-        'env', 'HERMES_HOME=/home/congvc/.hermes', 'hermes', 'send', '--to', target,
-        f'CHE-828 staging: {message}', timeout=20,
-    )
+    if target != ALERT_ISSUE:
+        raise RuntimeError('alert destination must be CHE-828')
+    if message not in ALERT_MESSAGES:
+        raise ValueError('unsupported staging alert message')
+    with tempfile.TemporaryDirectory(prefix='actual-staging-alert-', dir=Path.cwd()) as directory:
+        content = Path(directory) / 'comment.md'
+        content.write_text(f'CHE-828 staging alert — {message}\n\n{ALERT_ASSIGNEE}\n', encoding='utf-8')
+        content.chmod(0o600)
+        run(
+            'multica', 'issue', 'comment', 'add', target,
+            '--content-file', str(content), '--output', 'table', timeout=20,
+        )
 
 
 def alert_configured():
     if ALERT_ENV.is_symlink() or not ALERT_ENV.is_file() or ALERT_ENV.stat().st_mode & 0o077:
         raise ValueError('scheduled alert configuration must be a private regular file')
-    if not any(line.startswith('ACTUAL_ALERT_TARGET=') for line in ALERT_ENV.read_text().splitlines()):
-        raise ValueError('scheduled alert destination missing')
+    targets = [line.partition('=')[2] for line in ALERT_ENV.read_text(encoding='utf-8').splitlines()
+               if line.startswith('ACTUAL_ALERT_TARGET=')]
+    if targets != [ALERT_ISSUE]:
+        raise ValueError('scheduled alert destination must be CHE-828')
 
 
 def snapshot_auth_key():
@@ -968,15 +988,26 @@ def assert_tailnet_authorization():
         serve = json.loads(run('tailscale', 'serve', 'status', '--json', timeout=10))
         funnel = json.loads(run('tailscale', 'funnel', 'status', '--json', timeout=10))
     except (json.JSONDecodeError, TypeError) as error:
-        raise ValueError('unsupported Tailscale Serve status') from error
+        raise ValueError('unsupported Tailscale Serve or Funnel status') from error
+    if not isinstance(serve, dict) or not isinstance(funnel, dict):
+        raise ValueError('unsupported Tailscale Serve or Funnel status')
+    serve_web = serve.get('Web')
+    if not isinstance(serve_web, dict):
+        raise ValueError('unsupported Tailscale Serve status')
     expected = {'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{ACTIVE_PORT}'}}}
-    if not isinstance(serve.get('Web'), dict) or serve['Web'].get(f'{host}:443') != expected:
+    if serve_web.get(f'{host}:{STAGING_SERVE_PORT}') != expected:
         raise ValueError('tailnet Serve endpoint does not match approved staging origin')
+    original = {'Handlers': {'/': {'Proxy': PRODUCTION_SERVE_PROXY}}}
+    if serve_web.get(f'{host}:443') != original:
+        raise ValueError('original :443 Serve route changed')
     for status in (serve, funnel):
-        allow_funnel = status.get('AllowFunnel', {})
+        allow_funnel = status.get('AllowFunnel')
         if not isinstance(allow_funnel, dict) or any(value is not False for value in allow_funnel.values()):
             raise ValueError('Funnel must remain disabled for staging')
-    if funnel.get('Web', {}) and funnel.get('Web') != serve.get('Web'):
+    funnel_web = funnel.get('Web')
+    if not isinstance(funnel_web, dict):
+        raise ValueError('unsupported Tailscale Funnel status')
+    if funnel_web and funnel_web != serve_web:
         raise ValueError('Funnel must remain disabled for staging')
 
 
@@ -1243,7 +1274,7 @@ def main():
                 print('STALE STATE WRITE FAILED', file=sys.stderr)
         if args.action not in ('recover', 'freshness', 'alert-test'):
             try:
-                alert(f'{args.action} failed; prior staging preserved')
+                alert('staging action failed; prior state preserved')
             except Exception:
                 print('ALERT DELIVERY FAILED', file=sys.stderr)
         raise

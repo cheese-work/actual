@@ -23,7 +23,7 @@ class CandidateTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.alert_env = self.root / 'alert.env'
-        self.alert_env.write_text('ACTUAL_ALERT_TARGET=fixture\n')
+        self.alert_env.write_text('ACTUAL_ALERT_TARGET=CHE-828\n')
         self.alert_env.chmod(0o600)
         self.alert_env_patch = mock.patch.object(staging, 'ALERT_ENV', self.alert_env)
         self.alert_env_patch.start()
@@ -342,17 +342,151 @@ class CandidateTests(unittest.TestCase):
         docker.assert_called_once_with('start', staging.PROD, timeout=mock.ANY)
         self.assertFalse((self.root / 'pending-prod-1.json').exists())
 
-    def test_tailnet_requires_single_bound_proxy_and_no_funnel(self):
+    def test_tailnet_accepts_distinct_staging_port_and_preserves_original_route(self):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         serve = json.dumps({
-            'Web': {f'{host}:443': {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:15008'}}}},
-            'AllowFunnel': {f'{host}:443': True},
+            'Web': {
+                f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                f'{host}:{staging.STAGING_SERVE_PORT}': {
+                    'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                },
+            },
+            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
         })
+        funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})
         with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.object(staging, 'run', return_value=serve):
+                mock.patch.object(staging, 'run', side_effect=[serve, funnel]) as run:
+            staging.assert_tailnet_authorization()
+        self.assertEqual(run.call_args_list, [
+            mock.call('tailscale', 'serve', 'status', '--json', timeout=10),
+            mock.call('tailscale', 'funnel', 'status', '--json', timeout=10),
+        ])
+
+    def test_tailnet_rejects_wrong_port_or_origin(self):
+        host = 'staging-fixture.tailnet.ts.net'
+        (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
+        original = {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}}
+        valid_funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})
+        for endpoint, proxy in (
+            (f'{host}:{staging.STAGING_SERVE_PORT + 1}', f'http://127.0.0.1:{staging.ACTIVE_PORT}'),
+            (f'{host}:{staging.STAGING_SERVE_PORT}', 'http://127.0.0.1:15009'),
+        ):
+            serve = json.dumps({
+                'Web': {
+                    f'{host}:443': original,
+                    endpoint: {'Handlers': {'/': {'Proxy': proxy}}},
+                },
+                'AllowFunnel': {f'{host}:443': False, endpoint: False},
+            })
+            with self.subTest(endpoint=endpoint, proxy=proxy), \
+                    mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.object(staging, 'run', side_effect=[serve, valid_funnel]):
+                with self.assertRaises(ValueError):
+                    staging.assert_tailnet_authorization()
+
+    def test_tailnet_rejects_funnel_enabled_and_changed_original_route(self):
+        host = 'staging-fixture.tailnet.ts.net'
+        (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
+        serve_data = {
+            'Web': {
+                f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                f'{host}:{staging.STAGING_SERVE_PORT}': {
+                    'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                },
+            },
+            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
+        }
+        funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': True}})
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'run', side_effect=[json.dumps(serve_data), funnel]):
             with self.assertRaisesRegex(ValueError, 'Funnel'):
                 staging.assert_tailnet_authorization()
+
+        serve_data['Web'][f'{host}:443'] = {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:15008'}}}
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'run', side_effect=[json.dumps(serve_data),
+                    json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})]):
+            with self.assertRaisesRegex(ValueError, 'original :443'):
+                staging.assert_tailnet_authorization()
+
+    def test_tailnet_status_command_failures_fail_closed(self):
+        host = 'staging-fixture.tailnet.ts.net'
+        (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
+        serve = json.dumps({
+            'Web': {
+                f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                f'{host}:{staging.STAGING_SERVE_PORT}': {
+                    'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                },
+            },
+            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
+        })
+        funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})
+        for failed_command in ('serve', 'funnel'):
+            responses = [serve, funnel]
+            responses[0 if failed_command == 'serve' else 1] = subprocess.CalledProcessError(
+                1, ['tailscale', failed_command, 'status', '--json'],
+            )
+            with self.subTest(command=failed_command), \
+                    mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.object(staging, 'run', side_effect=responses):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    staging.assert_tailnet_authorization()
+
+    def test_alert_uses_private_utf8_comment_file_and_fixed_issue_target(self):
+        captured = {}
+
+        def stub_run(*command, timeout):
+            captured['command'] = command
+            captured['timeout'] = timeout
+            content = Path(command[command.index('--content-file') + 1])
+            captured['path'] = content
+            captured['body'] = content.read_bytes().decode('utf-8')
+            captured['mode'] = content.stat().st_mode & 0o777
+            captured['directory_mode'] = content.parent.stat().st_mode & 0o777
+            return ''
+
+        with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+                mock.patch.object(staging, 'run', side_effect=stub_run):
+            staging.alert('alert delivery test')
+
+        self.assertEqual(captured['command'][:5], (
+            'multica', 'issue', 'comment', 'add', 'CHE-828',
+        ))
+        self.assertEqual(captured['command'][5:8], ('--content-file', str(captured['path']), '--output'))
+        self.assertEqual(captured['command'][8], 'table')
+        self.assertEqual(captured['timeout'], 20)
+        self.assertEqual(captured['mode'], 0o600)
+        self.assertEqual(captured['directory_mode'], 0o700)
+        self.assertIn('CHE-828 staging alert — alert delivery test', captured['body'])
+        self.assertIn(staging.ALERT_ASSIGNEE, captured['body'])
+        self.assertFalse(captured['path'].exists())
+
+    def test_alert_rejects_unapproved_target_or_untrusted_message(self):
+        with mock.patch.object(staging, 'run') as run:
+            with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-829'}):
+                with self.assertRaisesRegex(RuntimeError, 'CHE-828'):
+                    staging.alert('alert delivery test')
+            with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}):
+                with self.assertRaisesRegex(ValueError, 'unsupported'):
+                    staging.alert('account balance: $100')
+        run.assert_not_called()
+
+    def test_alert_cli_failure_propagates_and_cleans_comment_file(self):
+        captured = {}
+
+        def fail_run(*command, timeout):
+            content = Path(command[command.index('--content-file') + 1])
+            captured['path'] = content
+            self.assertTrue(content.is_file())
+            raise subprocess.CalledProcessError(1, command)
+
+        with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+                mock.patch.object(staging, 'run', side_effect=fail_run):
+            with self.assertRaises(subprocess.CalledProcessError):
+                staging.alert('alert delivery test')
+        self.assertFalse(captured['path'].exists())
 
     def test_sync_image_uses_active_snapshot_without_snapshotting_production(self):
         image = f'{staging.IMAGE}{"b" * 64}'

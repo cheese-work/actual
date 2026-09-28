@@ -57,9 +57,10 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    connection-state predicate. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
-2. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
-   apply a tailnet ACL limited to authorized users, verify Funnel is disabled,
-   then write private `ROOT/tailnet-authorized.json`:
+2. Keep the existing Tailscale Serve `:443` route unchanged. Configure a
+   distinct private Serve port `:15018` to the staging origin at
+   `127.0.0.1:15008`, apply a tailnet ACL limited to authorized users, verify
+   Funnel is disabled, then write private `ROOT/tailnet-authorized.json`:
 
    ```json
    { "host": "staging-hostname.tailnet.ts.net", "funnel": false }
@@ -70,7 +71,9 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    authorized login and decrypt check without printing a secret, and exits
    nonzero on failure. Also create
    `~/.config/actual-staging/alert.env` mode `0600` containing
-   `ACTUAL_ALERT_TARGET=<approved-target>` for scheduled alerts. Create
+   `ACTUAL_ALERT_TARGET=CHE-828` for scheduled Multica issue-comment alerts.
+   Alerts use a private UTF-8 temporary comment file and contain only fixed,
+   non-financial status messages. Create
    `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
    signs each manifest into private `ROOT/snapshot-signatures/`, outside the
    writable archive store. This boundary excludes backup-store writers only;
@@ -84,7 +87,7 @@ if arming fails, snapshot capture does not start. Preserve command output,
 container IDs, image digests, alert receipt, and cleanup evidence.
 
 1. `python3 ops/actual-staging.py install-units`
-2. `ACTUAL_ALERT_TARGET=<approved-target> python3 ops/actual-staging.py alert-test`
+2. `ACTUAL_ALERT_TARGET=CHE-828 python3 ops/actual-staging.py alert-test`
 3. `python3 ops/actual-staging.py refresh`
 4. Confirm the authorized encrypted-budget verifier, staging version, source
    count, tailnet-only access, prior-generation rollback, and production
