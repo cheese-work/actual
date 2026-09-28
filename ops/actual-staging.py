@@ -325,6 +325,7 @@ def bounded_copy(source, destination, deadline):
 
 def snapshot():
     snapshot_auth_key()
+    alert_configured()
     before = assert_prod_identity()
     ensure_dir(ROOT / 'spool')
     ensure_snapshot_store()
@@ -721,7 +722,7 @@ def restore(snapshot_path, image):
     if candidate_data.exists() or manifest_path.exists():
         raise RuntimeError('candidate name collision')
     try:
-        shutil.copytree(path / 'data', candidate_data, symlinks=False)
+        shutil.copytree(path / 'data', candidate_data, symlinks=True)
         shutil.copy2(path / 'manifest.json', manifest_path)
         remove_sqlite_shared_memory(candidate_data)
         manifest, expected = approved_snapshot(path, candidate_data, manifest_path)

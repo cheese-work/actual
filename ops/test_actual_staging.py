@@ -22,6 +22,11 @@ class CandidateTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        self.alert_env = self.root / 'alert.env'
+        self.alert_env.write_text('ACTUAL_ALERT_TARGET=fixture\n')
+        self.alert_env.chmod(0o600)
+        self.alert_env_patch = mock.patch.object(staging, 'ALERT_ENV', self.alert_env)
+        self.alert_env_patch.start()
         (self.root / 'server-files').mkdir()
         (self.root / 'user-files').mkdir()
         self.db = self.root / 'server-files/account.sqlite'
@@ -45,6 +50,7 @@ class CandidateTests(unittest.TestCase):
             db.execute('INSERT INTO messages_binary VALUES (?)', (b'fixture',))
 
     def tearDown(self):
+        self.alert_env_patch.stop()
         self.tmp.cleanup()
 
     def network_fixture(self):
@@ -719,6 +725,17 @@ class CandidateTests(unittest.TestCase):
         identity.assert_not_called()
         stop.assert_not_called()
 
+    def test_snapshot_checks_watchdog_alert_configuration_before_stopping_production(self):
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'snapshot_auth_key', return_value=b'k' * 32), \
+                mock.patch.object(staging, 'alert_configured', side_effect=ValueError('alert missing')), \
+                mock.patch.object(staging, 'assert_prod_identity') as identity, \
+                mock.patch.object(staging, 'graceful_stop') as stop:
+            with self.assertRaisesRegex(ValueError, 'alert missing'):
+                staging.snapshot()
+        identity.assert_not_called()
+        stop.assert_not_called()
+
     def test_approved_snapshot_rejects_tampered_multidatabase_archive(self):
         backups = self.root / 'backups'
         snapshot = backups / 'actual-consistent-1'
@@ -792,6 +809,29 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'remove_sqlite_shared_memory', side_effect=inject_during_copy_cleanup):
             staging.sign_snapshot(snapshot.name, manifest)
             with self.assertRaisesRegex(ValueError, 'archive checksum mismatch'):
+                staging.restore(snapshot, image)
+        self.assertFalse(list((self.root / 'generations').iterdir()))
+
+    def test_restore_rejects_archive_symlink_without_following_it(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (snapshot / 'data/user-files/untrusted').symlink_to('/dev/zero')
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with self.assertRaisesRegex(ValueError, 'unsafe'):
                 staging.restore(snapshot, image)
         self.assertFalse(list((self.root / 'generations').iterdir()))
 
