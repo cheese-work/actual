@@ -211,5 +211,10 @@
   "Show reconciled transactions": "Hiện giao dịch đã đối chiếu",
   "Link account": "Liên kết tài khoản",
   "Reopen account": "Mở lại tài khoản",
-  "Close account": "Đóng tài khoản"
+  "Close account": "Đóng tài khoản",
+  "All accounts": "Tất cả tài khoản",
+  "On budget": "Tài khoản trong ngân sách",
+  "Off budget": "Tài khoản theo dõi",
+  "Closed accounts": "Tài khoản đã đóng",
+  "Closed accounts...": "Tài khoản đã đóng..."
 }
