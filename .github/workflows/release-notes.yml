@@ -15,11 +15,12 @@ concurrency:
 jobs:
   check-release-notes:
     if: >-
-      github.event_name == 'pull_request'
+      github.repository == 'actualbudget/actual'
+      && github.event_name == 'pull_request'
       && github.head_ref != 'release'
       && startsWith(github.head_ref, 'release-notes/') == false
       && github.event.pull_request.user.login != 'dependabot[bot]'
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -68,8 +69,8 @@ jobs:
         uses: ./.github/actions/release-notes/check
 
   generate-release-notes:
-    if: github.event_name == 'push'
-    runs-on: depot-ubuntu-latest
+    if: github.repository == 'actualbudget/actual' && github.event_name == 'push'
+    runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
