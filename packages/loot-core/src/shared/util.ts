@@ -464,7 +464,7 @@ export function integerToCurrencyWithDecimal(
     return integerToCurrency(
       integerAmount,
       getNumberFormat({ ...numberFormatConfig, decimalPlaces: dp }).formatter,
-      dp,
+      2,
     );
   }
 
@@ -482,8 +482,11 @@ export function integerToCurrencyWithDecimal(
   return integerToCurrency(integerAmount);
 }
 
-export function amountToCurrencyInteger(amount: number, code: string): number {
-  return amountToInteger(amount, getDecimalPlaces(code));
+export function amountToCurrencyInteger(
+  amount: number,
+  _currencyCode: string,
+): number {
+  return amountToInteger(amount);
 }
 
 export function amountToCurrency(amount: Amount): CurrencyAmount {

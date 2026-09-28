@@ -1,5 +1,6 @@
 import {
   amountToCurrencyInteger,
+  amountToInteger,
   currencyToAmount,
   getNumberFormat,
   integerToCurrencyWithDecimal,
@@ -254,11 +255,15 @@ describe('utility functions', () => {
     });
 
     test('JPY uses 0dp', () => {
-      expect(integerToCurrencyWithDecimal(1234, 'JPY')).toBe('1,234');
+      expect(integerToCurrencyWithDecimal(123400, 'JPY')).toBe('1,234');
     });
 
     test('IRR uses 0dp', () => {
-      expect(integerToCurrencyWithDecimal(1234, 'IRR')).toBe('1,234');
+      expect(integerToCurrencyWithDecimal(123400, 'IRR')).toBe('1,234');
+    });
+
+    test('VND keeps 2dp display precision with fixed-scale storage', () => {
+      expect(integerToCurrencyWithDecimal(5000000, 'VND')).toBe('50,000.00');
     });
 
     test('unknown currency XYZ defaults to 2dp', () => {
@@ -280,27 +285,27 @@ describe('utility functions', () => {
       expect(amountToCurrencyInteger(12.34, 'USD')).toBe(1234);
     });
 
-    test('JPY uses 0dp (multiply by 1)', () => {
-      expect(amountToCurrencyInteger(1234, 'JPY')).toBe(1234);
+    test('JPY keeps the shared 2dp storage scale', () => {
+      expect(amountToCurrencyInteger(1234, 'JPY')).toBe(123400);
     });
 
-    test('IRR uses 0dp (multiply by 1)', () => {
-      expect(amountToCurrencyInteger(1234, 'IRR')).toBe(1234);
+    test('VND keeps the shared 2dp storage scale', () => {
+      expect(amountToCurrencyInteger(50000, 'VND')).toBe(5000000);
     });
 
-    it.each<[number, string]>([
-      [12.34, 'USD'],
-      [1234, 'JPY'],
-      [5678, 'IRR'],
+    it.each<[number, string, string]>([
+      [12.34, 'USD', '12.34'],
+      [1234, 'JPY', '1,234'],
+      [50000, 'VND', '50,000.00'],
     ])(
-      'round-trip amountToCurrencyInteger/integerToCurrencyWithDecimal: %s %s',
-      (amount, currency) => {
+      'round-trips fixed storage scale before applying %s display precision: %s %s',
+      (amount, currency, displayedAmount) => {
         setNumberFormat({ format: 'comma-dot', hideFraction: false });
         const encoded = amountToCurrencyInteger(amount, currency);
-        const decoded = parseFloat(
-          integerToCurrencyWithDecimal(encoded, currency).replace(/,/g, ''),
+        expect(encoded).toBe(amountToInteger(amount));
+        expect(integerToCurrencyWithDecimal(encoded, currency)).toBe(
+          displayedAmount,
         );
-        expect(decoded).toBeCloseTo(amount, 8);
       },
     );
   });

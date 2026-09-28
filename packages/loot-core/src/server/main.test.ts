@@ -84,6 +84,42 @@ describe('Budgets', () => {
     expect(getClock()).toEqual(deserializeClock(row.clock));
   });
 
+  test('opens a pre-currency-migration budget before setup is finalized', async () => {
+    await createTestBudget('default-budget-template');
+
+    await db.openDatabase('test-budget');
+    const originalMigrations = await db.all<{ id: number }>(
+      'SELECT id FROM __migrations__',
+    );
+    const originalAccountColumns = await db.all<{ name: string }>(
+      'PRAGMA table_info(accounts)',
+    );
+    expect(originalMigrations.some(({ id }) => id === 1790000000000)).toBe(
+      false,
+    );
+    expect(originalAccountColumns.map(({ name }) => name)).not.toContain(
+      'currency',
+    );
+
+    const { error } = await runHandler(handlers['load-budget'], {
+      id: 'test-budget',
+    });
+    expect(error).toBeUndefined();
+
+    const migratedAccounts = await db.all<{ currency: string | null }>(
+      'SELECT currency FROM accounts',
+    );
+    expect(migratedAccounts.length).toBeGreaterThan(0);
+    expect(migratedAccounts.every(({ currency }) => currency === null)).toBe(
+      true,
+    );
+    expect(
+      await db.all(
+        "SELECT id FROM preferences WHERE id = 'currencySetupFinalized'",
+      ),
+    ).toEqual([]);
+  });
+
   test('budget detects out of sync migrations', async () => {
     await createTestBudget('default-budget-template');
 
@@ -153,6 +189,48 @@ describe('Accounts', () => {
     differ.expectToMatchDiff(
       await db.all<db.DbTransaction>('SELECT * FROM transactions'),
     );
+  });
+});
+
+describe('Currency setup', () => {
+  test('finalizes once without a retry changing the selected currency', async () => {
+    await runHandler(handlers['currency-setup-finalize'], {
+      defaultCurrencyCode: 'USD',
+    });
+    await runHandler(handlers['currency-setup-finalize'], {
+      defaultCurrencyCode: 'EUR',
+    });
+
+    expect(
+      await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
+        "SELECT id, value FROM preferences WHERE id IN ('currencySetupFinalized', 'defaultCurrencyCode') ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 'currencySetupFinalized', value: 'true' },
+      { id: 'defaultCurrencyCode', value: 'USD' },
+    ]);
+  });
+
+  test('repairs an interrupted finalized marker without changing the retry selection', async () => {
+    await runMutator(async () => {
+      await db.update('preferences', {
+        id: 'currencySetupFinalized',
+        value: 'true',
+      });
+    });
+
+    await runHandler(handlers['currency-setup-finalize'], {
+      defaultCurrencyCode: 'USD',
+    });
+
+    expect(
+      await db.all<Pick<db.DbPreference, 'id' | 'value'>>(
+        "SELECT id, value FROM preferences WHERE id IN ('currencySetupFinalized', 'defaultCurrencyCode') ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 'currencySetupFinalized', value: 'true' },
+      { id: 'defaultCurrencyCode', value: 'USD' },
+    ]);
   });
 });
 

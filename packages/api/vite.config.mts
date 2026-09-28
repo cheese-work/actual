@@ -71,8 +71,8 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    // e2e/ holds Playwright tests (yarn e2e), not vitest ones.
-    exclude: [...configDefaults.exclude, 'e2e/**'],
+    // e2e/ and acceptance/ hold Playwright tests, not Vitest ones.
+    exclude: [...configDefaults.exclude, 'e2e/**', 'acceptance/**'],
     // Each test loads a budget file and runs all DB migrations, which can be
     // slow on busy CI runners; the default 5s timeout is too tight and causes
     // flaky timeouts (and a cascade of unhandled rejections from in-flight work
