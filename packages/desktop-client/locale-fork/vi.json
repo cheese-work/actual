@@ -305,5 +305,6 @@
   "Edit notes": "Sửa ghi chú",
   "Menu": "Trình đơn",
   "Hide running balance": "Ẩn số dư lũy kế",
-  "Show running balance": "Hiện số dư lũy kế"
+  "Show running balance": "Hiện số dư lũy kế",
+  "Create \"{{name}}\"": "Tạo \"{{name}}\""
 }
