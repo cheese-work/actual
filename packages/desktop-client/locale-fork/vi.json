@@ -276,6 +276,7 @@
   "Create": "Tạo",
   "Balance must be a number": "Số dư phải là một số",
   "Once the account is created, you can also <2>import QIF/OFX/QFX files</2> into it.": "Sau khi tạo tài khoản, bạn cũng có thể <2>nhập tệp QIF/OFX/QFX</2> vào tài khoản đó.",
-  "Off-budget accounts (like investments, loans, or your house) are tracked but not part of your spending budget.": "Tài khoản ngoài ngân sách (như đầu tư, khoản vay hoặc nhà cửa) được theo dõi nhưng không thuộc ngân sách chi tiêu của bạn.",
-  "This cannot be changed later. See <2>Accounts Overview</2> for more information.": "Bạn không thể thay đổi điều này sau. Xem <2>Tổng quan tài khoản</2> để biết thêm thông tin."
+  "Off-budget accounts (like investments, loans, or your house) are tracked but not part of your spending budget.": "Tài khoản theo dõi (như đầu tư, khoản vay hoặc nhà cửa) được theo dõi nhưng không thuộc ngân sách chi tiêu của bạn.",
+  "This cannot be changed later. See <2>Accounts Overview</2> for more information.": "Bạn không thể thay đổi điều này sau. Xem <2>Tổng quan tài khoản</2> để biết thêm thông tin.",
+  "e.g. Bank, Savings, Credit Card, Cash": "VD: Ngân hàng, Tiết kiệm, Thẻ tín dụng, Tiền mặt"
 }
