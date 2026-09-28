@@ -7,9 +7,10 @@ permissions: {}
 
 jobs:
   stale:
+    if: github.repository == 'actualbudget/actual'
     permissions:
       pull-requests: write
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@b5d41d4e1d5dceea10e7104786b73624c18a190f # v10.2.0
         with:
@@ -20,9 +21,10 @@ jobs:
           days-before-issue-stale: -1
           include-only-assigned: true
   stale-wip:
+    if: github.repository == 'actualbudget/actual'
     permissions:
       pull-requests: write
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@b5d41d4e1d5dceea10e7104786b73624c18a190f # v10.2.0
         with:
@@ -33,9 +35,10 @@ jobs:
           days-before-issue-stale: -1
 
   stale-needs-info:
+    if: github.repository == 'actualbudget/actual'
     permissions:
       issues: write
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@b5d41d4e1d5dceea10e7104786b73624c18a190f # v10.2.0
         with:

@@ -17,9 +17,10 @@ concurrency:
 jobs:
   add-reaction:
     name: Add 👀 Reaction
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     # Only run on PR comments containing /update-vrt
     if: >
+      github.repository == 'actualbudget/actual' &&
       github.event.issue.pull_request &&
       startsWith(github.event.comment.body, '/update-vrt')
     permissions:
@@ -38,8 +39,9 @@ jobs:
 
   get-pr:
     name: Resolve PR details
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     if: >
+      github.repository == 'actualbudget/actual' &&
       github.event.issue.pull_request &&
       startsWith(github.event.comment.body, '/update-vrt')
     outputs:
@@ -63,7 +65,8 @@ jobs:
 
   build-web:
     name: Build web bundle
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
+    if: github.repository == 'actualbudget/actual'
     needs: get-pr
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -97,7 +100,8 @@ jobs:
 
   browser-vrt:
     name: Browser VRT (shard ${{ matrix.shard }}/3)
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
+    if: github.repository == 'actualbudget/actual'
     needs: [get-pr, build-web]
     strategy:
       fail-fast: false
@@ -167,7 +171,8 @@ jobs:
 
   desktop-vrt:
     name: Desktop VRT
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
+    if: github.repository == 'actualbudget/actual'
     needs: get-pr
     container:
       # noble (gcc 13) is required to compile native modules against Electron 43+ headers;
@@ -235,9 +240,9 @@ jobs:
 
   merge-patch:
     name: Merge VRT Patches
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     needs: [get-pr, browser-vrt, desktop-vrt]
-    if: ${{ !cancelled() && needs.get-pr.result == 'success' }}
+    if: ${{ github.repository == 'actualbudget/actual' && !cancelled() && needs.get-pr.result == 'success' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

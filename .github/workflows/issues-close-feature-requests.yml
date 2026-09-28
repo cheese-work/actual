@@ -9,8 +9,8 @@ permissions:
 
 jobs:
   needs-votes:
-    if: ${{ github.event.type.name == 'Feature' }}
-    runs-on: depot-ubuntu-latest
+    if: ${{ github.repository == 'actualbudget/actual' && github.event.type.name == 'Feature' }}
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
