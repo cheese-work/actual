@@ -150,7 +150,12 @@ export function useFormat(): UseFormatResult {
   }, [numberFormatConfig]);
 
   const applyCurrencyStyling = useCallback(
-    (formattedNumericValue: string, currencySymbol: string): string => {
+    (
+      formattedNumericValue: string,
+      currencySymbol: string,
+      position: string = symbolPositionPref || 'before',
+      spaceEnabled: boolean = spaceEnabledPref === 'true',
+    ): string => {
       if (!currencySymbol) {
         return formattedNumericValue;
       }
@@ -162,8 +167,7 @@ export function useFormat(): UseFormatResult {
         valueWithoutSign = formattedNumericValue.slice(1);
       }
 
-      const space = spaceEnabledPref === 'true' ? '\u202F' : '';
-      const position = symbolPositionPref || 'before';
+      const space = spaceEnabled ? '\u202F' : '';
 
       const styledAmount =
         position === 'after'
@@ -317,7 +321,22 @@ export function useFormat(): UseFormatResult {
 
       let styledValue = formattedString;
       if (currency.code !== '') {
-        styledValue = applyCurrencyStyling(formattedString, currency.symbol);
+        // Use this currency's own symbol placement (not the Main
+        // currency's user prefs) when displaying a different currency —
+        // otherwise every non-Main account would inherit the Main
+        // currency's symbol position/spacing (e.g. Main=VND puts the
+        // symbol after with a space, which would wrongly apply to USD).
+        const position = currency.symbolFirst ? 'before' : 'after';
+        const spaceEnabled = !currency.symbolFirst;
+        styledValue =
+          currency.code === activeCurrency.code
+            ? applyCurrencyStyling(formattedString, currency.symbol)
+            : applyCurrencyStyling(
+                formattedString,
+                currency.symbol,
+                position,
+                spaceEnabled,
+              );
       }
 
       if (type === 'financial-with-sign' && value >= 0) {
@@ -326,6 +345,7 @@ export function useFormat(): UseFormatResult {
       return styledValue;
     },
     [
+      activeCurrency.code,
       formatDisplay,
       hideFractionPref,
       numberFormatConfig.format,
