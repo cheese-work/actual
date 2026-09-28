@@ -389,6 +389,33 @@ class CandidateTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Funnel'):
                     staging.assert_tailnet_authorization()
 
+    def test_tailnet_rejects_foreground_session_that_overrides_private_routes(self):
+        host = 'staging-fixture.tailnet.ts.net'
+        (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
+        status = json.dumps({
+            'Web': {
+                f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                f'{host}:{staging.STAGING_SERVE_PORT}': {
+                    'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                },
+            },
+            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
+            'Foreground': {
+                'session-id': {
+                    'Web': {
+                        f'{host}:443': {
+                            'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                        },
+                    },
+                    'AllowFunnel': {f'{host}:443': True},
+                },
+            },
+        })
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'run', side_effect=[status, status]):
+            with self.assertRaisesRegex(ValueError, 'foreground Serve sessions'):
+                staging.assert_tailnet_authorization()
+
     def test_tailnet_rejects_wrong_port_or_origin(self):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))

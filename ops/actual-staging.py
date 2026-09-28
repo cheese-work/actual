@@ -991,6 +991,10 @@ def assert_tailnet_authorization():
         raise ValueError('unsupported Tailscale Serve or Funnel status') from error
     if not isinstance(serve, dict) or not isinstance(funnel, dict):
         raise ValueError('unsupported Tailscale Serve or Funnel status')
+    for status in (serve, funnel):
+        foreground = status.get('Foreground', {})
+        if not isinstance(foreground, dict) or foreground:
+            raise ValueError('foreground Serve sessions are not allowed for staging')
     serve_web = serve.get('Web')
     if not isinstance(serve_web, dict):
         raise ValueError('unsupported Tailscale Serve status')
