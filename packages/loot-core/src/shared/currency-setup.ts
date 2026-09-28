@@ -7,8 +7,7 @@ export type CurrencySetup = {
 
 export function getCurrencySetup(prefs: SyncedPrefs): CurrencySetup {
   const finalized =
-    prefs.currencySetupFinalized === 'true' &&
-    !!prefs.defaultCurrencyCode;
+    prefs.currencySetupFinalized === 'true' && !!prefs.defaultCurrencyCode;
 
   return {
     defaultCurrencyCode: prefs.defaultCurrencyCode ?? '',

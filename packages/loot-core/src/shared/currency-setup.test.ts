@@ -44,7 +44,10 @@ describe('currency setup', () => {
   });
 
   it('writes the confirmed currency even when defaultCurrencyCode already exists', () => {
-    const changes = finalizeCurrencySetup({ defaultCurrencyCode: 'USD' }, 'VND');
+    const changes = finalizeCurrencySetup(
+      { defaultCurrencyCode: 'USD' },
+      'VND',
+    );
 
     expect(changes).toEqual({
       defaultCurrencyCode: 'VND',
@@ -53,10 +56,7 @@ describe('currency setup', () => {
   });
 
   it('treats an empty defaultCurrencyCode as unset, not finalized', () => {
-    const changes = finalizeCurrencySetup(
-      { defaultCurrencyCode: '' },
-      'VND',
-    );
+    const changes = finalizeCurrencySetup({ defaultCurrencyCode: '' }, 'VND');
     const completed = { defaultCurrencyCode: '', ...changes };
 
     expect(changes.defaultCurrencyCode).toBe('VND');
