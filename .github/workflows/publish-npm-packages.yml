@@ -14,9 +14,9 @@ permissions:
 
 jobs:
   build-and-pack:
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     name: Build and pack npm packages
-    if: github.event_name == 'push' || (github.event.repository.fork == false)
+    if: github.repository == 'actualbudget/actual' && (github.event_name == 'push' || (github.event.repository.fork == false))
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -94,6 +94,7 @@ jobs:
     # self-hosted
     runs-on: ubuntu-latest
     name: Publish npm packages
+    if: github.repository == 'actualbudget/actual'
     needs: build-and-pack
     environment: release
     permissions:

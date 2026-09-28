@@ -31,9 +31,9 @@ env:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.fork
+    if: github.repository == 'actualbudget/actual'
     name: Build Docker image
-    runs-on: depot-ubuntu-latest-4
+    runs-on: ubuntu-latest
     environment: release
     strategy:
       matrix:
