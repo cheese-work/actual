@@ -168,5 +168,13 @@
   "Use last synced total": "Dùng số dư đồng bộ gần nhất",
   "Reconcile": "Đối chiếu",
   "Reconciled {{ relativeTimeAgo }} ({{ absoluteDate }})": "Đã đối chiếu {{ relativeTimeAgo }} ({{ absoluteDate }})",
-  "Not yet reconciled": "Chưa đối chiếu"
+  "Not yet reconciled": "Chưa đối chiếu",
+  "Financial files": "Tệp tài chính",
+  "Export transactions": "Xuất giao dịch",
+  "On Budget Accounts": "Tài khoản trong ngân sách",
+  "Off Budget Accounts": "Tài khoản theo dõi",
+  "Uncategorized": "Chưa phân loại",
+  "All Accounts": "Tất cả tài khoản",
+  "Selected transactions": "Giao dịch đã chọn",
+  "No transactions": "Không có giao dịch"
 }
