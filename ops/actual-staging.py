@@ -1001,7 +1001,7 @@ def assert_tailnet_authorization():
     if serve_web.get(f'{host}:443') != original:
         raise ValueError('original :443 Serve route changed')
     for status in (serve, funnel):
-        allow_funnel = status.get('AllowFunnel')
+        allow_funnel = status.get('AllowFunnel', {})
         if not isinstance(allow_funnel, dict) or any(value is not False for value in allow_funnel.values()):
             raise ValueError('Funnel must remain disabled for staging')
     funnel_web = funnel.get('Web')
