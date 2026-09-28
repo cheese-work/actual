@@ -1,4 +1,5 @@
 """Offline staging checks; run on X99 with python3 -m unittest discover -s ops."""
+import fcntl
 import importlib.util
 import json
 import os
@@ -157,6 +158,14 @@ class CandidateTests(unittest.TestCase):
             staging.schedule_watchdog('fixture')
         self.assertIn('--on-active=20s', run.call_args.args)
         self.assertIn('--timer-property=AccuracySec=1us', run.call_args.args)
+
+    def test_staging_lock_does_not_contend_with_existing_tar_lock(self):
+        shared_lock = self.root / '.actual-maintenance.lock'
+        with shared_lock.open('a') as tar_lock:
+            fcntl.flock(tar_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with mock.patch.object(staging, 'ROOT', self.root):
+                self.assertEqual(staging.locked(lambda: 'captured'), 'captured')
+        self.assertTrue((self.root / '.actual-staging.lock').is_file())
 
     def test_remaining_timeout_never_extends_recovery_deadline(self):
         with mock.patch.object(staging.time, 'monotonic', return_value=99.9):
@@ -517,10 +526,132 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'audit', return_value={'fixture': [1, 'hash']}), \
                 mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
                 mock.patch.object(staging, 'bounded_copy', side_effect=failed_copy), \
-                mock.patch.object(staging, 'recover'):
+                mock.patch.object(staging, 'recover') as recover:
             with self.assertRaises(subprocess.TimeoutExpired):
                 staging.snapshot()
+        recover.assert_called_once_with(before, mock.ANY)
         self.assertFalse(list((self.root / 'spool').rglob('financial-fixture')))
+
+    def test_quiesced_snapshot_preserves_wal_multidatabase_tree(self):
+        source = self.root / 'source'
+        shutil.copytree(self.root / 'server-files', source / 'server-files')
+        shutil.copytree(self.root / 'user-files', source / 'user-files')
+        readers = []
+        for path in (
+                source / 'server-files/account.sqlite',
+                source / 'user-files/group-fixture.sqlite',
+        ):
+            writer = sqlite3.connect(path)
+            writer.execute('PRAGMA journal_mode=WAL')
+            writer.commit()
+            reader = sqlite3.connect(path)
+            reader.execute('SELECT * FROM sqlite_master').fetchall()
+            readers.append((writer, reader))
+        readers[0][0].execute("INSERT INTO sessions VALUES ('wal', 'owner', 'password')")
+        readers[1][0].execute('INSERT INTO messages_binary VALUES (?)', (b'wal',))
+        for writer, _ in readers:
+            writer.commit()
+        for path in (
+                source / 'server-files/account.sqlite',
+                source / 'user-files/group-fixture.sqlite',
+        ):
+            self.assertTrue(path.with_name(f'{path.name}-wal').is_file())
+        helper_root = self.root / 'helper'
+        before = {
+            'Id': 'original',
+            'Image': 'image',
+            'HostConfig': {'Binds': [f'{source}:/data:rw']},
+            'State': {'Running': True},
+        }
+        try:
+            with mock.patch.object(staging, 'SOURCE', source), \
+                    mock.patch.object(staging, 'ROOT', helper_root), \
+                    mock.patch.object(staging, 'BACKUPS', helper_root / 'backups'), \
+                    mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
+                    mock.patch.object(staging, 'schedule_watchdog'), \
+                    mock.patch.object(staging, 'graceful_stop'), \
+                    mock.patch.object(staging, 'recover'), \
+                    mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)):
+                snapshot = staging.snapshot()
+        finally:
+            for writer, reader in readers:
+                reader.close()
+                writer.close()
+        manifest = json.loads((snapshot / 'manifest.json').read_text())
+        self.assertIn('server-files/account.sqlite', manifest['files'])
+        self.assertIn('server-files/account.sqlite-wal', manifest['files'])
+        self.assertNotIn('server-files/account.sqlite-shm', manifest['files'])
+        self.assertIn('user-files/group-fixture.sqlite', manifest['files'])
+        self.assertIn('user-files/group-fixture.sqlite-wal', manifest['files'])
+        self.assertNotIn('user-files/group-fixture.sqlite-shm', manifest['files'])
+        self.assertFalse((snapshot / 'data/server-files/account.sqlite-shm').exists())
+        self.assertFalse((snapshot / 'data/user-files/group-fixture.sqlite-shm').exists())
+        self.assertEqual(staging.budget_count(snapshot / 'data'), 1)
+
+    def test_snapshot_rejects_multidatabase_mutation_after_quiescence(self):
+        source = self.root / 'source'
+        shutil.copytree(self.root / 'server-files', source / 'server-files')
+        shutil.copytree(self.root / 'user-files', source / 'user-files')
+        helper_root = self.root / 'helper'
+        before = {
+            'Id': 'original',
+            'Image': 'image',
+            'HostConfig': {'Binds': [f'{source}:/data:rw']},
+            'State': {'Running': True},
+        }
+
+        def write_after_audit(source_path, destination, deadline):
+            with sqlite3.connect(source / 'user-files/group-fixture.sqlite') as database:
+                database.execute('INSERT INTO messages_binary VALUES (?)', (b'late-write',))
+            shutil.copytree(source_path, destination)
+
+        with mock.patch.object(staging, 'SOURCE', source), \
+                mock.patch.object(staging, 'ROOT', helper_root), \
+                mock.patch.object(staging, 'BACKUPS', helper_root / 'backups'), \
+                mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
+                mock.patch.object(staging, 'schedule_watchdog'), \
+                mock.patch.object(staging, 'graceful_stop'), \
+                mock.patch.object(staging, 'recover'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
+                mock.patch.object(staging, 'bounded_copy', side_effect=write_after_audit):
+            with self.assertRaisesRegex(RuntimeError, 'spooled snapshot checksum mismatch'):
+                staging.snapshot()
+
+    def test_snapshot_recovers_after_cancellation(self):
+        before = {
+            'Id': 'original',
+            'Image': 'image',
+            'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
+            'State': {'Running': True},
+        }
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', self.root / 'backups'), \
+                mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
+                mock.patch.object(staging, 'schedule_watchdog'), \
+                mock.patch.object(staging, 'graceful_stop'), \
+                mock.patch.object(staging, 'audit', return_value={'fixture': [1, 'hash']}), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
+                mock.patch.object(staging, 'bounded_copy', side_effect=KeyboardInterrupt), \
+                mock.patch.object(staging, 'recover') as recover:
+            with self.assertRaises(KeyboardInterrupt):
+                staging.snapshot()
+        recover.assert_called_once_with(before, mock.ANY)
+
+    def test_approved_snapshot_rejects_tampered_multidatabase_archive(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-fixture'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        with sqlite3.connect(snapshot / 'data/user-files/group-fixture.sqlite') as database:
+            database.execute('INSERT INTO messages_binary VALUES (?)', (b'tampered',))
+        with mock.patch.object(staging, 'BACKUPS', backups):
+            with self.assertRaisesRegex(ValueError, 'archive checksum mismatch'):
+                staging.approved_snapshot(snapshot)
 
 
 if __name__ == '__main__':

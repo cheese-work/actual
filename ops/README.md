@@ -7,9 +7,13 @@ container, or the live-directory tar archive as a restore source.
 
 ## Safety model
 
-- Every staging operation takes `/home/congvc/projects/oss/actual-budget/.actual-maintenance.lock`.
-  The existing `backup.sh` cron and CHE-829 promotion must be changed to take
-  that exact lock before this helper is enabled.
+- The normal staging action lock is `ROOT/.actual-staging.lock`; it never
+  locks the production directory or requires a change to the existing
+  read-only tar cron. Before copying, the helper waits for the exact
+  production sync-server container to exit, so all account, group, and SQLite
+  sidecar files are quiescent. Concurrent tar reads are safe; deadline
+  pressure aborts capture and starts the exact original container rather than
+  accepting a partial snapshot.
 - Snapshots send production `SIGTERM` only, wait no longer than 20 seconds
   for capture, and never use Docker's kill-on-timeout stop path. A durable
   original-ID/image record lets the 20-second watchdog and boot recovery start
@@ -32,9 +36,7 @@ container, or the live-directory tar archive as a restore source.
 These are deliberate external gates; do not substitute the existing tar
 archive or a production credential.
 
-1. Change the existing tar job and CHE-829 promotion to use the shared lock:
-   `flock -n /home/congvc/projects/oss/actual-budget/.actual-maintenance.lock <existing-command>`.
-2. Create `actual-staging-isolated` as an internal Docker bridge with
+1. Create `actual-staging-isolated` as an internal Docker bridge with
    `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
    name. Add `INPUT -> ACTUAL_STAGING_INPUT` and
    position-one `FORWARD -> ACTUAL_STAGING_FORWARD`, `INPUT ->
@@ -49,7 +51,7 @@ archive or a production credential.
    connection-state predicate. Create
    `ROOT/password.hash` mode `0600` from a staging-only password through the
    image's Argon2 implementation.
-3. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
+2. Configure Tailscale Serve to the staging origin at `127.0.0.1:15008`,
    apply a tailnet ACL limited to authorized users, verify Funnel is disabled,
    then write private `ROOT/tailnet-authorized.json`:
 
@@ -57,7 +59,7 @@ archive or a production credential.
    {"host":"staging-hostname.tailnet.ts.net","funnel":false}
    ```
 
-4. Install private executable `ROOT/verify-encrypted-budget`. It receives the
+3. Install private executable `ROOT/verify-encrypted-budget`. It receives the
    snapshot name, pinned image digest, and candidate identity, performs the
    authorized login and decrypt check without printing a secret, and exits
    nonzero on failure. Also create

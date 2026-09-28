@@ -26,7 +26,6 @@ CANDIDATE = 'actual-staging-candidate'
 SOURCE = Path('/home/congvc/projects/oss/actual-budget/data')
 BACKUPS = Path('/home/congvc/projects/oss/actual-budget/backups')
 ROOT = Path('/home/congvc/projects/oss/actual-staging')
-SHARED_LOCK = SOURCE.parent / '.actual-maintenance.lock'
 IMAGE = 'ghcr.io/cheese-work/actual-server@sha256:'
 MASTER = 'ghcr.io/cheese-work/actual-server:master'
 DIGEST = re.compile(r'^ghcr.io/cheese-work/actual-server@sha256:[0-9a-f]{64}$')
@@ -103,6 +102,8 @@ def audit(root, deadline=None):
                 raise ValueError('unsafe file in data tree')
         for name in files:
             path = Path(base, name)
+            if name.endswith('.sqlite-shm'):
+                continue
             digest = hashlib.sha256()
             with path.open('rb') as stream:
                 for block in iter(lambda: stream.read(1048576), b''):
@@ -113,6 +114,13 @@ def audit(root, deadline=None):
                 raise RuntimeError('source audit missed production recovery deadline')
             result[str(path.relative_to(root))] = [path.stat().st_size, digest.hexdigest()]
     return result
+
+
+def remove_sqlite_shared_memory(root):
+    for path in root.rglob('*.sqlite-shm'):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('unsafe SQLite shared-memory sidecar')
+        path.unlink()
 
 
 def budget_count(root):
@@ -147,9 +155,10 @@ def alert_configured():
 
 def locked(action):
     ensure_dir(ROOT)
-    if SHARED_LOCK.is_symlink():
-        raise ValueError('unsafe shared lock')
-    with SHARED_LOCK.open('a') as lock:
+    lock_path = ROOT / '.actual-staging.lock'
+    if lock_path.is_symlink():
+        raise ValueError('unsafe staging lock')
+    with lock_path.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return action()
 
@@ -227,6 +236,7 @@ def snapshot():
             if disk.free - required < max(5 * 1024**3, disk.total // 5):
                 raise RuntimeError('disk reserve insufficient')
             bounded_copy(SOURCE, copied / 'data', capture_deadline)
+            remove_sqlite_shared_memory(copied / 'data')
         finally:
             recover(before, recovery_deadline)
         if time.monotonic() > recovery_deadline:
@@ -235,6 +245,7 @@ def snapshot():
         if copied_files != files:
             raise RuntimeError('spooled snapshot checksum mismatch')
         count = budget_count(copied / 'data')
+        remove_sqlite_shared_memory(copied / 'data')
         write_json(
             copied / 'manifest.json',
             {'files': copied_files, 'budget_count': count, 'source_image': before['Image'], 'timestamp': stamp},
