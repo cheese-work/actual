@@ -226,7 +226,7 @@ def open_directory(path, parent_fd=None):
 
 def read_regular_file(directory_fd, name, maximum):
     try:
-        file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
     except OSError as error:
         raise ValueError('unsafe snapshot file') from error
     try:
@@ -299,14 +299,18 @@ def verify_snapshot_signature(snapshot, manifest):
         raise ValueError('snapshot manifest signature mismatch')
 
 
-def locked(action):
+def locked(action, name='.actual-staging.lock'):
     ensure_dir(ROOT)
-    lock_path = ROOT / '.actual-staging.lock'
+    lock_path = ROOT / name
     if lock_path.is_symlink():
         raise ValueError('unsafe staging lock')
     with lock_path.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return action()
+
+
+def recovery_locked(action):
+    return locked(action, '.actual-recovery.lock')
 
 
 def assert_prod_identity(before=None, deadline=None):
@@ -404,6 +408,10 @@ def bounded_copy(source, destination, deadline):
 
 
 def snapshot():
+    return recovery_locked(snapshot_locked)
+
+
+def snapshot_locked():
     snapshot_auth_key()
     alert_configured()
     before = assert_prod_identity()
@@ -582,7 +590,7 @@ def open_manifest_file(data_fd, path):
             os.close(parent_fd)
             parent_fd = child_fd
         try:
-            return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+            return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
         except OSError as error:
             raise ValueError('unsafe file in snapshot data') from error
     finally:
@@ -593,7 +601,9 @@ def copy_manifest_file(data_fd, candidate_data, path, expected_size, expected_di
     source_fd = open_manifest_file(data_fd, path)
     try:
         details = os.fstat(source_fd)
-        if not stat.S_ISREG(details.st_mode) or details.st_size != expected_size:
+        if not stat.S_ISREG(details.st_mode):
+            raise ValueError('unsafe file in snapshot data')
+        if details.st_size != expected_size:
             raise ValueError('snapshot file size mismatch')
         destination = candidate_data.joinpath(*path.parts)
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1198,7 +1208,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.action == 'recover':
-            locked(lambda: recover(capture=args.capture))
+            recovery_locked(lambda: recover(capture=args.capture))
         elif args.action == 'freshness':
             locked(freshness)
         elif args.action == 'alert-test':

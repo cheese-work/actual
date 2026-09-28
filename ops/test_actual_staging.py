@@ -168,12 +168,13 @@ class CandidateTests(unittest.TestCase):
         self.assertIn('--property=Restart=on-failure', run.call_args.args)
         self.assertEqual(run.call_args.args[-2:], ('--capture', 'fixture'))
 
-    def test_recover_cli_serializes_with_snapshot_lock(self):
+    def test_recover_cli_uses_dedicated_recovery_lock(self):
         with mock.patch.object(staging.sys, 'argv', ['actual-staging.py', 'recover', '--capture', '1']), \
-                mock.patch.object(staging, 'locked', side_effect=lambda action: action()) as locked, \
+                mock.patch.object(staging, 'locked', side_effect=AssertionError('staging lock used')), \
+                mock.patch.object(staging, 'recovery_locked', side_effect=lambda action: action()) as recovery_locked, \
                 mock.patch.object(staging, 'recover') as recover:
             staging.main()
-        locked.assert_called_once()
+        recovery_locked.assert_called_once()
         recover.assert_called_once_with(capture='1')
 
     def test_staging_lock_does_not_contend_with_existing_tar_lock(self):
@@ -183,6 +184,22 @@ class CandidateTests(unittest.TestCase):
             with mock.patch.object(staging, 'ROOT', self.root):
                 self.assertEqual(staging.locked(lambda: 'captured'), 'captured')
         self.assertTrue((self.root / '.actual-staging.lock').is_file())
+
+    def test_recover_cli_does_not_wait_for_staging_lock(self):
+        with mock.patch.object(staging, 'ROOT', self.root):
+            with (self.root / '.actual-staging.lock').open('a') as staging_lock:
+                fcntl.flock(staging_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with mock.patch.object(staging.sys, 'argv', ['actual-staging.py', 'recover', '--capture', '1']), \
+                        mock.patch.object(staging, 'recover') as recover:
+                    staging.main()
+        recover.assert_called_once_with(capture='1')
+        self.assertTrue((self.root / '.actual-recovery.lock').is_file())
+
+    def test_snapshot_holds_dedicated_recovery_lock(self):
+        with mock.patch.object(staging, 'recovery_locked', side_effect=lambda action: action()) as recovery_locked, \
+                mock.patch.object(staging, 'snapshot_locked', return_value='snapshot') as snapshot_locked:
+            self.assertEqual(staging.snapshot(), 'snapshot')
+        recovery_locked.assert_called_once_with(snapshot_locked)
 
     def test_remaining_timeout_never_extends_recovery_deadline(self):
         with mock.patch.object(staging.time, 'monotonic', return_value=99.9):
@@ -868,6 +885,30 @@ class CandidateTests(unittest.TestCase):
                 staging.restore(snapshot, image)
         self.assertFalse((self.root / 'generations').exists())
 
+    def test_restore_rejects_fifo_manifest_without_blocking(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'):
+            staging.sign_snapshot(snapshot.name, manifest)
+            (snapshot / 'manifest.json').unlink()
+            os.mkfifo(snapshot / 'manifest.json')
+            with self.assertRaisesRegex(ValueError, 'unsafe snapshot file'):
+                staging.restore(snapshot, image)
+        self.assertFalse((self.root / 'generations').exists())
+
     def test_restore_rejects_symlinked_data_root_before_copy(self):
         backups = self.root / 'backups'
         snapshot = backups / 'actual-consistent-1'
@@ -890,6 +931,43 @@ class CandidateTests(unittest.TestCase):
             shutil.rmtree(snapshot / 'data')
             (snapshot / 'data').symlink_to(self.root / 'server-files')
             with self.assertRaisesRegex(ValueError, 'unsafe snapshot directory'):
+                staging.restore(snapshot, image)
+        self.assertFalse(list((self.root / 'generations').iterdir()))
+
+    def test_restore_rejects_fifo_file_after_tree_scan_without_blocking(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        original_names = staging.source_file_names
+        account = snapshot / 'data/server-files/account.sqlite'
+        replaced = False
+
+        def replace_after_scan(*args):
+            nonlocal replaced
+            names = original_names(*args)
+            if not replaced:
+                account.unlink()
+                os.mkfifo(account)
+                replaced = True
+            return names
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
+                mock.patch.object(staging, 'source_file_names', side_effect=replace_after_scan):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with self.assertRaisesRegex(ValueError, 'unsafe file in snapshot data'):
                 staging.restore(snapshot, image)
         self.assertFalse(list((self.root / 'generations').iterdir()))
 
