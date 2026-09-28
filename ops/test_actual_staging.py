@@ -147,6 +147,7 @@ class CandidateTests(unittest.TestCase):
 
         self.assertIn('actual-prod-watchdog.service', units)
         self.assertIn('ExecStart=/usr/bin/python3 /srv/actual/ops/actual-staging.py recover', units['actual-prod-watchdog.service'])
+        self.assertIn('EnvironmentFile=%h/.config/actual-staging/alert.env', units['actual-prod-watchdog.service'])
         self.assertIn('Restart=on-failure', units['actual-prod-watchdog.service'])
         self.assertIn('EnvironmentFile=%h/.config/actual-staging/alert.env', units['actual-staging-refresh.service'])
         self.assertIn('OnCalendar=*-*-* 03:45:00', units['actual-staging-refresh.timer'])
@@ -158,6 +159,7 @@ class CandidateTests(unittest.TestCase):
             staging.schedule_watchdog('fixture')
         self.assertIn('--on-active=20s', run.call_args.args)
         self.assertIn('--timer-property=AccuracySec=1us', run.call_args.args)
+        self.assertIn('--property=Restart=on-failure', run.call_args.args)
         self.assertEqual(run.call_args.args[-2:], ('--capture', 'fixture'))
 
     def test_staging_lock_does_not_contend_with_existing_tar_lock(self):
@@ -231,11 +233,11 @@ class CandidateTests(unittest.TestCase):
             'Id': 'original',
             'Image': 'original-image',
             'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
-            'State': {'Running': False},
+            'State': {'Running': False, 'StartedAt': 'old'},
         }
-        running = {**before, 'State': {'Running': True}}
+        running = {**before, 'State': {'Running': True, 'StartedAt': 'new'}}
         (self.root / 'pending-prod-1.json').write_text(json.dumps({
-            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopped',
+            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopped', 'started_at': 'old',
         }))
         (self.root / 'pending-prod-1.json').chmod(0o600)
         with mock.patch.object(staging, 'ROOT', self.root), \
@@ -270,18 +272,44 @@ class CandidateTests(unittest.TestCase):
             'Id': 'original',
             'Image': 'original-image',
             'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
-            'State': {'Running': True},
+            'State': {'Running': True, 'StartedAt': 'old'},
         }
         (self.root / 'pending-prod-1.json').write_text(json.dumps({
-            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopping',
+            'Id': before['Id'], 'Image': before['Image'], 'state': 'stopping', 'started_at': 'old',
         }))
         (self.root / 'pending-prod-1.json').chmod(0o600)
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'prod', return_value=before), \
-                mock.patch.object(staging, 'docker') as docker:
-            staging.recover(capture='1')
+                mock.patch.object(staging, 'docker') as docker, \
+                mock.patch.object(staging, 'alert') as alert, \
+                mock.patch.object(staging.time, 'monotonic', side_effect=[0, 0, 10]), \
+                mock.patch.object(staging.time, 'sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'did not observe a new start'):
+                staging.recover(capture='1', deadline=10)
         docker.assert_not_called()
+        alert.assert_called_once_with('production remains down after SIGTERM')
         self.assertTrue((self.root / 'pending-prod-1.json').exists())
+
+    def test_recover_waits_for_delayed_shutdown_then_starts_production(self):
+        running = {
+            'Id': 'original',
+            'Image': 'original-image',
+            'HostConfig': {'Binds': [f'{staging.SOURCE}:/data:rw']},
+            'State': {'Running': True, 'StartedAt': 'old'},
+        }
+        stopped = {**running, 'State': {'Running': False, 'StartedAt': 'old'}}
+        restarted = {**running, 'State': {'Running': True, 'StartedAt': 'new'}}
+        (self.root / 'pending-prod-1.json').write_text(json.dumps({
+            'Id': 'original', 'Image': 'original-image', 'state': 'stopping', 'started_at': 'old',
+        }))
+        (self.root / 'pending-prod-1.json').chmod(0o600)
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'prod', side_effect=[running, stopped, restarted]), \
+                mock.patch.object(staging, 'docker') as docker, \
+                mock.patch.object(staging.time, 'sleep'):
+            staging.recover(capture='1')
+        docker.assert_called_once_with('start', staging.PROD, timeout=mock.ANY)
+        self.assertFalse((self.root / 'pending-prod-1.json').exists())
 
     def test_tailnet_requires_single_bound_proxy_and_no_funnel(self):
         host = 'staging-fixture.tailnet.ts.net'
@@ -563,13 +591,14 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
                 mock.patch.object(staging, 'schedule_watchdog'), \
                 mock.patch.object(staging, 'graceful_stop'), \
+                mock.patch.object(staging, 'snapshot_auth_key', return_value=b'k' * 32), \
                 mock.patch.object(staging, 'audit', return_value={'fixture': [1, 'hash']}), \
                 mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
                 mock.patch.object(staging, 'bounded_copy', side_effect=failed_copy), \
                 mock.patch.object(staging, 'recover') as recover:
             with self.assertRaises(subprocess.TimeoutExpired):
                 staging.snapshot()
-        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY, complete=True)
+        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY)
         self.assertFalse(list((self.root / 'spool').rglob('financial-fixture')))
 
     def test_quiesced_snapshot_preserves_wal_multidatabase_tree(self):
@@ -653,6 +682,7 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'schedule_watchdog'), \
                 mock.patch.object(staging, 'graceful_stop'), \
                 mock.patch.object(staging, 'recover'), \
+                mock.patch.object(staging, 'snapshot_auth_key', return_value=b'k' * 32), \
                 mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
                 mock.patch.object(staging, 'bounded_copy', side_effect=write_after_audit):
             with self.assertRaisesRegex(RuntimeError, 'spooled snapshot checksum mismatch'):
@@ -670,13 +700,24 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'assert_prod_identity', return_value=before), \
                 mock.patch.object(staging, 'schedule_watchdog'), \
                 mock.patch.object(staging, 'graceful_stop'), \
+                mock.patch.object(staging, 'snapshot_auth_key', return_value=b'k' * 32), \
                 mock.patch.object(staging, 'audit', return_value={'fixture': [1, 'hash']}), \
                 mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
                 mock.patch.object(staging, 'bounded_copy', side_effect=KeyboardInterrupt), \
                 mock.patch.object(staging, 'recover') as recover:
             with self.assertRaises(KeyboardInterrupt):
                 staging.snapshot()
-        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY, complete=True)
+        recover.assert_called_once_with(capture=mock.ANY, deadline=mock.ANY)
+
+    def test_snapshot_checks_authentication_key_before_stopping_production(self):
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'snapshot_auth_key', side_effect=ValueError('key missing')), \
+                mock.patch.object(staging, 'assert_prod_identity') as identity, \
+                mock.patch.object(staging, 'graceful_stop') as stop:
+            with self.assertRaisesRegex(ValueError, 'key missing'):
+                staging.snapshot()
+        identity.assert_not_called()
+        stop.assert_not_called()
 
     def test_approved_snapshot_rejects_tampered_multidatabase_archive(self):
         backups = self.root / 'backups'
@@ -722,6 +763,37 @@ class CandidateTests(unittest.TestCase):
             (snapshot / 'manifest.json').write_text(json.dumps(rewritten))
             with self.assertRaisesRegex(ValueError, 'snapshot manifest signature mismatch'):
                 staging.approved_snapshot(snapshot)
+
+    def test_restore_rejects_archive_mutated_during_copy(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        original_remove = staging.remove_sqlite_shared_memory
+
+        def inject_during_copy_cleanup(data):
+            (data / 'extra-untrusted').write_text('fixture')
+            (data / 'injected.sqlite-shm').write_text('fixture')
+            original_remove(data)
+            self.assertFalse((data / 'injected.sqlite-shm').exists())
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging, 'remove_sqlite_shared_memory', side_effect=inject_during_copy_cleanup):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with self.assertRaisesRegex(ValueError, 'archive checksum mismatch'):
+                staging.restore(snapshot, image)
+        self.assertFalse(list((self.root / 'generations').iterdir()))
 
 
 if __name__ == '__main__':

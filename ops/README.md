@@ -15,12 +15,18 @@ container, or the live-directory tar archive as a restore source.
   pressure aborts capture and starts the exact original container rather than
   accepting a partial snapshot.
 - Snapshots send production `SIGTERM` only, wait no longer than 20 seconds
-  for capture, and never use Docker's kill-on-timeout stop path. A durable
-  original-ID/image record lets the 20-second watchdog and boot recovery start
-  only the exact production container interrupted by a refresh.
+  for capture, and never use Docker's kill-on-timeout stop path. The helper
+  validates its manifest-authentication key before signalling. A durable
+  original-ID/image/start record is retained until the exact production
+  container has a new start; transient and boot recovery retry failures and
+  alert rather than treating an old still-running process as recovered.
 - Snapshot manifests audit every file and every SQLite database. Restore fails
   on a changed archive, unsupported account schema, copied sessions, auth,
-  OpenID state, integration secrets, source config, or unpinned image.
+  OpenID state, integration secrets, source config, or unpinned image. The
+  manifest HMAC and data audit run after copying into private `ROOT/generations`;
+  SQLite shared-memory sidecars are discarded there before validation. The
+  HMAC protects against writers of the backup store, not the `congvc` user
+  that owns both `ROOT` and `BACKUPS`.
 - A candidate runs only on `actual-staging-isolated` and
   `127.0.0.1:15009`. The bridge must disable masquerading and have an exact
   position-one `FORWARD -> ACTUAL_STAGING_FORWARD` hook, plus verified
@@ -67,7 +73,8 @@ archive or a production credential.
    `ACTUAL_ALERT_TARGET=<approved-target>` for scheduled alerts. Create
    `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
    signs each manifest into private `ROOT/snapshot-signatures/`, outside the
-   writable archive store.
+   writable archive store. This boundary excludes backup-store writers only;
+   it does not authenticate data against the owner of both directories.
 
 ## Rehearsal sequence
 

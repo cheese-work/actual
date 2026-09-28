@@ -109,6 +109,10 @@ def set_pending_state(capture, state):
     write_json(path, record)
 
 
+def started_at(container):
+    return container['State'].get('StartedAt')
+
+
 def audit(root, deadline=None):
     result = {}
     if root.is_symlink() or not root.is_dir():
@@ -234,30 +238,63 @@ def assert_prod_identity(before=None, deadline=None):
     return current
 
 
-def recover(before=None, deadline=None, capture=None, complete=False):
+def recovery_alert(message):
+    try:
+        alert(message)
+    except Exception:
+        print('PRODUCTION RECOVERY ALERT FAILED', file=sys.stderr)
+
+
+def recovered(pending, current):
+    if not current['State']['Running']:
+        return False
+    if pending['state'] == 'armed':
+        return True
+    return pending.get('started_at') is not None and started_at(current) != pending['started_at']
+
+
+def recover(before=None, deadline=None, capture=None):
     if before is None and capture is None:
         for path in sorted(ROOT.glob('pending-prod-*.json')):
             recover(capture=path.stem.removeprefix('pending-prod-'))
         return
+    pending_path_value = None
     pending = None
     if before is None:
         if not pending_path(capture).exists():
             return
-        pending, before = pending_record(capture)
+        pending_path_value, before = pending_record(capture)
+        pending = before
     deadline = deadline or time.monotonic() + RECOVERY_SECONDS
-    current = assert_prod_identity(before, deadline)
-    if not current['State']['Running']:
-        docker('start', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
-    if not assert_prod_identity(before, deadline)['State']['Running']:
-        raise RuntimeError('production restart failed')
-    if pending and (complete or before.get('state') == 'stopped'):
-        pending.unlink()
+    while True:
+        if time.monotonic() >= deadline:
+            if pending and pending['state'] != 'armed':
+                recovery_alert('production remains down after SIGTERM')
+            raise RuntimeError('production recovery did not observe a new start')
+        current = assert_prod_identity(before, deadline)
+        if not current['State']['Running']:
+            try:
+                docker('start', PROD, timeout=remaining_timeout(deadline, RECOVERY_SECONDS))
+            except subprocess.CalledProcessError:
+                current = assert_prod_identity(before, deadline)
+                if not current['State']['Running']:
+                    if pending:
+                        recovery_alert('production restart failed')
+                    raise
+            current = assert_prod_identity(before, deadline)
+        if not pending or recovered(pending, current):
+            if pending:
+                pending_path_value.unlink(missing_ok=True)
+            return
+        time.sleep(0.2)
 
 
 def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
         '--on-active=20s', '--timer-property=AccuracySec=1us',
+        f'--property=EnvironmentFile={ALERT_ENV}', '--property=Restart=on-failure',
+        '--property=RestartSec=2s',
         sys.executable, str(Path(__file__).resolve()), 'recover', '--capture', stamp,
         timeout=10,
     )
@@ -287,6 +324,7 @@ def bounded_copy(source, destination, deadline):
 
 
 def snapshot():
+    snapshot_auth_key()
     before = assert_prod_identity()
     ensure_dir(ROOT / 'spool')
     ensure_snapshot_store()
@@ -295,7 +333,7 @@ def snapshot():
     copied.mkdir(mode=0o700)
     write_json(
         pending_path(stamp),
-        {'Id': before['Id'], 'Image': before['Image'], 'state': 'armed'},
+        {'Id': before['Id'], 'Image': before['Image'], 'state': 'armed', 'started_at': started_at(before)},
     )
     schedule_watchdog(stamp)
     started = time.monotonic()
@@ -312,7 +350,7 @@ def snapshot():
             bounded_copy(SOURCE, copied / 'data', capture_deadline)
             remove_sqlite_shared_memory(copied / 'data')
         finally:
-            recover(capture=stamp, deadline=recovery_deadline, complete=True)
+            recover(capture=stamp, deadline=recovery_deadline)
         if time.monotonic() > recovery_deadline:
             raise RuntimeError('production deadline exceeded')
         copied_files = audit(copied / 'data')
@@ -336,6 +374,7 @@ def snapshot():
             sign_snapshot(target.name, read_json(target / 'manifest.json'))
         except BaseException:
             shutil.rmtree(partial, ignore_errors=True)
+            shutil.rmtree(target, ignore_errors=True)
             raise
         return target
     finally:
@@ -401,19 +440,27 @@ def probe(port):
     raise RuntimeError('container failed HTTP readiness')
 
 
-def approved_snapshot(path):
+def snapshot_source(path):
     path = path.resolve(strict=True)
     if BACKUPS.resolve() not in path.parents or not path.name.startswith('actual-consistent-'):
         raise ValueError('snapshot outside approved store')
-    manifest = read_json(path / 'manifest.json')
-    verify_snapshot_signature(path.name, manifest)
-    if audit(path / 'data') != manifest['files']:
+    return path
+
+
+def approved_snapshot(snapshot, data=None, manifest_path=None):
+    if data is None:
+        snapshot = snapshot_source(snapshot)
+        data = snapshot / 'data'
+        manifest_path = snapshot / 'manifest.json'
+    manifest = read_json(manifest_path)
+    verify_snapshot_signature(snapshot.name, manifest)
+    if audit(data) != manifest['files']:
         raise ValueError('archive checksum mismatch')
-    count = budget_count(path / 'data')
+    count = budget_count(data)
     if count != manifest['budget_count']:
         raise ValueError('source snapshot count mismatch')
-    reject_inherited_configuration(path / 'data')
-    return path, manifest, count
+    reject_inherited_configuration(data)
+    return manifest, count
 
 
 def assert_network_isolation():
@@ -666,15 +713,18 @@ def staging_inventory(root):
 def restore(snapshot_path, image):
     if not DIGEST.fullmatch(image):
         raise ValueError('only published fork digest allowed')
-    path, manifest, expected = approved_snapshot(snapshot_path)
+    path = snapshot_source(snapshot_path)
     base = ensure_dir(ROOT / 'generations')
     generation = f'{path.name}-{image.rsplit(":", 1)[1][:12]}'
     candidate_data = base / generation
-    if candidate_data.exists():
+    manifest_path = base / f'.{generation}.manifest.json'
+    if candidate_data.exists() or manifest_path.exists():
         raise RuntimeError('candidate name collision')
-    shutil.copytree(path / 'data', candidate_data, symlinks=False)
     try:
-        reject_inherited_configuration(candidate_data)
+        shutil.copytree(path / 'data', candidate_data, symlinks=False)
+        shutil.copy2(path / 'manifest.json', manifest_path)
+        remove_sqlite_shared_memory(candidate_data)
+        manifest, expected = approved_snapshot(path, candidate_data, manifest_path)
         if sanitize(candidate_data, staging_password_hash()) != expected:
             raise RuntimeError('restored snapshot count mismatch')
         remove_container(CANDIDATE)
@@ -694,6 +744,8 @@ def restore(snapshot_path, image):
         remove_container(CANDIDATE)
         shutil.rmtree(candidate_data, ignore_errors=True)
         raise
+    finally:
+        manifest_path.unlink(missing_ok=True)
 
 
 def candidate_state():
@@ -888,6 +940,7 @@ def systemd_units(script):
         'actual-prod-watchdog.service': '\n'.join((
             '[Unit]', 'Description=Recover unchanged Actual production container after boot',
             'After=default.target', '', '[Service]', 'Type=oneshot',
+            'EnvironmentFile=%h/.config/actual-staging/alert.env',
             'Restart=on-failure', 'RestartSec=2s', f'ExecStart={command} recover', '',
             '[Install]', 'WantedBy=default.target', '',
         )),
