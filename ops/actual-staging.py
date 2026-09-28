@@ -995,6 +995,10 @@ def assert_tailnet_authorization():
         foreground = status.get('Foreground', {})
         if not isinstance(foreground, dict) or foreground:
             raise ValueError('foreground Serve sessions are not allowed for staging')
+        tcp = status.get('TCP')
+        if not isinstance(tcp, dict) or tcp.get('443') != {'HTTPS': True} or \
+                tcp.get(str(STAGING_SERVE_PORT)) != {'HTTPS': True}:
+            raise ValueError('Tailscale TCP routes do not match approved HTTPS endpoints')
     serve_web = serve.get('Web')
     if not isinstance(serve_web, dict):
         raise ValueError('unsupported Tailscale Serve status')

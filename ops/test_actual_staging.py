@@ -53,6 +53,12 @@ class CandidateTests(unittest.TestCase):
         self.alert_env_patch.stop()
         self.tmp.cleanup()
 
+    def tailnet_tcp_status(self):
+        return {
+            '443': {'HTTPS': True},
+            str(staging.STAGING_SERVE_PORT): {'HTTPS': True},
+        }
+
     def network_fixture(self):
         network = {
             'Internal': True,
@@ -346,6 +352,7 @@ class CandidateTests(unittest.TestCase):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         status = json.dumps({
+            'TCP': self.tailnet_tcp_status(),
             'Web': {
                 f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
                 f'{host}:{staging.STAGING_SERVE_PORT}': {
@@ -365,6 +372,7 @@ class CandidateTests(unittest.TestCase):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         serve = {
+            'TCP': self.tailnet_tcp_status(),
             'Web': {
                 f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
                 f'{host}:{staging.STAGING_SERVE_PORT}': {
@@ -372,7 +380,7 @@ class CandidateTests(unittest.TestCase):
                 },
             },
         }
-        funnel = {'Web': {}}
+        funnel = serve
         for status_index, allow_funnel in (
             (0, []),
             (0, {f'{host}:443': True}),
@@ -392,40 +400,69 @@ class CandidateTests(unittest.TestCase):
     def test_tailnet_rejects_foreground_session_that_overrides_private_routes(self):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
-        status = json.dumps({
-            'Web': {
-                f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
-                f'{host}:{staging.STAGING_SERVE_PORT}': {
-                    'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
-                },
-            },
-            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
-            'Foreground': {
-                'session-id': {
-                    'Web': {
-                        f'{host}:443': {
-                            'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
-                        },
+        for port in ('443', str(staging.STAGING_SERVE_PORT)):
+            status = json.dumps({
+                'TCP': self.tailnet_tcp_status(),
+                'Web': {
+                    f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                    f'{host}:{staging.STAGING_SERVE_PORT}': {
+                        'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
                     },
-                    'AllowFunnel': {f'{host}:443': True},
                 },
-            },
-        })
-        with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.object(staging, 'run', side_effect=[status, status]):
-            with self.assertRaisesRegex(ValueError, 'foreground Serve sessions'):
-                staging.assert_tailnet_authorization()
+                'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
+                'Foreground': {
+                    'session-id': {
+                        'Web': {
+                            f'{host}:{port}': {
+                                'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                            },
+                        },
+                        'AllowFunnel': {f'{host}:{port}': True},
+                    },
+                },
+            })
+            with self.subTest(port=port), \
+                    mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.object(staging, 'run', side_effect=[status, status]):
+                with self.assertRaisesRegex(ValueError, 'foreground Serve sessions'):
+                    staging.assert_tailnet_authorization()
+
+    def test_tailnet_rejects_tcp_forward_on_approved_https_ports(self):
+        host = 'staging-fixture.tailnet.ts.net'
+        (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
+        for port in ('443', str(staging.STAGING_SERVE_PORT)):
+            status = {
+                'TCP': self.tailnet_tcp_status(),
+                'Web': {
+                    f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
+                    f'{host}:{staging.STAGING_SERVE_PORT}': {
+                        'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
+                    },
+                },
+            }
+            status['TCP'][port] = {'TCPForward': '127.0.0.1:15009'}
+            encoded_status = json.dumps(status)
+            with self.subTest(port=port), \
+                    mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.object(staging, 'run', side_effect=[encoded_status, encoded_status]):
+                with self.assertRaisesRegex(ValueError, 'TCP routes'):
+                    staging.assert_tailnet_authorization()
 
     def test_tailnet_rejects_wrong_port_or_origin(self):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         original = {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}}
-        valid_funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})
+        valid_funnel = json.dumps({
+            'TCP': self.tailnet_tcp_status(),
+            'Web': {},
+            'AllowFunnel': {f'{host}:443': False},
+        })
         for endpoint, proxy in (
             (f'{host}:{staging.STAGING_SERVE_PORT + 1}', f'http://127.0.0.1:{staging.ACTIVE_PORT}'),
             (f'{host}:{staging.STAGING_SERVE_PORT}', 'http://127.0.0.1:15009'),
         ):
             serve = json.dumps({
+                'TCP': self.tailnet_tcp_status(),
                 'Web': {
                     f'{host}:443': original,
                     endpoint: {'Handlers': {'/': {'Proxy': proxy}}},
@@ -442,6 +479,7 @@ class CandidateTests(unittest.TestCase):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         serve_data = {
+            'TCP': self.tailnet_tcp_status(),
             'Web': {
                 f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
                 f'{host}:{staging.STAGING_SERVE_PORT}': {
@@ -450,7 +488,8 @@ class CandidateTests(unittest.TestCase):
             },
             'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
         }
-        funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': True}})
+        funnel_data = {**serve_data, 'AllowFunnel': {f'{host}:443': True}}
+        funnel = json.dumps(funnel_data)
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'run', side_effect=[json.dumps(serve_data), funnel]):
             with self.assertRaisesRegex(ValueError, 'Funnel'):
@@ -459,7 +498,7 @@ class CandidateTests(unittest.TestCase):
         serve_data['Web'][f'{host}:443'] = {'Handlers': {'/': {'Proxy': 'http://127.0.0.1:15008'}}}
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'run', side_effect=[json.dumps(serve_data),
-                    json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})]):
+                    json.dumps(serve_data)]):
             with self.assertRaisesRegex(ValueError, 'original :443'):
                 staging.assert_tailnet_authorization()
 
@@ -467,15 +506,15 @@ class CandidateTests(unittest.TestCase):
         host = 'staging-fixture.tailnet.ts.net'
         (self.root / 'tailnet-authorized.json').write_text(json.dumps({'host': host, 'funnel': False}))
         serve = json.dumps({
+            'TCP': self.tailnet_tcp_status(),
             'Web': {
                 f'{host}:443': {'Handlers': {'/': {'Proxy': staging.PRODUCTION_SERVE_PROXY}}},
                 f'{host}:{staging.STAGING_SERVE_PORT}': {
                     'Handlers': {'/': {'Proxy': f'http://127.0.0.1:{staging.ACTIVE_PORT}'}}
                 },
             },
-            'AllowFunnel': {f'{host}:443': False, f'{host}:{staging.STAGING_SERVE_PORT}': False},
         })
-        funnel = json.dumps({'Web': {}, 'AllowFunnel': {f'{host}:443': False}})
+        funnel = serve
         for failed_command in ('serve', 'funnel'):
             responses = [serve, funnel]
             responses[0 if failed_command == 'serve' else 1] = subprocess.CalledProcessError(
