@@ -232,5 +232,9 @@
   "Group name": "Tên nhóm",
   "Accounts": "Tài khoản",
   "Collapse all groups": "Thu gọn tất cả các nhóm",
-  "Expand all groups": "Mở rộng tất cả các nhóm"
+  "Expand all groups": "Mở rộng tất cả các nhóm",
+  "Synced": "Đã đồng bộ",
+  "Sync error": "Lỗi đồng bộ",
+  "Syncing": "Đang đồng bộ",
+  "Not linked": "Chưa liên kết"
 }
