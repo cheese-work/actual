@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -36,6 +37,8 @@ CAPTURE_SECONDS = 20
 RECOVERY_SECONDS = 10
 INTERRUPTION_SECONDS = CAPTURE_SECONDS + RECOVERY_SECONDS
 ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
+MANIFEST_BYTES = 8 * 1024**2
+COPY_BLOCK_BYTES = 1024**2
 
 
 def run(*cmd, timeout=60):
@@ -88,6 +91,12 @@ def write_json(path, value):
 
 def read_json(path):
     return json.loads(path.read_text())
+
+
+def reserve_disk(directory, required):
+    disk = shutil.disk_usage(directory)
+    if disk.free - required < max(5 * 1024**3, disk.total // 5):
+        raise RuntimeError('disk reserve insufficient')
 
 
 def pending_path(capture):
@@ -185,6 +194,77 @@ def snapshot_auth_key():
     if len(key) < 32:
         raise ValueError('snapshot authentication key is too short')
     return key
+
+
+def manifest_files(manifest):
+    files = manifest.get('files')
+    if not isinstance(files, dict) or not isinstance(manifest.get('budget_count'), int):
+        raise ValueError('invalid snapshot manifest')
+    result = []
+    for name, entry in files.items():
+        path = Path(name) if isinstance(name, str) else None
+        if (path is None or not name or path.is_absolute()
+                or any(part in ('', '.', '..') for part in path.parts)):
+            raise ValueError('unsafe path in snapshot manifest')
+        if (not isinstance(entry, list) or len(entry) != 2
+                or isinstance(entry[0], bool) or not isinstance(entry[0], int) or entry[0] < 0
+                or not isinstance(entry[1], str) or not re.fullmatch(r'[0-9a-f]{64}', entry[1])):
+            raise ValueError('invalid file in snapshot manifest')
+        result.append((name, path, entry[0], entry[1]))
+    return sorted(result)
+
+
+def open_directory(path, parent_fd=None):
+    try:
+        return os.open(
+            path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+    except OSError as error:
+        raise ValueError('unsafe snapshot directory') from error
+
+
+def read_regular_file(directory_fd, name, maximum):
+    try:
+        file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+    except OSError as error:
+        raise ValueError('unsafe snapshot file') from error
+    try:
+        details = os.fstat(file_fd)
+        if not stat.S_ISREG(details.st_mode) or details.st_size > maximum:
+            raise ValueError('unsafe snapshot file')
+        remaining = details.st_size
+        content = bytearray()
+        while remaining:
+            block = os.read(file_fd, min(COPY_BLOCK_BYTES, remaining))
+            if not block:
+                raise ValueError('snapshot file changed while reading')
+            content.extend(block)
+            remaining -= len(block)
+        if os.read(file_fd, 1):
+            raise ValueError('snapshot file changed while reading')
+        return bytes(content)
+    finally:
+        os.close(file_fd)
+
+
+def authenticated_manifest(snapshot_fd, snapshot):
+    try:
+        manifest = json.loads(read_regular_file(snapshot_fd, 'manifest.json', MANIFEST_BYTES))
+    except json.JSONDecodeError as error:
+        raise ValueError('invalid snapshot manifest') from error
+    manifest_files(manifest)
+    verify_snapshot_signature(snapshot.name, manifest)
+    return manifest
+
+
+def open_authenticated_snapshot(snapshot):
+    snapshot_fd = open_directory(snapshot)
+    try:
+        return snapshot_fd, authenticated_manifest(snapshot_fd, snapshot)
+    except BaseException:
+        os.close(snapshot_fd)
+        raise
 
 
 def manifest_signature(snapshot, manifest):
@@ -345,9 +425,7 @@ def snapshot():
             graceful_stop(before, capture_deadline, stamp)
             files = audit(SOURCE, capture_deadline)
             required = sum(size for size, _ in files.values())
-            disk = shutil.disk_usage(ROOT)
-            if disk.free - required < max(5 * 1024**3, disk.total // 5):
-                raise RuntimeError('disk reserve insufficient')
+            reserve_disk(ROOT, required)
             bounded_copy(SOURCE, copied / 'data', capture_deadline)
             remove_sqlite_shared_memory(copied / 'data')
         finally:
@@ -448,13 +526,8 @@ def snapshot_source(path):
     return path
 
 
-def approved_snapshot(snapshot, data=None, manifest_path=None):
-    if data is None:
-        snapshot = snapshot_source(snapshot)
-        data = snapshot / 'data'
-        manifest_path = snapshot / 'manifest.json'
-    manifest = read_json(manifest_path)
-    verify_snapshot_signature(snapshot.name, manifest)
+def approved_manifest(data, manifest):
+    manifest_files(manifest)
     if audit(data) != manifest['files']:
         raise ValueError('archive checksum mismatch')
     count = budget_count(data)
@@ -462,6 +535,100 @@ def approved_snapshot(snapshot, data=None, manifest_path=None):
         raise ValueError('source snapshot count mismatch')
     reject_inherited_configuration(data)
     return manifest, count
+
+
+def approved_snapshot(snapshot, data=None, manifest_path=None):
+    if data is None:
+        snapshot = snapshot_source(snapshot)
+        snapshot_fd, manifest = open_authenticated_snapshot(snapshot)
+        os.close(snapshot_fd)
+        data = snapshot / 'data'
+    else:
+        manifest = read_json(manifest_path)
+        manifest_files(manifest)
+        verify_snapshot_signature(snapshot.name, manifest)
+    return approved_manifest(data, manifest)
+
+
+def source_file_names(directory_fd, prefix=()):
+    names = set()
+    with os.scandir(os.dup(directory_fd)) as entries:
+        for entry in entries:
+            try:
+                details = entry.stat(follow_symlinks=False)
+            except OSError as error:
+                raise ValueError('unsafe file in snapshot data') from error
+            if stat.S_ISLNK(details.st_mode) or not entry.name:
+                raise ValueError('unsafe file in snapshot data')
+            path = prefix + (entry.name,)
+            if stat.S_ISDIR(details.st_mode):
+                child_fd = open_directory(entry.name, directory_fd)
+                try:
+                    names.update(source_file_names(child_fd, path))
+                finally:
+                    os.close(child_fd)
+            elif stat.S_ISREG(details.st_mode):
+                names.add('/'.join(path))
+            else:
+                raise ValueError('unsafe file in snapshot data')
+    return names
+
+
+def open_manifest_file(data_fd, path):
+    parent_fd = os.dup(data_fd)
+    try:
+        for name in path.parts[:-1]:
+            child_fd = open_directory(name, parent_fd)
+            os.close(parent_fd)
+            parent_fd = child_fd
+        try:
+            return os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+        except OSError as error:
+            raise ValueError('unsafe file in snapshot data') from error
+    finally:
+        os.close(parent_fd)
+
+
+def copy_manifest_file(data_fd, candidate_data, path, expected_size, expected_digest):
+    source_fd = open_manifest_file(data_fd, path)
+    try:
+        details = os.fstat(source_fd)
+        if not stat.S_ISREG(details.st_mode) or details.st_size != expected_size:
+            raise ValueError('snapshot file size mismatch')
+        destination = candidate_data.joinpath(*path.parts)
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        remaining = expected_size
+        with os.fdopen(source_fd, 'rb', closefd=False) as source, destination.open('xb') as target:
+            while remaining:
+                block = source.read(min(COPY_BLOCK_BYTES, remaining))
+                if not block:
+                    raise ValueError('snapshot file changed while copying')
+                target.write(block)
+                digest.update(block)
+                remaining -= len(block)
+            if source.read(1):
+                raise ValueError('snapshot file changed while copying')
+        destination.chmod(0o600)
+        if digest.hexdigest() != expected_digest:
+            raise ValueError('archive checksum mismatch')
+    finally:
+        os.close(source_fd)
+
+
+def copy_manifest_data(snapshot_fd, manifest, candidate_data):
+    files = manifest_files(manifest)
+    reserve_disk(candidate_data.parent, sum(size for _, _, size, _ in files))
+    data_fd = open_directory('data', snapshot_fd)
+    try:
+        expected_names = {name for name, _, _, _ in files}
+        if source_file_names(data_fd) != expected_names:
+            raise ValueError('snapshot tree does not match manifest')
+        candidate_data.mkdir(mode=0o700)
+        for _, path, size, digest in files:
+            copy_manifest_file(data_fd, candidate_data, path, size, digest)
+    finally:
+        os.close(data_fd)
 
 
 def assert_network_isolation():
@@ -715,17 +882,16 @@ def restore(snapshot_path, image):
     if not DIGEST.fullmatch(image):
         raise ValueError('only published fork digest allowed')
     path = snapshot_source(snapshot_path)
+    snapshot_fd, manifest = open_authenticated_snapshot(path)
     base = ensure_dir(ROOT / 'generations')
     generation = f'{path.name}-{image.rsplit(":", 1)[1][:12]}'
     candidate_data = base / generation
-    manifest_path = base / f'.{generation}.manifest.json'
-    if candidate_data.exists() or manifest_path.exists():
+    if candidate_data.exists():
+        os.close(snapshot_fd)
         raise RuntimeError('candidate name collision')
     try:
-        shutil.copytree(path / 'data', candidate_data, symlinks=True)
-        shutil.copy2(path / 'manifest.json', manifest_path)
-        remove_sqlite_shared_memory(candidate_data)
-        manifest, expected = approved_snapshot(path, candidate_data, manifest_path)
+        copy_manifest_data(snapshot_fd, manifest, candidate_data)
+        manifest, expected = approved_manifest(candidate_data, manifest)
         if sanitize(candidate_data, staging_password_hash()) != expected:
             raise RuntimeError('restored snapshot count mismatch')
         remove_container(CANDIDATE)
@@ -746,7 +912,7 @@ def restore(snapshot_path, image):
         shutil.rmtree(candidate_data, ignore_errors=True)
         raise
     finally:
-        manifest_path.unlink(missing_ok=True)
+        os.close(snapshot_fd)
 
 
 def candidate_state():

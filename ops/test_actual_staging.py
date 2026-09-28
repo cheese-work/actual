@@ -802,21 +802,21 @@ class CandidateTests(unittest.TestCase):
         (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
         (self.root / 'snapshot-auth.key').chmod(0o600)
 
-        original_remove = staging.remove_sqlite_shared_memory
+        original_copy = staging.copy_manifest_file
 
-        def inject_during_copy_cleanup(data):
-            (data / 'extra-untrusted').write_text('fixture')
-            (data / 'injected.sqlite-shm').write_text('fixture')
-            original_remove(data)
-            self.assertFalse((data / 'injected.sqlite-shm').exists())
+        def mutate_before_copy(*args):
+            with sqlite3.connect(snapshot / 'data/user-files/group-fixture.sqlite') as database:
+                database.execute('INSERT INTO messages_binary VALUES (?)', (b'tampered',))
+            return original_copy(*args)
 
         image = f'{staging.IMAGE}{"a" * 64}'
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'BACKUPS', backups), \
                 mock.patch.object(staging, 'remove_container'), \
-                mock.patch.object(staging, 'remove_sqlite_shared_memory', side_effect=inject_during_copy_cleanup):
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)), \
+                mock.patch.object(staging, 'copy_manifest_file', side_effect=mutate_before_copy):
             staging.sign_snapshot(snapshot.name, manifest)
-            with self.assertRaisesRegex(ValueError, 'archive checksum mismatch'):
+            with self.assertRaisesRegex(ValueError, 'snapshot file size mismatch|archive checksum mismatch'):
                 staging.restore(snapshot, image)
         self.assertFalse(list((self.root / 'generations').iterdir()))
 
@@ -837,11 +837,115 @@ class CandidateTests(unittest.TestCase):
         image = f'{staging.IMAGE}{"a" * 64}'
         with mock.patch.object(staging, 'ROOT', self.root), \
                 mock.patch.object(staging, 'BACKUPS', backups), \
-                mock.patch.object(staging, 'remove_container'):
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)):
             staging.sign_snapshot(snapshot.name, manifest)
             with self.assertRaisesRegex(ValueError, 'unsafe'):
                 staging.restore(snapshot, image)
         self.assertFalse(list((self.root / 'generations').iterdir()))
+
+    def test_restore_rejects_symlinked_manifest_before_copy(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'):
+            staging.sign_snapshot(snapshot.name, manifest)
+            (snapshot / 'manifest.json').unlink()
+            (snapshot / 'manifest.json').symlink_to('/dev/zero')
+            with self.assertRaisesRegex(ValueError, 'unsafe snapshot file'):
+                staging.restore(snapshot, image)
+        self.assertFalse((self.root / 'generations').exists())
+
+    def test_restore_rejects_symlinked_data_root_before_copy(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)):
+            staging.sign_snapshot(snapshot.name, manifest)
+            shutil.rmtree(snapshot / 'data')
+            (snapshot / 'data').symlink_to(self.root / 'server-files')
+            with self.assertRaisesRegex(ValueError, 'unsafe snapshot directory'):
+                staging.restore(snapshot, image)
+        self.assertFalse(list((self.root / 'generations').iterdir()))
+
+    def test_restore_rejects_sparse_manifest_without_disk_reserve(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        account = snapshot / 'data/server-files/account.sqlite'
+        account.write_bytes(b'fixture')
+        with account.open('r+b') as stream:
+            stream.truncate(200 * 1024**2)
+        manifest = {
+            'files': {'server-files/account.sqlite': [200 * 1024**2, 'a' * 64]},
+            'budget_count': 1,
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+
+        disk = mock.Mock(free=5 * 1024**3 + 200 * 1024**2 - 1, total=10 * 1024**3)
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=disk):
+            staging.sign_snapshot(snapshot.name, manifest)
+            with self.assertRaisesRegex(RuntimeError, 'disk reserve insufficient'):
+                staging.restore(snapshot, image)
+        self.assertFalse(list((self.root / 'generations').iterdir()))
+
+    def test_restore_copies_only_authenticated_manifest_files(self):
+        backups = self.root / 'backups'
+        snapshot = backups / 'actual-consistent-1'
+        shutil.copytree(self.root / 'server-files', snapshot / 'data/server-files')
+        shutil.copytree(self.root / 'user-files', snapshot / 'data/user-files')
+        manifest = {
+            'files': staging.audit(snapshot / 'data'),
+            'budget_count': staging.budget_count(snapshot / 'data'),
+        }
+        (snapshot / 'manifest.json').write_text(json.dumps(manifest))
+        (self.root / 'snapshot-auth.key').write_bytes(b'k' * 32)
+        (self.root / 'snapshot-auth.key').chmod(0o600)
+        (self.root / 'password.hash').write_text('$argon2id$fixture')
+        (self.root / 'password.hash').chmod(0o600)
+
+        image = f'{staging.IMAGE}{"a" * 64}'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'BACKUPS', backups), \
+                mock.patch.object(staging, 'remove_container'), \
+                mock.patch.object(staging, 'create_container'), \
+                mock.patch.object(staging.shutil, 'disk_usage', return_value=mock.Mock(free=10**12, total=10**12)):
+            staging.sign_snapshot(snapshot.name, manifest)
+            candidate = staging.restore(snapshot, image)
+        self.assertEqual(candidate['manifest'], manifest)
+        self.assertTrue((self.root / 'generations' / candidate['generation'] / 'server-files/account.sqlite').is_file())
 
 
 if __name__ == '__main__':
