@@ -348,6 +348,7 @@ def assert_network_isolation():
     subnet = config[0]['Subnet']
     assert_firewall_hook('INPUT', bridge, 'ACTUAL_STAGING_INPUT')
     assert_firewall_deny('ACTUAL_STAGING_INPUT', subnet, {config[0]['Gateway']})
+    assert_effective_forward_hook(bridge, 'ACTUAL_STAGING_FORWARD')
     assert_firewall_hook('DOCKER-USER', bridge, 'ACTUAL_STAGING_FORWARD')
     assert_firewall_deny('ACTUAL_STAGING_FORWARD', subnet, production_ips)
 
@@ -375,6 +376,19 @@ def assert_firewall_hook(chain, bridge, policy):
         lambda rule: firewall_interface_may_match(firewall_value(rule, '-i'), bridge),
         f'{chain} isolation hook',
     )
+
+
+def assert_effective_forward_hook(bridge, policy):
+    rules = firewall_rules('FORWARD')
+    try:
+        index = next(
+            index for index, rule in enumerate(rules)
+            if firewall_is_full_hook(rule, 'FORWARD', bridge, policy)
+        )
+    except StopIteration as error:
+        raise ValueError('missing FORWARD isolation hook') from error
+    if index:
+        raise ValueError('FORWARD isolation hook is shadowed')
 
 
 def assert_firewall_deny(policy, subnet, destinations):

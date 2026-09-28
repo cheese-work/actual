@@ -12,13 +12,14 @@ container, or the live-directory tar archive as a restore source.
   that exact lock before this helper is enabled.
 - Snapshots send production `SIGTERM` only, wait no longer than 20 seconds
   for capture, and never use Docker's kill-on-timeout stop path. A durable
-  original-ID/image record lets the 25-second watchdog and boot recovery start
+  original-ID/image record lets the 20-second watchdog and boot recovery start
   only the exact production container interrupted by a refresh.
 - Snapshot manifests audit every file and every SQLite database. Restore fails
   on a changed archive, unsupported account schema, copied sessions, auth,
   OpenID state, integration secrets, source config, or unpinned image.
 - A candidate runs only on `actual-staging-isolated` and
-  `127.0.0.1:15009`. The bridge must disable masquerading and have verified
+  `127.0.0.1:15009`. The bridge must disable masquerading and have an exact
+  position-one `FORWARD -> ACTUAL_STAGING_FORWARD` hook, plus verified
   `DOCKER-USER` DROP rules for both its gateway and every production container
   IP. Promotion recreates `actual-staging` on `127.0.0.1:15008`; replacement
   and state commits roll back together.
@@ -36,7 +37,10 @@ archive or a production credential.
 2. Create `actual-staging-isolated` as an internal Docker bridge with
    `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
    name. Add `INPUT -> ACTUAL_STAGING_INPUT` and
-   `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks for that bridge. Earlier
+   position-one `FORWARD -> ACTUAL_STAGING_FORWARD`, `INPUT ->
+   ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
+   for that bridge. The `FORWARD` hook must precede `ts-forward`; the helper
+   fails closed if it is missing or displaced. Earlier
    rules may only be unrelated-interface traffic or scoped
    `ESTABLISHED,RELATED` replies; no earlier jump, goto, RETURN, or NEW
    accept is allowed. Each hook must match only the bridge interface, and each

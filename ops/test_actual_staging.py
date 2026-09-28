@@ -69,6 +69,12 @@ class CandidateTests(unittest.TestCase):
                 '-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT',
                 '-A DOCKER-USER -i act-stg0 -j ACTUAL_STAGING_FORWARD',
             )),
+            'FORWARD': '\n'.join((
+                '-P FORWARD DROP',
+                '-A FORWARD -i act-stg0 -j ACTUAL_STAGING_FORWARD',
+                '-A FORWARD -j ts-forward',
+                '-A FORWARD -j DOCKER-USER',
+            )),
             'ACTUAL_STAGING_INPUT': '\n'.join((
                 '-N ACTUAL_STAGING_INPUT',
                 '-A ACTUAL_STAGING_INPUT -s 172.25.0.0/24 -d 172.25.0.1/32 -j DROP',
@@ -424,6 +430,27 @@ class CandidateTests(unittest.TestCase):
             '-A INPUT -i act-stg0 -j ACTUAL_STAGING_INPUT',
         ))
         with self.assertRaisesRegex(ValueError, 'INPUT isolation hook is shadowed'):
+            self.assert_network_fixture(network, production, policies)
+
+    def test_network_isolation_requires_effective_forward_hook(self):
+        network, production, policies = self.network_fixture()
+        policies['FORWARD'] = '\n'.join((
+            '-P FORWARD DROP',
+            '-A FORWARD -j ts-forward',
+            '-A FORWARD -j DOCKER-USER',
+        ))
+        with self.assertRaisesRegex(ValueError, 'missing FORWARD isolation hook'):
+            self.assert_network_fixture(network, production, policies)
+
+    def test_network_isolation_rejects_forward_hook_after_tailscale_bypass(self):
+        network, production, policies = self.network_fixture()
+        policies['FORWARD'] = '\n'.join((
+            '-P FORWARD DROP',
+            '-A FORWARD -j ts-forward',
+            '-A FORWARD -i act-stg0 -j ACTUAL_STAGING_FORWARD',
+            '-A FORWARD -j DOCKER-USER',
+        ))
+        with self.assertRaisesRegex(ValueError, 'FORWARD isolation hook is shadowed'):
             self.assert_network_fixture(network, production, policies)
 
     def test_network_isolation_rejects_goto_before_input_hook(self):
