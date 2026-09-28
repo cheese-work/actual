@@ -216,5 +216,9 @@
   "On budget": "Tài khoản trong ngân sách",
   "Off budget": "Tài khoản theo dõi",
   "Closed accounts": "Tài khoản đã đóng",
-  "Closed accounts...": "Tài khoản đã đóng..."
+  "Closed accounts...": "Tài khoản đã đóng...",
+  "Rename": "Đổi tên",
+  "Reopen": "Mở lại",
+  "Close": "Đóng",
+  "Toggle balance history": "Bật/tắt lịch sử số dư"
 }
