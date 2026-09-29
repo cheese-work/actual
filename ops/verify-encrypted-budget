@@ -8,6 +8,7 @@ on 127.0.0.1:15009. Nothing is written to disk; secrets, tokens, headers, reques
 bodies and budget bytes are never printed. Needs python3 `cryptography` (AES-GCM).
 """
 import base64
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -20,6 +21,12 @@ import time
 import urllib.error
 from urllib.parse import quote
 import urllib.request
+
+try:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:  # reported by verify() before any network call
+    AESGCM = InvalidTag = None
 
 ROOT = Path('/home/congvc/projects/oss/actual-staging')
 PASSWORD_FILE = Path.home() / '.config/actual-staging/staging-password.txt'
@@ -43,17 +50,29 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def private_text(path, what):
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     except OSError:
         raise Fail(f'{what} must be a readable regular file, not a symlink') from None
-    with os.fdopen(fd) as stream:
+    with os.fdopen(fd, encoding='utf-8') as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
             raise Fail(f'{what} must be a private regular file owned by the caller')
-        text = stream.read().removesuffix('\n')
+        text = stream.read().rstrip('\r\n')
     if not text:
         raise Fail(f'{what} is empty')
     return text
+
+
+def read_candidate_blob(path, expected_size):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        raise Fail('candidate budget file missing or unsafe') from None
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size != expected_size:
+            raise Fail('served budget does not match the candidate data directory')
+        return stream.read(expected_size + 1)
 
 
 def candidate_record(snapshot, image, candidate_id):
@@ -71,7 +90,7 @@ def candidate_record(snapshot, image, candidate_id):
     if data.parent != (ROOT / 'generations').resolve() or data.name != candidate['generation']:
         raise Fail('candidate data outside staging root')
     account = quote(str(data / 'server-files/account.sqlite'))
-    with sqlite3.connect(f'file:{account}?mode=ro', uri=True) as db:
+    with closing(sqlite3.connect(f'file:{account}?mode=ro', uri=True)) as db:
         ids = [row[0] for row in db.execute('SELECT id FROM files WHERE deleted = 0')]
     if len(ids) != 1 or candidate['budget_count'] != 1:
         raise Fail('candidate must hold exactly one budget')
@@ -98,13 +117,20 @@ class Client:
             request.add_header(name, value)
         try:
             with self.opener.open(request, timeout=min(REQUEST_SECONDS, remaining)) as response:
-                data = response.read(MAX_BYTES + 1)
+                if int(response.headers.get('Content-Length') or 0) > MAX_BYTES:
+                    raise Fail(f'{path} response too large')
+                chunks, size = [], 0
+                while chunk := response.read1(1 << 16):
+                    size += len(chunk)
+                    if size > MAX_BYTES:
+                        raise Fail(f'{path} response too large')
+                    if time.monotonic() >= self.stop:  # per-recv timeouts alone let a trickle outlive the deadline
+                        raise Fail('verification deadline exceeded')
+                    chunks.append(chunk)
         except (urllib.error.URLError, OSError, ValueError) as error:  # timeouts are OSError
             status = getattr(error, 'code', 'unreachable')
             raise Fail(f'{path} request failed ({status})') from None
-        if len(data) > MAX_BYTES:
-            raise Fail(f'{path} response too large')
-        return data
+        return b''.join(chunks)
 
     def json(self, path, body=None, headers=None):
         try:
@@ -117,8 +143,6 @@ class Client:
 
 
 def decrypt(key, encrypted, meta):
-    from cryptography.exceptions import InvalidTag
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     if meta.get('algorithm') != 'aes-256-gcm':
         raise Fail('unsupported encryption algorithm')
     try:
@@ -130,6 +154,8 @@ def decrypt(key, encrypted, meta):
 
 
 def verify(snapshot, image, candidate_id):
+    if AESGCM is None:
+        raise Fail("python3 'cryptography' module is not installed")
     file_id, data = candidate_record(snapshot, image, candidate_id)
     password = private_text(PASSWORD_FILE, 'staging password file')
     e2e = private_text(KEY_FILE, 'E2E key file')
@@ -154,8 +180,7 @@ def verify(snapshot, image, candidate_id):
             raise Fail('key-test key identity mismatch')
         decrypt(key, base64.b64decode(test['value'], validate=True), test['meta'])
         blob = client.call('/sync/download-user-file', headers={'x-actual-file-id': file_id})
-        on_disk = data / 'user-files' / f'file-{file_id}.blob'
-        if on_disk.is_symlink() or not on_disk.is_file() or on_disk.read_bytes() != blob:
+        if read_candidate_blob(data / 'user-files' / f'file-{file_id}.blob', len(blob)) != blob:
             raise Fail('served budget does not match the candidate data directory')
         if not decrypt(key, blob, meta).startswith(b'PK\x03\x04'):
             raise Fail('decrypted budget is not a budget archive')
