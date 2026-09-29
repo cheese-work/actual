@@ -151,5 +151,7 @@
   "Found {{count}} split transactions with mismatched amounts on the below dates. Please review them manually:_one": "Đã tìm thấy {{count}} giao dịch tách có số tiền không khớp vào các ngày bên dưới. Vui lòng xem xét thủ công:",
   "Found {{count}} split transactions with mismatched amounts on the below dates. Please review them manually:_other": "Đã tìm thấy {{count}} giao dịch tách có số tiền không khớp vào các ngày bên dưới. Vui lòng xem xét thủ công:",
   "No split transactions found needing repair.": "Không tìm thấy giao dịch tách nào cần sửa.",
-  "Repair transactions": "Sửa giao dịch"
+  "Repair transactions": "Sửa giao dịch",
+  "<0>Let's add your first account.</0> Accounts hold your transactions, like everyday spending, savings, credit cards, or cash. You can connect to your bank to import transactions automatically, or add them yourself.": "<0>Hãy thêm tài khoản đầu tiên.</0> Tài khoản lưu các giao dịch của bạn, chẳng hạn như chi tiêu hằng ngày, tiền tiết kiệm, thẻ tín dụng hoặc tiền mặt. Bạn có thể kết nối với ngân hàng để tự động nhập giao dịch, hoặc tự thêm giao dịch.",
+  "You can add more accounts at any time from the sidebar.": "Bạn có thể thêm tài khoản bất cứ lúc nào từ thanh bên."
 }
