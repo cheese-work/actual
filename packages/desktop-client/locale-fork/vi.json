@@ -365,5 +365,18 @@
   "Are you sure you want to edit this transaction?": "Bạn có chắc muốn sửa giao dịch này không?",
   "Confirm": "Xác nhận",
   "Imported payee": "Người nhận đã nhập",
-  "Scheduled date": "Ngày định kỳ"
+  "Scheduled date": "Ngày định kỳ",
+  "Reorder {{ columnName }} column": "Sắp xếp lại cột {{ columnName }}",
+  "Always shown": "Luôn hiển thị",
+  "Table columns": "Cột của bảng",
+  "Transaction table columns": "Cột của bảng giao dịch",
+  "Choose which columns appear in the transaction table and drag them into the order you prefer.": "Chọn các cột hiển thị trong bảng giao dịch và kéo để sắp xếp theo thứ tự bạn muốn.",
+  "Apply to all transaction tables": "Áp dụng cho tất cả bảng giao dịch",
+  "Use this layout everywhere, not just in the current view.": "Dùng bố cục này ở mọi nơi, không chỉ ở chế độ xem hiện tại.",
+  "Reset to default": "Đặt lại về mặc định",
+  "Save": "Lưu",
+  "Category group": "Nhóm danh mục",
+  "Running balance": "Số dư lũy kế",
+  "Payment": "Tiền ra",
+  "Deposit": "Tiền vào"
 }
