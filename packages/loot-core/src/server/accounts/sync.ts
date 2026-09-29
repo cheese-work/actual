@@ -35,6 +35,7 @@ import type {
   TransactionEntity,
 } from '#types/models';
 
+import { assertTransactionCurrencies } from './currency-guard';
 import { getStartingBalancePayee } from './payees';
 import { title } from './title';
 
@@ -1055,6 +1056,7 @@ export async function addTransactions(
     });
     newTransactions = res.added.map(t => t.id);
   } else {
+    await assertTransactionCurrencies({ added });
     await batchMessages(async () => {
       newTransactions = await Promise.all(
         added.map(async trans => db.insertTransaction(trans)),

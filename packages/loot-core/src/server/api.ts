@@ -25,6 +25,7 @@ import type {
 } from '#types/models';
 import type { ServerHandlers } from '#types/server-handlers';
 
+import { assertAccountCurrencyChange } from './accounts/currency-guard';
 import { addTransactions } from './accounts/sync';
 import {
   accountGroupModel,
@@ -642,7 +643,9 @@ handlers['api/account-create'] = withMutation(async function ({
 handlers['api/account-update'] = withMutation(async function ({ id, fields }) {
   checkFileOpen();
   // @ts-expect-error - fix me
-  return db.updateAccount({ id, ...accountModel.fromExternal(fields) });
+  const account = accountModel.fromExternal(fields);
+  await assertAccountCurrencyChange(id, account);
+  return db.updateAccount({ id, ...account });
 });
 
 handlers['api/account-close'] = withMutation(async function ({
