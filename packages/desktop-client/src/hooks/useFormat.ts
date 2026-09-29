@@ -42,7 +42,7 @@ export type UseFormatResult = {
   forCurrency: (
     value: IntegerAmount,
     currencyCode: string | null | undefined,
-    type?: 'financial' | 'financial-with-sign',
+    type?: 'financial' | 'financial-with-sign' | 'financial-no-decimals',
   ) => string;
   currency: Currency;
   /** The user's number format prefs, for formatAccountAmount. */
@@ -168,7 +168,9 @@ export function useFormat(): UseFormatResult {
     (
       formattedNumericValue: string,
       currencySymbol: string,
-      position: string = symbolPositionPref || 'before',
+      position: 'before' | 'after' = symbolPositionPref === 'after'
+        ? 'after'
+        : 'before',
       spaceEnabled: boolean = spaceEnabledPref === 'true',
     ): string => {
       if (!currencySymbol) {
@@ -307,23 +309,26 @@ export function useFormat(): UseFormatResult {
     (
       value: IntegerAmount,
       currencyCode: string | null | undefined,
-      type: 'financial' | 'financial-with-sign' = 'financial',
+      type:
+        | 'financial'
+        | 'financial-with-sign'
+        | 'financial-no-decimals' = 'financial',
     ): string => {
       if (!currencyCode) {
         return formatDisplay(value, type);
       }
 
       const currency = getCurrency(currencyCode);
-      const formattedString = formatAccountAmount(
-        value,
-        currencyCode,
-        numberFormatConfig,
-      );
+      const formattedString = formatAccountAmount(value, currencyCode, {
+        ...numberFormatConfig,
+        hideFraction:
+          numberFormatConfig.hideFraction || type === 'financial-no-decimals',
+      });
 
       // Non-Main currencies use their own symbol placement and spacing;
       // the Main currency keeps the user's prefs (applyCurrencyStyling's
       // defaults). Unknown codes resolve to the symbol-less None currency.
-      let position: string | undefined;
+      let position: 'before' | 'after' | undefined;
       let spaceEnabled: boolean | undefined;
       if (currency.code !== activeCurrency.code) {
         position = currency.symbolFirst ? 'before' : 'after';

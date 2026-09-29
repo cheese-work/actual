@@ -22,8 +22,9 @@ export type AmountFormat = {
 };
 
 /**
- * Decimal places to *display* for a currency. This is independent of
- * storage scale, which stays fixed at two decimal places for every
+ * Decimal places to *display* for an account amount in a currency. Unlike
+ * getDecimalPlaces, this honors displayDecimalPlaces. It is independent of
+ * storage scale, which stays fixed at STORAGE_DECIMAL_PLACES for every
  * currency (see currencyToInteger/amountToInteger in shared/util.ts).
  */
 export function getDisplayDecimalPlaces(currencyCode: string): number {

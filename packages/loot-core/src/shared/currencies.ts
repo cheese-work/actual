@@ -10,7 +10,10 @@ export type Currency = {
   displayDecimalPlaces?: number;
   numberFormat: NumberFormats;
   symbolFirst: boolean;
-  // CLDR spacing between symbol and amount in the currency's home locale.
+  // Whether a space separates symbol and amount, per CLDR in the
+  // currency's home locale: Intl.NumberFormat(locale, { style: 'currency' })
+  // (e.g. de-CH for CHF gives "CHF 1'234.50"). Symbols placed after the
+  // amount are always spaced.
   spaceBetweenAmountAndSymbol: boolean;
 };
 
@@ -79,10 +82,18 @@ export const currencies: Currency[] = [
   { code: 'VND', name: 'Vietnamese Dong', symbol: '₫', decimalPlaces: 2, displayDecimalPlaces: 0, numberFormat: 'comma-dot', symbolFirst: false, spaceBetweenAmountAndSymbol: true },
 ];
 
+const currenciesByCode = new Map(currencies.map(c => [c.code, c]));
+
 export function getCurrency(code: string): Currency {
-  return currencies.find(c => c.code === code) || currencies[0];
+  return currenciesByCode.get(code) ?? currencies[0];
 }
 
+/**
+ * The currency's own precision, used for storage-scale conversions and the
+ * Main-currency display (see CHE-838). For an account amount's *display*
+ * precision use getDisplayDecimalPlaces in currency-setup.ts, which honors
+ * displayDecimalPlaces (e.g. VND shows no fraction).
+ */
 export function getDecimalPlaces(currencyCode: string): number {
   return getCurrency(currencyCode)?.decimalPlaces ?? 2;
 }

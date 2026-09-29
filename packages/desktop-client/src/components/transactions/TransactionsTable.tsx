@@ -1363,6 +1363,10 @@ const Transaction = memo(function Transaction({
     account ? account.currency : null,
   );
   const { numberFormat } = useFormat();
+  const debitValue =
+    debit === '' && credit === ''
+      ? formatAccountAmount(0, accountCurrency, numberFormat)
+      : debit;
 
   const isChild = transaction.is_child;
   const transferAcct =
@@ -1978,11 +1982,7 @@ const Transaction = memo(function Transaction({
             name="debit"
             exposed={focusedField === 'debit'}
             focused={focusedField === 'debit'}
-            value={
-              debit === '' && credit === ''
-                ? formatAccountAmount(0, accountCurrency, numberFormat)
-                : debit
-            }
+            value={debitValue}
             formatter={value =>
               // reformat value so since we might have kept decimals
               reformatAccountAmountInput(value, accountCurrency, numberFormat)
@@ -1997,10 +1997,7 @@ const Transaction = memo(function Transaction({
               ...amountStyle,
             }}
             inputProps={{
-              value:
-                debit === '' && credit === ''
-                  ? formatAccountAmount(0, accountCurrency, numberFormat)
-                  : debit,
+              value: debitValue,
               onUpdate: onUpdate.bind(null, 'debit'),
               'data-1p-ignore': true,
             }}
