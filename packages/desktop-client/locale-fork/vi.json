@@ -363,5 +363,7 @@
   "Saving your changes to this reconciled transaction may bring your reconciliation out of balance.": "Lưu thay đổi cho giao dịch đã đối chiếu này có thể khiến việc đối chiếu của bạn bị lệch.",
   "Unlocking this transaction means you won't be warned about changes that can impact your reconciled balance. (Changes to amount, account, payee, etc).": "Mở khóa giao dịch này nghĩa là bạn sẽ không được cảnh báo về các thay đổi có thể ảnh hưởng đến số dư đã đối chiếu (thay đổi số tiền, tài khoản, người nhận, v.v.).",
   "Are you sure you want to edit this transaction?": "Bạn có chắc muốn sửa giao dịch này không?",
-  "Confirm": "Xác nhận"
+  "Confirm": "Xác nhận",
+  "Imported payee": "Người nhận đã nhập",
+  "Scheduled date": "Ngày định kỳ"
 }
