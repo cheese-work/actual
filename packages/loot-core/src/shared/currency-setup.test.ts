@@ -155,4 +155,15 @@ describe('reformatAccountAmountInput', () => {
   it('keeps an empty input empty', () => {
     expect(reformatAccountAmountInput('', 'USD', commaDot)).toBe('');
   });
+
+  it('parses the input with the given number format, not the global one', () => {
+    // The global config is still comma-dot (see beforeEach); under
+    // dot-comma the '.' in '1.234' is a thousands separator.
+    expect(
+      reformatAccountAmountInput('1.234', 'USD', {
+        format: 'dot-comma',
+        hideFraction: false,
+      }),
+    ).toBe('1.234,00');
+  });
 });

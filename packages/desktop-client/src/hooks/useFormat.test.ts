@@ -135,6 +135,25 @@ describe('useFormat.forCurrency: exact strings per Main currency', () => {
     );
   });
 
+  it('prefixes a sign for non-Main currencies like it does for Main', () => {
+    mockPrefs = vndMain;
+    const { result } = renderHook(() => useFormat());
+
+    expect(result.current.forCurrency(1234, 'USD', 'financial-with-sign')).toBe(
+      '+\u202A$\u202C12.34',
+    );
+    expect(
+      result.current.forCurrency(-1234, 'USD', 'financial-with-sign'),
+    ).toBe('-\u202A$\u202C12.34');
+  });
+
+  it('renders an unknown currency code without a symbol', () => {
+    mockPrefs = usdMain;
+    const { result } = renderHook(() => useFormat());
+
+    expect(result.current.forCurrency(1234, 'XYZ')).toBe('12.34');
+  });
+
   it('delegates number formatting to the shared formatAccountAmount', () => {
     mockPrefs = { ...usdMain, numberFormat: 'dot-comma', hideFraction: 'true' };
     const { result } = renderHook(() => useFormat());
