@@ -77,5 +77,6 @@ runs:
       shell: bash
       if: ${{ inputs.download-translations == 'true' && !env.ACT }}
     - name: Keep Vietnamese unavailable before UC5 approval
+      working-directory: ${{ inputs.working-directory }}
       run: rm -f packages/desktop-client/locale/vi.json
       shell: bash
