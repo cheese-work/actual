@@ -416,6 +416,9 @@ export type CurrencyAmount = string;
  */
 export type IntegerAmount = number;
 
+/** Decimal places every stored IntegerAmount uses, whatever its currency. */
+export const STORAGE_DECIMAL_PLACES = 2;
+
 // We dont use `Number.MAX_SAFE_NUMBER` and such here because those
 // numbers are so large that it's not safe to convert them to floats
 // (i.e. N / 100). For example, `9007199254740987 / 100 ===
@@ -447,7 +450,7 @@ export function toRelaxedNumber(currencyAmount: CurrencyAmount): Amount {
 export function integerToCurrency(
   integerAmount: IntegerAmount,
   formatter = getNumberFormat().formatter,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ) {
   const divisor = Math.pow(10, decimalPlaces);
   const amount = safeNumber(integerAmount) / divisor;
@@ -464,12 +467,12 @@ export function integerToCurrencyWithDecimal(
     return integerToCurrency(
       integerAmount,
       getNumberFormat({ ...numberFormatConfig, decimalPlaces: dp }).formatter,
-      2,
+      STORAGE_DECIMAL_PLACES,
     );
   }
 
   // If decimal digits exist, keep them. Otherwise format them as usual.
-  if (integerAmount % 100 !== 0) {
+  if (integerAmount % 10 ** STORAGE_DECIMAL_PLACES !== 0) {
     return integerToCurrency(
       integerAmount,
       getNumberFormat({
@@ -500,7 +503,10 @@ export function amountToCurrencyNoDecimal(amount: Amount): CurrencyAmount {
   }).formatter.format(amount);
 }
 
-export function currencyToAmount(currencyAmount: string): Amount | null {
+export function currencyToAmount(
+  currencyAmount: string,
+  format?: NumberFormats,
+): Amount | null {
   currencyAmount = currencyAmount.replace(/\u2212/g, '-');
 
   let integer, fraction;
@@ -510,7 +516,7 @@ export function currencyToAmount(currencyAmount: string): Amount | null {
 
   if (
     !match ||
-    (match[0] === getNumberFormat().thousandsSeparator &&
+    (match[0] === getNumberFormat({ format }).thousandsSeparator &&
       match.index + 4 <= currencyAmount.length)
   ) {
     fraction = null;
@@ -543,7 +549,7 @@ export function stringToInteger(str: string): number | null {
 
 export function amountToInteger(
   amount: Amount,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ): IntegerAmount {
   const multiplier = Math.pow(10, decimalPlaces);
   return Math.round(amount * multiplier);
@@ -551,7 +557,7 @@ export function amountToInteger(
 
 export function integerToAmount(
   integerAmount: IntegerAmount,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ): Amount {
   const divisor = Math.pow(10, decimalPlaces);
   return integerAmount / divisor;

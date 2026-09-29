@@ -112,7 +112,7 @@ export function CurrencySettings() {
       const cur = getCurrency(code);
       setNumberFormatPref(cur.numberFormat);
       setHideFractionPref(cur.decimalPlaces === 0 ? 'true' : 'false');
-      setSpaceEnabledPref(cur.symbolFirst ? 'false' : 'true');
+      setSpaceEnabledPref(cur.spaceBetweenAmountAndSymbol ? 'true' : 'false');
       setSymbolPositionPref(cur.symbolFirst ? 'before' : 'after');
     }
   };

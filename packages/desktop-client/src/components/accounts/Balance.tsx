@@ -51,9 +51,7 @@ function DetailedBalance({
       <PrivacyFilter>
         <FinancialText style={{ fontWeight: 600 }}>
           {!isExactBalance && '~ '}
-          {currency
-            ? format.forCurrency(balance, currency)
-            : format(balance, 'financial')}
+          {format.forCurrency(balance, currency)}
         </FinancialText>
       </PrivacyFilter>
     </Text>
@@ -63,14 +61,15 @@ function DetailedBalance({
 type SelectedBalanceProps = {
   selectedItems: Set<string>;
   account?: AccountEntity;
+  currency?: string | null;
 };
 
 export function SelectedBalance({
   selectedItems,
   account,
+  currency,
 }: SelectedBalanceProps) {
   const { t } = useTranslation();
-  const accountCurrency = useEffectiveAccountCurrency(account?.currency);
 
   const name = `selected-balance-${[...selectedItems].join('-')}`;
 
@@ -133,7 +132,7 @@ export function SelectedBalance({
       name={t('Selected balance:')}
       balance={balance}
       isExactBalance={isExactBalance}
-      currency={accountCurrency}
+      currency={currency}
     />
   );
 }
@@ -283,7 +282,11 @@ export function Balances({
       )}
 
       {selectedItems.size > 0 && (
-        <SelectedBalance selectedItems={selectedItems} account={account} />
+        <SelectedBalance
+          selectedItems={selectedItems}
+          account={account}
+          currency={accountCurrency}
+        />
       )}
       {isFiltered && (
         <FilteredBalance

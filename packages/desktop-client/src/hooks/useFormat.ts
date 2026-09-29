@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { evalArithmetic } from '@actual-app/core/shared/arithmetic';
 import { getCurrency } from '@actual-app/core/shared/currencies';
 import type { Currency } from '@actual-app/core/shared/currencies';
-import { getDisplayDecimalPlaces } from '@actual-app/core/shared/currency-setup';
+import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
+import type { AmountFormat } from '@actual-app/core/shared/currency-setup';
 import {
   amountToInteger,
   currencyToAmount,
@@ -25,6 +26,21 @@ export type FormatType =
   | 'financial-with-sign'
   | 'financial-no-decimals';
 
+export type FinancialFormatType = Extract<
+  FormatType,
+  'financial' | 'financial-with-sign' | 'financial-no-decimals'
+>;
+
+export function isFinancialFormatType(
+  type: FormatType | undefined,
+): type is FinancialFormatType {
+  return (
+    type === 'financial' ||
+    type === 'financial-with-sign' ||
+    type === 'financial-no-decimals'
+  );
+}
+
 export type UseFormatResult = {
   (value: unknown, type?: FormatType): string;
   forEdit: (value: IntegerAmount) => string;
@@ -36,14 +52,17 @@ export type UseFormatResult = {
    * Formats a stored (scale-100) amount for display using an explicit
    * currency code instead of the Main currency — for rendering an
    * account's own currency (see getEffectiveAccountCurrency). Falls back
-   * to the Main currency's formatting when `currencyCode` is nullish.
+   * to the Main currency's formatting when `currencyCode` is empty or
+   * nullish (no currency, as in budgets without a Main currency).
    */
   forCurrency: (
     value: IntegerAmount,
     currencyCode: string | null | undefined,
-    type?: 'financial' | 'financial-with-sign',
+    type?: FinancialFormatType,
   ) => string;
   currency: Currency;
+  /** The user's number format prefs, for formatAccountAmount. */
+  numberFormat: AmountFormat;
 };
 
 export type FormatResult = {
@@ -119,6 +138,18 @@ function format(
   }
 }
 
+function withSign(
+  styledValue: string,
+  numericValue: number | undefined,
+  type: FormatType,
+): string {
+  return type === 'financial-with-sign' &&
+    numericValue != null &&
+    numericValue >= 0
+    ? '+' + styledValue
+    : styledValue;
+}
+
 export function useFormat(): UseFormatResult {
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const [hideFractionPref] = useSyncedPref('hideFraction');
@@ -153,7 +184,9 @@ export function useFormat(): UseFormatResult {
     (
       formattedNumericValue: string,
       currencySymbol: string,
-      position: string = symbolPositionPref || 'before',
+      position: 'before' | 'after' = symbolPositionPref === 'after'
+        ? 'after'
+        : 'before',
       spaceEnabled: boolean = spaceEnabledPref === 'true',
     ): string => {
       if (!currencySymbol) {
@@ -181,10 +214,7 @@ export function useFormat(): UseFormatResult {
 
   const formatDisplay = useCallback(
     (value: unknown, type: FormatType = 'string'): string => {
-      const isFinancialType =
-        type === 'financial' ||
-        type === 'financial-with-sign' ||
-        type === 'financial-no-decimals';
+      const isFinancialType = isFinancialFormatType(type);
 
       let displayDecimalPlaces: number | undefined;
 
@@ -216,14 +246,7 @@ export function useFormat(): UseFormatResult {
         );
       }
 
-      if (
-        type === 'financial-with-sign' &&
-        numericValue != null &&
-        numericValue >= 0
-      ) {
-        return '+' + styledValue;
-      }
-      return styledValue;
+      return withSign(styledValue, numericValue, type);
     },
     [
       activeCurrency,
@@ -299,56 +322,41 @@ export function useFormat(): UseFormatResult {
     (
       value: IntegerAmount,
       currencyCode: string | null | undefined,
-      type: 'financial' | 'financial-with-sign' = 'financial',
+      type: FinancialFormatType = 'financial',
     ): string => {
       if (!currencyCode) {
         return formatDisplay(value, type);
       }
 
       const currency = getCurrency(currencyCode);
-      const displayDecimalPlaces =
-        hideFractionPref === 'true' ? 0 : getDisplayDecimalPlaces(currencyCode);
+      const formattedString = formatAccountAmount(value, currencyCode, {
+        ...numberFormatConfig,
+        hideFraction:
+          numberFormatConfig.hideFraction || type === 'financial-no-decimals',
+      });
 
-      const formatter = getNumberFormat({
-        format: numberFormatConfig.format,
-        decimalPlaces: displayDecimalPlaces,
-      }).formatter;
-
-      // Storage is always at the shared two-decimal scale (see
-      // amountToInteger/currencyToInteger), regardless of which
-      // currency is being displayed.
-      const formattedString = integerToCurrency(value, formatter, 2);
-
-      let styledValue = formattedString;
-      if (currency.code !== '') {
-        // Use this currency's own symbol placement (not the Main
-        // currency's user prefs) when displaying a different currency —
-        // otherwise every non-Main account would inherit the Main
-        // currency's symbol position/spacing (e.g. Main=VND puts the
-        // symbol after with a space, which would wrongly apply to USD).
-        const position = currency.symbolFirst ? 'before' : 'after';
-        const spaceEnabled = !currency.symbolFirst;
-        styledValue =
-          currency.code === activeCurrency.code
-            ? applyCurrencyStyling(formattedString, currency.symbol)
-            : applyCurrencyStyling(
-                formattedString,
-                currency.symbol,
-                position,
-                spaceEnabled,
-              );
+      // Non-Main currencies use their own symbol placement and spacing;
+      // the Main currency keeps the user's prefs (applyCurrencyStyling's
+      // defaults). Unknown codes resolve to the symbol-less None currency.
+      let position: 'before' | 'after' | undefined;
+      let spaceEnabled: boolean | undefined;
+      if (currency.code !== activeCurrency.code) {
+        position = currency.symbolFirst ? 'before' : 'after';
+        spaceEnabled = currency.spaceBetweenAmountAndSymbol;
       }
+      const styledValue = applyCurrencyStyling(
+        formattedString,
+        currency.symbol,
+        position,
+        spaceEnabled,
+      );
 
-      if (type === 'financial-with-sign' && value >= 0) {
-        return '+' + styledValue;
-      }
-      return styledValue;
+      return withSign(styledValue, value, type);
     },
     [
       activeCurrency.code,
       formatDisplay,
-      hideFractionPref,
-      numberFormatConfig.format,
+      numberFormatConfig,
       applyCurrencyStyling,
     ],
   );
@@ -358,5 +366,6 @@ export function useFormat(): UseFormatResult {
     fromEdit,
     forCurrency,
     currency: activeCurrency,
+    numberFormat: numberFormatConfig,
   });
 }

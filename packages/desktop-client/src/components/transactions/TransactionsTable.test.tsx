@@ -1829,6 +1829,48 @@ describe('Transactions', () => {
   });
 });
 
+describe('Transactions in a non-Main currency account', () => {
+  // Main currency is unset (useSyncedPref is mocked), so a VND account
+  // renders in its own currency.
+  const vndAccounts = [{ ...accounts[0], currency: 'VND' }];
+
+  test('a new transaction amount starts at a VND-formatted zero', async () => {
+    const { container, updateProps } = renderTransactions({
+      accounts: vndAccounts,
+    });
+    updateProps({ isAdding: true });
+
+    const input = await editNewField(container, 'debit');
+    expect(input.value).toBe('0');
+  });
+
+  test('split "Amount left" uses the account currency', async () => {
+    const { container, updateProps } = renderTransactions({
+      accounts: vndAccounts,
+    });
+    updateProps({ isAdding: true });
+
+    let input = await editNewField(container, 'debit');
+    await userEvent.clear(input);
+    await userEvent.type(input, '55');
+
+    await editNewField(container, 'category');
+    await userEvent.click(screen.getByTestId('split-transaction-button'));
+    await waitForAutocomplete();
+    await waitForAutocomplete();
+    await waitForAutocomplete();
+
+    input = await editNewField(container, 'debit', 1);
+    await userEvent.clear(input);
+    await userEvent.type(input, '45');
+    await userEvent.tab();
+
+    expect(
+      container.querySelector('[data-testid="transaction-error"]')?.textContent,
+    ).toMatch(/Amount left:\s*10(?![.,\d])/);
+  });
+});
+
 describe('useAmountColumnWidths', () => {
   function transaction(amount: number) {
     return generateTransaction({ account: accounts[0].id, amount })[0];

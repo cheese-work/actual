@@ -6,7 +6,7 @@ import { Text } from '@actual-app/components/text';
 
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
 import type { FormatType } from '#hooks/useFormat';
 import { useSheetName } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
@@ -80,7 +80,7 @@ type CellValueTextProps<
   ) => string;
   /** Effective account currency (see getEffectiveAccountCurrency) to format
    * this value in, instead of the Main currency. Ignored for non-financial
-   * `type`s, and when `formatter` is provided. */
+   * `type`s, and when `formatter` or `children` is provided. */
   currency?: string | null;
 };
 
@@ -97,10 +97,7 @@ export function CellValueText<
   ...props
 }: CellValueTextProps<SheetName, FieldName>) {
   const format = useFormat();
-  const isFinancial =
-    type === 'financial' ||
-    type === 'financial-with-sign' ||
-    type === 'financial-no-decimals';
+  const isFinancial = isFinancialFormatType(type);
   const sharedProps = {
     style,
     'data-testid': name,
@@ -112,11 +109,7 @@ export function CellValueText<
     if (formatter) {
       return formatter(value, type);
     }
-    if (
-      currency &&
-      (type === 'financial' || type === 'financial-with-sign') &&
-      typeof value === 'number'
-    ) {
+    if (currency && isFinancial && typeof value === 'number') {
       return format.forCurrency(value, currency, type);
     }
     return format(value, type);
