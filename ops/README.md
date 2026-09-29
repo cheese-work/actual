@@ -66,10 +66,18 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    { "host": "staging-hostname.tailnet.ts.net", "funnel": false }
    ```
 
-3. Install private executable `ROOT/verify-encrypted-budget`. It receives the
-   snapshot name, pinned image digest, and candidate identity, performs the
-   authorized login and decrypt check without printing a secret, and exits
-   nonzero on failure. Also create
+3. Install private executable `ROOT/verify-encrypted-budget` from
+   `ops/verify-encrypted-budget` (`install -m 0700`; needs python3
+   `cryptography`). It receives the snapshot name, pinned image digest, and
+   candidate identity, rechecks them against `ROOT/candidate.json`, logs in to
+   `127.0.0.1:15009` with `~/.config/actual-staging/staging-password.txt`,
+   requires exactly one budget matching the candidate database, tests
+   `~/.config/actual-staging/budget-e2e.key` against the key-test message, and
+   decrypts the budget file (AES-256-GCM, PBKDF2 as in `loot-core`). It prints
+   no secret or budget data and exits nonzero on any failure. Actual has no
+   logout endpoint, so the in-memory session token is dropped; the resulting
+   `sessions` row is ignored by the candidate fingerprint. Wrong-password
+   attempts count toward the server's 5-per-15-minute login limit. Also create
    `~/.config/actual-staging/alert.env` mode `0600` containing
    `ACTUAL_ALERT_TARGET=CHE-828` for scheduled Multica issue-comment alerts.
    Alerts use a private UTF-8 temporary comment file and contain only fixed,
@@ -104,5 +112,5 @@ partial archives, and expired unreferenced generations are removed.
 The X99 offline suite is:
 
 ```bash
-python3 -m unittest discover -s ops -p 'test_actual_staging.py' -v
+python3 -m unittest discover -s ops -p 'test_*.py' -v
 ```
