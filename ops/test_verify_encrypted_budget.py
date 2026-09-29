@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import signal
 import tempfile
 import threading
 import time
@@ -95,7 +96,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/sync/user-get-key':
             return self.reply({'id': KEY_ID, 'salt': SALT, 'test': state['test']})
         if self.path == '/sync/download-user-file':
-            return self.reply(None, raw=state['blob'])
+            blob = state['blob']
+            self.send_response(200)
+            self.send_header('Content-Length', str(state.get('declared_length', len(blob))))
+            self.end_headers()
+            step = 1 if state.get('trickle') else len(blob)
+            for start in range(0, len(blob), step):
+                self.wfile.write(blob[start:start + step])
+                self.wfile.flush()
+                if state.get('trickle'):
+                    time.sleep(0.05)
+            return
         self.send_error(404)
 
 
@@ -266,6 +277,48 @@ class VerifierTests(unittest.TestCase):
         self.write_candidate()
         self.candidate_id = staging.verification_receipt(self.candidate)['candidate_id']
         self.assertIn('outside staging root', self.run_main()[1])
+
+    def test_fifo_secret_fails_fast_instead_of_blocking(self):
+        fifo = Path(self.tmp.name) / 'fifo.key'
+        os.mkfifo(fifo, 0o600)
+        with mock.patch.object(verifier, 'KEY_FILE', fifo):
+            def hang(*_):
+                raise AssertionError('open() blocked on a FIFO')
+            signal.signal(signal.SIGALRM, hang)
+            signal.alarm(5)  # a blocking open() would otherwise hang the suite
+            try:
+                code, err = self.run_main()
+            finally:
+                signal.alarm(0)
+        self.assertEqual(code, 1)
+        self.assertIn('private regular file', err)
+
+    def test_trickling_body_hits_overall_deadline(self):
+        self.state['trickle'] = True
+        self.state['blob'] = self.state['blob'] + b'\0' * 400  # ~22s of 1-byte writes
+        with mock.patch.object(verifier, 'DEADLINE_SECONDS', 1):
+            started = time.monotonic()
+            code, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIn('deadline', err)
+
+    def test_declared_oversize_body_rejected_early(self):
+        self.state['declared_length'] = 10**9
+        with mock.patch.object(verifier, 'MAX_BYTES', 1000):
+            self.assertIn('too large', self.run_main()[1])
+
+    def test_crlf_secret_files_accepted(self):
+        self.write_secret('password.txt', PASSWORD + '\r')  # write_secret appends \n
+        self.write_secret('e2e.key', E2E + '\r')
+        self.assertEqual(self.run_main(), (0, ''))
+
+    def test_missing_cryptography_fails_before_any_network_call(self):
+        with mock.patch.object(verifier, 'AESGCM', None):
+            code, err = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertIn('cryptography', err)
+        self.assertEqual(self.state['seen'], [])
 
     def test_secret_files_must_be_private(self):
         (Path(self.tmp.name) / 'e2e.key').chmod(0o644)
