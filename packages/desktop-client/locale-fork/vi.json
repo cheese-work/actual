@@ -354,5 +354,14 @@
   "Amount left:": "Số tiền còn lại:",
   "Distribute": "Phân bổ",
   "Add Split": "Thêm tách",
-  "Schedule": "Giao dịch định kỳ"
+  "Schedule": "Giao dịch định kỳ",
+  "Reconciled Transaction": "Giao dịch đã đối chiếu",
+  "This transfer has a linked transaction in another account that is reconciled. Deleting it may bring that account's reconciliation out of balance.": "Khoản chuyển này có một giao dịch liên kết ở tài khoản khác đã được đối chiếu. Xóa giao dịch này có thể khiến việc đối chiếu của tài khoản đó bị lệch.",
+  "Deleting reconciled transactions may bring your reconciliation out of balance.": "Xóa các giao dịch đã đối chiếu có thể khiến việc đối chiếu của bạn bị lệch.",
+  "This transfer has a linked transaction in another account that is reconciled. Editing it may bring that account's reconciliation out of balance.": "Khoản chuyển này có một giao dịch liên kết ở tài khoản khác đã được đối chiếu. Sửa giao dịch này có thể khiến việc đối chiếu của tài khoản đó bị lệch.",
+  "Editing reconciled transactions may bring your reconciliation out of balance.": "Sửa các giao dịch đã đối chiếu có thể khiến việc đối chiếu của bạn bị lệch.",
+  "Saving your changes to this reconciled transaction may bring your reconciliation out of balance.": "Lưu thay đổi cho giao dịch đã đối chiếu này có thể khiến việc đối chiếu của bạn bị lệch.",
+  "Unlocking this transaction means you won't be warned about changes that can impact your reconciled balance. (Changes to amount, account, payee, etc).": "Mở khóa giao dịch này nghĩa là bạn sẽ không được cảnh báo về các thay đổi có thể ảnh hưởng đến số dư đã đối chiếu (thay đổi số tiền, tài khoản, người nhận, v.v.).",
+  "Are you sure you want to edit this transaction?": "Bạn có chắc muốn sửa giao dịch này không?",
+  "Confirm": "Xác nhận"
 }
