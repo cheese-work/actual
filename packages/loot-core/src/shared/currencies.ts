@@ -5,8 +5,8 @@ export type Currency = {
   symbol: string;
   name: string;
   decimalPlaces: number;
-  // Display-only precision when it differs from decimalPlaces; storage
-  // always stays at decimalPlaces (see CHE-838).
+  // Display-only precision when it differs from decimalPlaces. Storage is
+  // fixed at STORAGE_DECIMAL_PLACES for every currency (see CHE-838).
   displayDecimalPlaces?: number;
   numberFormat: NumberFormats;
   symbolFirst: boolean;

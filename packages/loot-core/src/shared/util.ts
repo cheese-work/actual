@@ -416,6 +416,9 @@ export type CurrencyAmount = string;
  */
 export type IntegerAmount = number;
 
+/** Decimal places every stored IntegerAmount uses, whatever its currency. */
+export const STORAGE_DECIMAL_PLACES = 2;
+
 // We dont use `Number.MAX_SAFE_NUMBER` and such here because those
 // numbers are so large that it's not safe to convert them to floats
 // (i.e. N / 100). For example, `9007199254740987 / 100 ===
@@ -500,7 +503,10 @@ export function amountToCurrencyNoDecimal(amount: Amount): CurrencyAmount {
   }).formatter.format(amount);
 }
 
-export function currencyToAmount(currencyAmount: string): Amount | null {
+export function currencyToAmount(
+  currencyAmount: string,
+  format?: NumberFormats,
+): Amount | null {
   currencyAmount = currencyAmount.replace(/\u2212/g, '-');
 
   let integer, fraction;
@@ -510,7 +516,7 @@ export function currencyToAmount(currencyAmount: string): Amount | null {
 
   if (
     !match ||
-    (match[0] === getNumberFormat().thousandsSeparator &&
+    (match[0] === getNumberFormat({ format }).thousandsSeparator &&
       match.index + 4 <= currencyAmount.length)
   ) {
     fraction = null;

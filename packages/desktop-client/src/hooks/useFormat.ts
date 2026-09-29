@@ -122,6 +122,18 @@ function format(
   }
 }
 
+function withSign(
+  styledValue: string,
+  numericValue: number | undefined,
+  type: FormatType,
+): string {
+  return type === 'financial-with-sign' &&
+    numericValue != null &&
+    numericValue >= 0
+    ? '+' + styledValue
+    : styledValue;
+}
+
 export function useFormat(): UseFormatResult {
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const [hideFractionPref] = useSyncedPref('hideFraction');
@@ -219,14 +231,7 @@ export function useFormat(): UseFormatResult {
         );
       }
 
-      if (
-        type === 'financial-with-sign' &&
-        numericValue != null &&
-        numericValue >= 0
-      ) {
-        return '+' + styledValue;
-      }
-      return styledValue;
+      return withSign(styledValue, numericValue, type);
     },
     [
       activeCurrency,
@@ -315,25 +320,20 @@ export function useFormat(): UseFormatResult {
         numberFormatConfig,
       );
 
-      let styledValue = formattedString;
-      if (currency.code !== '') {
-        // Use this currency's own symbol placement and spacing (not the
-        // Main currency's user prefs) when displaying a different currency.
-        styledValue =
-          currency.code === activeCurrency.code
-            ? applyCurrencyStyling(formattedString, currency.symbol)
-            : applyCurrencyStyling(
-                formattedString,
-                currency.symbol,
-                currency.symbolFirst ? 'before' : 'after',
-                currency.spaceBetweenAmountAndSymbol,
-              );
-      }
+      // Use this currency's own symbol placement and spacing (not the
+      // Main currency's user prefs) when displaying a different currency.
+      // Unknown codes resolve to the symbol-less None currency.
+      const styledValue =
+        currency.code === activeCurrency.code
+          ? applyCurrencyStyling(formattedString, currency.symbol)
+          : applyCurrencyStyling(
+              formattedString,
+              currency.symbol,
+              currency.symbolFirst ? 'before' : 'after',
+              currency.spaceBetweenAmountAndSymbol,
+            );
 
-      if (type === 'financial-with-sign' && value >= 0) {
-        return '+' + styledValue;
-      }
-      return styledValue;
+      return withSign(styledValue, value, type);
     },
     [
       activeCurrency.code,

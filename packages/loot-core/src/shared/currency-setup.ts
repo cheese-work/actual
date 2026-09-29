@@ -6,6 +6,7 @@ import {
   currencyToAmount,
   getNumberFormat,
   integerToCurrency,
+  STORAGE_DECIMAL_PLACES,
 } from './util';
 import type { IntegerAmount, NumberFormats } from './util';
 
@@ -43,7 +44,7 @@ export function formatAccountAmount(
     format,
     decimalPlaces: hideFraction ? 0 : getDisplayDecimalPlaces(currencyCode),
   }).formatter;
-  return integerToCurrency(integerAmount, formatter, 2);
+  return integerToCurrency(integerAmount, formatter, STORAGE_DECIMAL_PLACES);
 }
 
 /**
@@ -59,7 +60,10 @@ export function reformatAccountAmountInput(
     return '';
   }
   return formatAccountAmount(
-    amountToCurrencyInteger(currencyToAmount(value) || 0, currencyCode),
+    amountToCurrencyInteger(
+      currencyToAmount(value, amountFormat.format) || 0,
+      currencyCode,
+    ),
     currencyCode,
     amountFormat,
   );

@@ -79,8 +79,9 @@ type CellValueTextProps<
     type?: FormatType,
   ) => string;
   /** Effective account currency (see getEffectiveAccountCurrency) to format
-   * this value in, instead of the Main currency. Ignored for non-financial
-   * `type`s, and when `formatter` is provided. */
+   * this value in, instead of the Main currency. Applies only to `financial`
+   * and `financial-with-sign`; ignored for other `type`s (including
+   * `financial-no-decimals`) and when `formatter` is provided. */
   currency?: string | null;
 };
 
