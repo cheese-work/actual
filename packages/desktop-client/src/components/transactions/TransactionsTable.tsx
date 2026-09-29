@@ -52,6 +52,7 @@ import {
   formatAccountAmount,
   reformatAccountAmountInput,
 } from '@actual-app/core/shared/currency-setup';
+import type { AmountFormat } from '@actual-app/core/shared/currency-setup';
 import { memoizeOne } from '@actual-app/core/shared/memoize';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
@@ -997,6 +998,7 @@ type TransactionProps = {
   balance: number;
   dateFormat: string;
   hideFraction: boolean;
+  numberFormat: AmountFormat;
   onSave: (
     tx: TransactionEntity,
     subTxs: TransactionEntity[] | null,
@@ -1064,6 +1066,7 @@ const Transaction = memo(function Transaction({
   balance,
   dateFormat = 'MM/dd/yyyy',
   hideFraction,
+  numberFormat,
   onSave,
   onEdit,
   onDelete,
@@ -1360,9 +1363,8 @@ const Transaction = memo(function Transaction({
     (payees && payeeId && getPayeesById(payees)[payeeId]) || undefined;
   const account = accounts && accountId && getAccountsById(accounts)[accountId];
   const accountCurrency = useEffectiveAccountCurrency(
-    getAccountCurrency(accounts, accountId),
+    account ? account.currency : null,
   );
-  const { numberFormat } = useFormat();
   const debitValue =
     debit === '' && credit === ''
       ? formatAccountAmount(0, accountCurrency, numberFormat)
@@ -2344,6 +2346,7 @@ type TransactionErrorProps = {
   isDeposit: boolean;
   /** The transaction account's own currency, unset to inherit Main. */
   accountCurrency: string | null | undefined;
+  numberFormat: AmountFormat;
   onAddSplit: () => void;
   onDistributeRemainder: () => void;
   style?: CSSProperties;
@@ -2353,12 +2356,12 @@ function TransactionError({
   error,
   isDeposit,
   accountCurrency,
+  numberFormat,
   onAddSplit,
   onDistributeRemainder,
   style,
 }: TransactionErrorProps) {
   const currency = useEffectiveAccountCurrency(accountCurrency);
-  const { numberFormat } = useFormat();
 
   switch (error.type) {
     case 'SplitTransactionError':
@@ -2416,6 +2419,7 @@ type NewTransactionProps = {
   editingTransaction: TransactionEntity['id'];
   focusedField: string;
   hideFraction: boolean;
+  numberFormat: AmountFormat;
   onSchedule: () => void;
   onAdd: () => void;
   onAddAndClose: () => void;
@@ -2458,6 +2462,7 @@ function NewTransaction({
   columns,
   dateFormat,
   hideFraction,
+  numberFormat,
   onClose,
   onSplit,
   onToggleSplit,
@@ -2533,6 +2538,7 @@ function NewTransaction({
           payees={payees}
           dateFormat={dateFormat}
           hideFraction={!!hideFraction}
+          numberFormat={numberFormat}
           expanded
           onEdit={onEdit}
           onSave={onSave}
@@ -2586,6 +2592,7 @@ function NewTransaction({
               accounts,
               transactions[0].account,
             )}
+            numberFormat={numberFormat}
             onAddSplit={() => onAddSplit(transactions[0].id)}
             onDistributeRemainder={() =>
               onDistributeRemainder(transactions[0].id)
@@ -2699,6 +2706,7 @@ function TransactionTableInner({
   showHiddenCategories,
   ...props
 }: TransactionTableInnerProps) {
+  const { numberFormat } = useFormat();
   const containerRef = createRef<HTMLDivElement>();
   const isAddingPrev = usePrevious(props.isAdding);
   const [scrollWidth, setScrollWidth] = useState(0);
@@ -2864,6 +2872,7 @@ function TransactionTableInner({
         payees={payees}
         dateFormat={dateFormat}
         hideFraction={hideFraction}
+        numberFormat={numberFormat}
         onEdit={tableNavigator.onEdit}
         onSave={props.onSave}
         onDelete={props.onDelete}
@@ -2887,6 +2896,7 @@ function TransactionTableInner({
               error={error}
               isDeposit={!!isChildDeposit}
               accountCurrency={getAccountCurrency(accounts, trans.account)}
+              numberFormat={numberFormat}
               onAddSplit={() => props.onAddSplit(trans.id)}
               onDistributeRemainder={() =>
                 props.onDistributeRemainder(trans.id)
@@ -2956,6 +2966,7 @@ function TransactionTableInner({
               columns={props.columns}
               dateFormat={dateFormat}
               hideFraction={props.hideFraction}
+              numberFormat={numberFormat}
               onClose={props.onCloseAddTransaction}
               onSchedule={props.onScheduleTemporary}
               onAdd={props.onAddTemporary}
