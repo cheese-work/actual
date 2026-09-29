@@ -73,6 +73,7 @@ runs:
         persist-credentials: false
       if: ${{ inputs.download-translations == 'true' && !env.ACT }}
     - name: Remove untranslated languages
+      working-directory: ${{ inputs.working-directory }}
       run: packages/desktop-client/bin/remove-untranslated-languages
       shell: bash
       if: ${{ inputs.download-translations == 'true' && !env.ACT }}
