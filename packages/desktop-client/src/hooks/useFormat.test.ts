@@ -47,7 +47,7 @@ describe('useFormat.forCurrency: effective account currency', () => {
     expect(result.current.forCurrency(1234, 'USD')).toBe('‪$‬12.34');
   });
 
-  it('renders a VND account under a USD Main with VND\'s own after-placement', () => {
+  it("renders a VND account under a USD Main with VND's own after-placement", () => {
     // Main=USD puts the symbol before with no space — a VND account must
     // not inherit that either.
     mockPrefs = {
@@ -61,7 +61,7 @@ describe('useFormat.forCurrency: effective account currency', () => {
     expect(result.current.forCurrency(5000000, 'VND')).toBe('50,000 ₫');
   });
 
-  it('uses the Main currency\'s own user prefs when the code matches Main currency', () => {
+  it("uses the Main currency's own user prefs when the code matches Main currency", () => {
     mockPrefs = {
       defaultCurrencyCode: 'VND',
       currencySymbolPosition: 'after',
