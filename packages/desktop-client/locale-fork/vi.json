@@ -430,5 +430,17 @@
   "is less than": "nhỏ hơn",
   "is less than or equals": "nhỏ hơn hoặc bằng",
   "is on budget": "là tài khoản trong ngân sách",
-  "is off budget": "là tài khoản theo dõi"
+  "is off budget": "là tài khoản theo dõi",
+  "Expand": "Mở rộng",
+  "Fully Expand": "Mở rộng hoàn toàn",
+  "Collapse": "Thu gọn",
+  "Toggle hidden categories": "Bật/tắt danh mục đã ẩn",
+  "Expand all": "Mở rộng tất cả",
+  "Collapse all": "Thu gọn tất cả",
+  "Hide": "Ẩn",
+  "Sort A to Z": "Sắp xếp A đến Z",
+  "Sort Z to A": "Sắp xếp Z đến A",
+  "Overwrite with templates": "Ghi đè bằng mẫu ngân sách",
+  "Add category": "Thêm danh mục",
+  "New group name": "Tên nhóm mới"
 }
