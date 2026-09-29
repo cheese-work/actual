@@ -1,17 +1,24 @@
 import type { SyncedPrefs } from '#types/prefs';
 
-import { getDecimalPlaces } from './currencies';
-import { getNumberFormat, integerToCurrency } from './util';
-import type { IntegerAmount } from './util';
+import { getCurrency } from './currencies';
+import {
+  amountToCurrencyInteger,
+  currencyToAmount,
+  getNumberFormat,
+  integerToCurrency,
+} from './util';
+import type { IntegerAmount, NumberFormats } from './util';
 
 export type CurrencySetup = {
   defaultCurrencyCode: string;
   finalized: boolean;
 };
 
-// Currencies that display without a fraction even though amounts are
-// always stored at the shared two-decimal scale (see CHE-838).
-const FRACTIONLESS_DISPLAY_CURRENCIES = new Set(['VND']);
+/** The user's number format prefs, as parsed by parseNumberFormat. */
+export type AmountFormat = {
+  format: NumberFormats;
+  hideFraction: boolean;
+};
 
 /**
  * Decimal places to *display* for a currency. This is independent of
@@ -19,25 +26,43 @@ const FRACTIONLESS_DISPLAY_CURRENCIES = new Set(['VND']);
  * currency (see currencyToInteger/amountToInteger in shared/util.ts).
  */
 export function getDisplayDecimalPlaces(currencyCode: string): number {
-  if (FRACTIONLESS_DISPLAY_CURRENCIES.has(currencyCode)) {
-    return 0;
-  }
-  return getDecimalPlaces(currencyCode);
+  const currency = getCurrency(currencyCode);
+  return currency.displayDecimalPlaces ?? currency.decimalPlaces;
 }
 
 /**
  * Formats a stored (scale-100) amount using a currency's *display*
- * precision, without a currency symbol — for un-styled contexts like
- * register cells where the symbol is implied by column context.
+ * precision and the user's number format, without a currency symbol.
  */
 export function formatAccountAmount(
   integerAmount: IntegerAmount,
   currencyCode: string,
+  { format, hideFraction }: AmountFormat,
 ): string {
   const formatter = getNumberFormat({
-    decimalPlaces: getDisplayDecimalPlaces(currencyCode),
+    format,
+    decimalPlaces: hideFraction ? 0 : getDisplayDecimalPlaces(currencyCode),
   }).formatter;
   return integerToCurrency(integerAmount, formatter, 2);
+}
+
+/**
+ * Re-formats a typed register amount (debit/credit input) at the
+ * account currency's display precision. Empty input stays empty.
+ */
+export function reformatAccountAmountInput(
+  value: string,
+  currencyCode: string,
+  amountFormat: AmountFormat,
+): string {
+  if (!value) {
+    return '';
+  }
+  return formatAccountAmount(
+    amountToCurrencyInteger(currencyToAmount(value) || 0, currencyCode),
+    currencyCode,
+    amountFormat,
+  );
 }
 
 export function getCurrencySetup(prefs: SyncedPrefs): CurrencySetup {

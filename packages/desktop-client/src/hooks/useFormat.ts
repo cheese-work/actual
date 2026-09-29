@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { evalArithmetic } from '@actual-app/core/shared/arithmetic';
 import { getCurrency } from '@actual-app/core/shared/currencies';
 import type { Currency } from '@actual-app/core/shared/currencies';
-import { getDisplayDecimalPlaces } from '@actual-app/core/shared/currency-setup';
+import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
+import type { AmountFormat } from '@actual-app/core/shared/currency-setup';
 import {
   amountToInteger,
   currencyToAmount,
@@ -44,6 +45,8 @@ export type UseFormatResult = {
     type?: 'financial' | 'financial-with-sign',
   ) => string;
   currency: Currency;
+  /** The user's number format prefs, for formatAccountAmount. */
+  numberFormat: AmountFormat;
 };
 
 export type FormatResult = {
@@ -306,36 +309,24 @@ export function useFormat(): UseFormatResult {
       }
 
       const currency = getCurrency(currencyCode);
-      const displayDecimalPlaces =
-        hideFractionPref === 'true' ? 0 : getDisplayDecimalPlaces(currencyCode);
-
-      const formatter = getNumberFormat({
-        format: numberFormatConfig.format,
-        decimalPlaces: displayDecimalPlaces,
-      }).formatter;
-
-      // Storage is always at the shared two-decimal scale (see
-      // amountToInteger/currencyToInteger), regardless of which
-      // currency is being displayed.
-      const formattedString = integerToCurrency(value, formatter, 2);
+      const formattedString = formatAccountAmount(
+        value,
+        currencyCode,
+        numberFormatConfig,
+      );
 
       let styledValue = formattedString;
       if (currency.code !== '') {
-        // Use this currency's own symbol placement (not the Main
-        // currency's user prefs) when displaying a different currency —
-        // otherwise every non-Main account would inherit the Main
-        // currency's symbol position/spacing (e.g. Main=VND puts the
-        // symbol after with a space, which would wrongly apply to USD).
-        const position = currency.symbolFirst ? 'before' : 'after';
-        const spaceEnabled = !currency.symbolFirst;
+        // Use this currency's own symbol placement and spacing (not the
+        // Main currency's user prefs) when displaying a different currency.
         styledValue =
           currency.code === activeCurrency.code
             ? applyCurrencyStyling(formattedString, currency.symbol)
             : applyCurrencyStyling(
                 formattedString,
                 currency.symbol,
-                position,
-                spaceEnabled,
+                currency.symbolFirst ? 'before' : 'after',
+                currency.spaceBetweenAmountAndSymbol,
               );
       }
 
@@ -347,8 +338,7 @@ export function useFormat(): UseFormatResult {
     [
       activeCurrency.code,
       formatDisplay,
-      hideFractionPref,
-      numberFormatConfig.format,
+      numberFormatConfig,
       applyCurrencyStyling,
     ],
   );
@@ -358,5 +348,6 @@ export function useFormat(): UseFormatResult {
     fromEdit,
     forCurrency,
     currency: activeCurrency,
+    numberFormat: numberFormatConfig,
   });
 }

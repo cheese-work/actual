@@ -48,7 +48,10 @@ import { theme } from '@actual-app/components/theme';
 import { Tooltip } from '@actual-app/components/tooltip';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
-import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
+import {
+  formatAccountAmount,
+  reformatAccountAmountInput,
+} from '@actual-app/core/shared/currency-setup';
 import { memoizeOne } from '@actual-app/core/shared/memoize';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
@@ -66,8 +69,6 @@ import {
 } from '@actual-app/core/shared/transactions';
 import {
   amountToCurrency,
-  amountToCurrencyInteger,
-  currencyToAmount,
   integerToCurrency,
   titleFirst,
 } from '@actual-app/core/shared/util';
@@ -127,6 +128,7 @@ import type {
   OnDropCallback,
 } from '#hooks/useDragDrop';
 import { useEffectiveAccountCurrency } from '#hooks/useEffectiveAccountCurrency';
+import { useFormat } from '#hooks/useFormat';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useMergedRefs } from '#hooks/useMergedRefs';
 import { usePrevious } from '#hooks/usePrevious';
@@ -1364,6 +1366,7 @@ const Transaction = memo(function Transaction({
   const accountCurrency = useEffectiveAccountCurrency(
     account ? account.currency : null,
   );
+  const { numberFormat } = useFormat();
 
   const isChild = transaction.is_child;
   const transferAcct =
@@ -1982,15 +1985,7 @@ const Transaction = memo(function Transaction({
             value={debit === '' && credit === '' ? amountToCurrency(0) : debit}
             formatter={value =>
               // reformat value so since we might have kept decimals
-              value
-                ? formatAccountAmount(
-                    amountToCurrencyInteger(
-                      currencyToAmount(value) || 0,
-                      accountCurrency,
-                    ),
-                    accountCurrency,
-                  )
-                : ''
+              reformatAccountAmountInput(value, accountCurrency, numberFormat)
             }
             valueStyle={valueStyle}
             textAlign="right"
@@ -2025,15 +2020,7 @@ const Transaction = memo(function Transaction({
             value={credit}
             formatter={value =>
               // reformat value so since we might have kept decimals
-              value
-                ? formatAccountAmount(
-                    amountToCurrencyInteger(
-                      currencyToAmount(value) || 0,
-                      accountCurrency,
-                    ),
-                    accountCurrency,
-                  )
-                : ''
+              reformatAccountAmountInput(value, accountCurrency, numberFormat)
             }
             valueStyle={valueStyle}
             textAlign="right"
@@ -2063,7 +2050,11 @@ const Transaction = memo(function Transaction({
             value={
               runningBalance == null || isChild || isTemporaryId(id)
                 ? ''
-                : formatAccountAmount(runningBalance, accountCurrency)
+                : formatAccountAmount(
+                    runningBalance,
+                    accountCurrency,
+                    numberFormat,
+                  )
             }
             valueStyle={{
               color:

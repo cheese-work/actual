@@ -24,6 +24,7 @@ const defaultCurrency: Currency = {
   decimalPlaces: 2,
   numberFormat: 'comma-dot',
   symbolFirst: false,
+  spaceBetweenAmountAndSymbol: false,
 };
 
 const defaultCategory = { id: '1', name: 'Test Category' } as CategoryEntity;

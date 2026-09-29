@@ -12,16 +12,7 @@ vi.mock('./useSyncedPref', () => ({
   useSyncedPref: (id: string) => [mockPrefs[id], vi.fn()],
 }));
 
-vi.mock('@actual-app/core/shared/currency-setup', async importOriginal => {
-  const actual =
-    await importOriginal<
-      typeof import('@actual-app/core/shared/currency-setup')
-    >();
-  return {
-    ...actual,
-    formatAccountAmount: vi.fn(actual.formatAccountAmount),
-  };
-});
+vi.mock('@actual-app/core/shared/currency-setup', { spy: true });
 
 describe('useFormat VND storage scale', () => {
   beforeEach(() => {
