@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""CHE-828 authorized encrypted-budget verifier: verify-encrypted-budget SNAPSHOT IMAGE CANDIDATE_ID.
+
+Installed by the operator as private ROOT/verify-encrypted-budget (mode 0700) and run by
+actual-staging.py. Exit 0 only after the staging-password login, the E2E key-test, and an
+authenticated AES-256-GCM decrypt of the single budget file all succeed against the candidate
+on 127.0.0.1:15009. Nothing is written to disk; secrets, tokens, headers, request/response
+bodies and budget bytes are never printed. Needs python3 `cryptography` (AES-GCM).
+"""
+import base64
+from contextlib import closing
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import stat
+import sys
+import time
+import urllib.error
+from urllib.parse import quote
+import urllib.request
+
+try:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except ImportError:  # reported by verify() before any network call
+    AESGCM = InvalidTag = None
+
+ROOT = Path('/home/congvc/projects/oss/actual-staging')
+PASSWORD_FILE = Path.home() / '.config/actual-staging/staging-password.txt'
+KEY_FILE = Path.home() / '.config/actual-staging/budget-e2e.key'
+BASE = 'http://127.0.0.1:15009'
+DIGEST = re.compile(r'^ghcr.io/cheese-work/actual-server@sha256:[0-9a-f]{64}$')
+DEADLINE_SECONDS = 90  # helper kills the verifier at 120s
+REQUEST_SECONDS = 30
+MAX_BYTES = 256 * 1024 * 1024
+IDENTITY_KEYS = ('snapshot', 'image', 'generation', 'budget_count', 'inventory', 'manifest')
+
+
+class Fail(Exception):
+    pass
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def private_text(path, what):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        raise Fail(f'{what} must be a readable regular file, not a symlink') from None
+    with os.fdopen(fd, encoding='utf-8') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
+            raise Fail(f'{what} must be a private regular file owned by the caller')
+        text = stream.read().rstrip('\r\n')
+    if not text:
+        raise Fail(f'{what} is empty')
+    return text
+
+
+def read_candidate_blob(path, expected_size):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        raise Fail('candidate budget file missing or unsafe') from None
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size != expected_size:
+            raise Fail('served budget does not match the candidate data directory')
+        return stream.read(expected_size + 1)
+
+
+def candidate_record(snapshot, image, candidate_id):
+    if not DIGEST.fullmatch(image):
+        raise Fail('image is not a pinned digest')
+    candidate = json.loads(private_text(ROOT / 'candidate.json', 'candidate record'))
+    if any(key not in candidate for key in IDENTITY_KEYS):
+        raise Fail('candidate identity is incomplete')
+    canonical = json.dumps({k: candidate[k] for k in IDENTITY_KEYS}, sort_keys=True, separators=(',', ':')).encode()
+    if hashlib.sha256(canonical).hexdigest() != candidate_id:
+        raise Fail('candidate identity mismatch')
+    if candidate['snapshot'] != snapshot or candidate['image'] != image:
+        raise Fail('candidate snapshot or image mismatch')
+    data = Path(candidate['data']).resolve(strict=True)
+    if data.parent != (ROOT / 'generations').resolve() or data.name != candidate['generation']:
+        raise Fail('candidate data outside staging root')
+    account = quote(str(data / 'server-files/account.sqlite'))
+    with closing(sqlite3.connect(f'file:{account}?mode=ro', uri=True)) as db:
+        ids = [row[0] for row in db.execute('SELECT id FROM files WHERE deleted = 0')]
+    if len(ids) != 1 or candidate['budget_count'] != 1:
+        raise Fail('candidate must hold exactly one budget')
+    return ids[0], data
+
+
+class Client:
+    def __init__(self):
+        self.stop = time.monotonic() + DEADLINE_SECONDS
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.token = None
+
+    def call(self, path, body=None, headers=None):
+        remaining = self.stop - time.monotonic()
+        if remaining <= 0:
+            raise Fail('verification deadline exceeded')
+        request = urllib.request.Request(BASE + path, method='POST' if body is not None else 'GET')
+        if body is not None:
+            request.add_header('Content-Type', 'application/json')
+            request.data = json.dumps(body).encode()
+        if self.token:
+            request.add_header('x-actual-token', self.token)
+        for name, value in (headers or {}).items():
+            request.add_header(name, value)
+        try:
+            with self.opener.open(request, timeout=min(REQUEST_SECONDS, remaining)) as response:
+                if int(response.headers.get('Content-Length') or 0) > MAX_BYTES:
+                    raise Fail(f'{path} response too large')
+                chunks, size = [], 0
+                while chunk := response.read1(1 << 16):
+                    size += len(chunk)
+                    if size > MAX_BYTES:
+                        raise Fail(f'{path} response too large')
+                    if time.monotonic() >= self.stop:  # per-recv timeouts alone let a trickle outlive the deadline
+                        raise Fail('verification deadline exceeded')
+                    chunks.append(chunk)
+        except (urllib.error.URLError, OSError, ValueError) as error:  # timeouts are OSError
+            status = getattr(error, 'code', 'unreachable')
+            raise Fail(f'{path} request failed ({status})') from None
+        return b''.join(chunks)
+
+    def json(self, path, body=None, headers=None):
+        try:
+            reply = json.loads(self.call(path, body, headers))
+        except json.JSONDecodeError:
+            raise Fail(f'{path} returned invalid JSON') from None
+        if not isinstance(reply, dict) or reply.get('status') != 'ok' or not isinstance(reply.get('data'), (dict, list)):
+            raise Fail(f'{path} did not return ok')
+        return reply['data']
+
+
+def decrypt(key, encrypted, meta):
+    if meta.get('algorithm') != 'aes-256-gcm':
+        raise Fail('unsupported encryption algorithm')
+    try:
+        iv = base64.b64decode(meta['iv'], validate=True)
+        tag = base64.b64decode(meta['authTag'], validate=True)
+        return AESGCM(key).decrypt(iv, encrypted + tag, None)
+    except (InvalidTag, KeyError, ValueError, TypeError):
+        raise Fail('decrypt failure') from None
+
+
+def verify(snapshot, image, candidate_id):
+    if AESGCM is None:
+        raise Fail("python3 'cryptography' module is not installed")
+    file_id, data = candidate_record(snapshot, image, candidate_id)
+    password = private_text(PASSWORD_FILE, 'staging password file')
+    e2e = private_text(KEY_FILE, 'E2E key file')
+    client = Client()
+    try:
+        client.token = client.json('/account/login', {'password': password})['token']
+        password = None
+        files = [f for f in client.json('/sync/list-user-files') if not f.get('deleted')]
+        if [f.get('fileId') for f in files] != [file_id]:
+            raise Fail('authorized budget selection is not the single candidate budget')
+        info = client.json('/sync/get-user-file-info', headers={'x-actual-file-id': file_id})
+        meta = info.get('encryptMeta')
+        if not meta:
+            raise Fail('budget is not encrypted')
+        stored = client.json('/sync/user-get-key', {'fileId': file_id})
+        if not stored.get('test') or stored['id'] != meta.get('keyId'):
+            raise Fail('key-test material missing or key identity mismatch')
+        # Must match loot-core encryption-internals createKeyBuffer (pbkdf2 sha512, 10000 iterations, 32 bytes).
+        key = hashlib.pbkdf2_hmac('sha512', e2e.encode(), stored['salt'].encode(), 10000, 32)
+        test = json.loads(stored['test'])
+        if test['meta'].get('keyId') != stored['id']:
+            raise Fail('key-test key identity mismatch')
+        decrypt(key, base64.b64decode(test['value'], validate=True), test['meta'])
+        blob = client.call('/sync/download-user-file', headers={'x-actual-file-id': file_id})
+        if read_candidate_blob(data / 'user-files' / f'file-{file_id}.blob', len(blob)) != blob:
+            raise Fail('served budget does not match the candidate data directory')
+        if not decrypt(key, blob, meta).startswith(b'PK\x03\x04'):
+            raise Fail('decrypted budget is not a budget archive')
+    finally:
+        # ponytail: Actual has no logout endpoint; the token lives only in memory and the
+        # helper's session-tolerant candidate fingerprint accepts the resulting sessions row.
+        client.token = e2e = password = None
+
+
+def main(argv):
+    if len(argv) != 4:
+        print('usage: verify-encrypted-budget SNAPSHOT IMAGE CANDIDATE_ID', file=sys.stderr)
+        return 2
+    try:
+        verify(*argv[1:])
+    except Fail as error:
+        print(f'verify-encrypted-budget: {error}', file=sys.stderr)
+        return 1
+    except Exception as error:  # class name only: messages may echo secrets or paths
+        print(f'verify-encrypted-budget: unexpected {type(error).__name__}', file=sys.stderr)
+        return 1
+    print('verify-encrypted-budget: ok')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
