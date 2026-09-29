@@ -89,10 +89,12 @@ export function getCurrency(code: string): Currency {
 }
 
 /**
- * The currency's own precision, used for storage-scale conversions and the
- * Main-currency display (see CHE-838). For an account amount's *display*
- * precision use getDisplayDecimalPlaces in currency-setup.ts, which honors
- * displayDecimalPlaces (e.g. VND shows no fraction).
+ * The currency's conventional fraction-digit count, used for Main-currency
+ * display and editing. Never a storage divisor: storage is fixed at
+ * STORAGE_DECIMAL_PLACES for every currency (see CHE-838). For an account
+ * amount's display precision use getDisplayDecimalPlaces in
+ * currency-setup.ts, which honors displayDecimalPlaces (e.g. VND shows no
+ * fraction).
  */
 export function getDecimalPlaces(currencyCode: string): number {
   return getCurrency(currencyCode)?.decimalPlaces ?? 2;

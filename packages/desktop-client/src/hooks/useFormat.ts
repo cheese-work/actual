@@ -214,10 +214,7 @@ export function useFormat(): UseFormatResult {
 
   const formatDisplay = useCallback(
     (value: unknown, type: FormatType = 'string'): string => {
-      const isFinancialType =
-        type === 'financial' ||
-        type === 'financial-with-sign' ||
-        type === 'financial-no-decimals';
+      const isFinancialType = isFinancialFormatType(type);
 
       let displayDecimalPlaces: number | undefined;
 

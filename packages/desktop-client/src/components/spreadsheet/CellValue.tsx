@@ -80,7 +80,7 @@ type CellValueTextProps<
   ) => string;
   /** Effective account currency (see getEffectiveAccountCurrency) to format
    * this value in, instead of the Main currency. Ignored for non-financial
-   * `type`s, and when `formatter` is provided. */
+   * `type`s, and when `formatter` or `children` is provided. */
   currency?: string | null;
 };
 
@@ -109,7 +109,7 @@ export function CellValueText<
     if (formatter) {
       return formatter(value, type);
     }
-    if (currency && isFinancialFormatType(type) && typeof value === 'number') {
+    if (currency && isFinancial && typeof value === 'number') {
       return format.forCurrency(value, currency, type);
     }
     return format(value, type);

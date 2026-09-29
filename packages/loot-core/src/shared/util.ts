@@ -450,7 +450,7 @@ export function toRelaxedNumber(currencyAmount: CurrencyAmount): Amount {
 export function integerToCurrency(
   integerAmount: IntegerAmount,
   formatter = getNumberFormat().formatter,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ) {
   const divisor = Math.pow(10, decimalPlaces);
   const amount = safeNumber(integerAmount) / divisor;
@@ -549,7 +549,7 @@ export function stringToInteger(str: string): number | null {
 
 export function amountToInteger(
   amount: Amount,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ): IntegerAmount {
   const multiplier = Math.pow(10, decimalPlaces);
   return Math.round(amount * multiplier);
@@ -557,7 +557,7 @@ export function amountToInteger(
 
 export function integerToAmount(
   integerAmount: IntegerAmount,
-  decimalPlaces: number = 2,
+  decimalPlaces: number = STORAGE_DECIMAL_PLACES,
 ): Amount {
   const divisor = Math.pow(10, decimalPlaces);
   return integerAmount / divisor;
