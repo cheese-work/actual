@@ -41,6 +41,8 @@ RECOVERY_SECONDS = 10
 INTERRUPTION_SECONDS = CAPTURE_SECONDS + RECOVERY_SECONDS
 ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
 ALERT_ISSUE = 'CHE-828'
+# Root comment on CHE-828; Multica rejects top-level comments from comment-triggered tasks, so every alert replies here.
+ALERT_PARENT = '01a0eb2a-01d5-7502-b4e6-af49fc538366'
 ALERT_ASSIGNEE = '[@c00-hermes-devops](mention://agent/b2b52f93-32e6-4caf-80ad-1b48cf60b821)'
 ALERT_MESSAGES = {
     'alert delivery test',
@@ -192,7 +194,7 @@ def alert(message):
         content.write_text(f'CHE-828 staging alert — {message}\n\n{ALERT_ASSIGNEE}\n', encoding='utf-8')
         content.chmod(0o600)
         run(
-            'multica', 'issue', 'comment', 'add', target,
+            'multica', 'issue', 'comment', 'add', target, '--parent', ALERT_PARENT,
             '--content-file', str(content), '--output', 'table', timeout=20,
         )
 

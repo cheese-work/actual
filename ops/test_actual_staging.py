@@ -543,11 +543,12 @@ class CandidateTests(unittest.TestCase):
                 mock.patch.object(staging, 'run', side_effect=stub_run):
             staging.alert('alert delivery test')
 
-        self.assertEqual(captured['command'][:5], (
-            'multica', 'issue', 'comment', 'add', 'CHE-828',
+        self.assertEqual(captured['command'][:7], (
+            'multica', 'issue', 'comment', 'add', 'CHE-828', '--parent', staging.ALERT_PARENT,
         ))
-        self.assertEqual(captured['command'][5:8], ('--content-file', str(captured['path']), '--output'))
-        self.assertEqual(captured['command'][8], 'table')
+        self.assertEqual(staging.ALERT_PARENT, '01a0eb2a-01d5-7502-b4e6-af49fc538366')
+        self.assertEqual(captured['command'][7:10], ('--content-file', str(captured['path']), '--output'))
+        self.assertEqual(captured['command'][10], 'table')
         self.assertEqual(captured['timeout'], 20)
         self.assertEqual(captured['mode'], 0o600)
         self.assertEqual(captured['directory_mode'], 0o700)

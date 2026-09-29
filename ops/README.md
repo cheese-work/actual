@@ -73,7 +73,10 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    `~/.config/actual-staging/alert.env` mode `0600` containing
    `ACTUAL_ALERT_TARGET=CHE-828` for scheduled Multica issue-comment alerts.
    Alerts use a private UTF-8 temporary comment file and contain only fixed,
-   non-financial status messages. Create
+   non-financial status messages, posted as replies under the fixed CHE-828
+   root comment (`ALERT_PARENT`): Multica rejects top-level comments from
+   comment-triggered tasks. Under `systemd --user` the CLI authenticates from
+   `~/.multica/config.json`, so alerts post as that account, not an agent. Create
    `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
    signs each manifest into private `ROOT/snapshot-signatures/`, outside the
    writable archive store. This boundary excludes backup-store writers only;
