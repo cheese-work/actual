@@ -1,3 +1,4 @@
+import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,6 +11,17 @@ let mockPrefs: Record<string, string | undefined> = {
 vi.mock('./useSyncedPref', () => ({
   useSyncedPref: (id: string) => [mockPrefs[id], vi.fn()],
 }));
+
+vi.mock('@actual-app/core/shared/currency-setup', async importOriginal => {
+  const actual =
+    await importOriginal<
+      typeof import('@actual-app/core/shared/currency-setup')
+    >();
+  return {
+    ...actual,
+    formatAccountAmount: vi.fn(actual.formatAccountAmount),
+  };
+});
 
 describe('useFormat VND storage scale', () => {
   beforeEach(() => {
@@ -85,5 +97,62 @@ describe('useFormat.forCurrency: effective account currency', () => {
     expect(result.current.forCurrency(5000000, undefined)).toBe(
       result.current(5000000, 'financial'),
     );
+  });
+});
+
+// Prefs as Settings > Currency writes them when each Main currency is picked.
+const usdMain = {
+  defaultCurrencyCode: 'USD',
+  numberFormat: 'comma-dot',
+  hideFraction: 'false',
+  currencySymbolPosition: 'before',
+  currencySpaceBetweenAmountAndSymbol: 'false',
+};
+const vndMain = {
+  defaultCurrencyCode: 'VND',
+  numberFormat: 'comma-dot',
+  hideFraction: 'false',
+  currencySymbolPosition: 'after',
+  currencySpaceBetweenAmountAndSymbol: 'true',
+};
+
+describe('useFormat.forCurrency: exact strings per Main currency', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ['USD', 'USD', 1234, '\u202A$\u202C12.34', usdMain],
+    ['USD', 'CHF', 123456, '\u202AFr.\u202C\u202F1,234.56', usdMain],
+    ['USD', 'VND', 5000000, '50,000\u202F₫', usdMain],
+    ['VND', 'USD', 1234, '\u202A$\u202C12.34', vndMain],
+    ['VND', 'CHF', 123456, '\u202AFr.\u202C\u202F1,234.56', vndMain],
+    ['VND', 'VND', 5000000, '50,000\u202F₫', vndMain],
+  ])('Main %s: %s %d renders as %j', (_main, code, value, expected, prefs) => {
+    mockPrefs = prefs;
+    const { result } = renderHook(() => useFormat());
+
+    expect(result.current.forCurrency(value, code)).toBe(expected);
+  });
+
+  it("formats other currencies with the user's number format", () => {
+    mockPrefs = { ...vndMain, numberFormat: 'dot-comma' };
+    const { result } = renderHook(() => useFormat());
+
+    expect(result.current.forCurrency(123456, 'USD')).toBe(
+      '\u202A$\u202C1.234,56',
+    );
+  });
+
+  it('delegates number formatting to the shared formatAccountAmount', () => {
+    mockPrefs = { ...usdMain, numberFormat: 'dot-comma', hideFraction: 'true' };
+    const { result } = renderHook(() => useFormat());
+
+    result.current.forCurrency(123456, 'CHF');
+
+    expect(formatAccountAmount).toHaveBeenCalledWith(123456, 'CHF', {
+      format: 'dot-comma',
+      hideFraction: true,
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { currencies, getDecimalPlaces } from './currencies';
+import { currencies, getCurrency, getDecimalPlaces } from './currencies';
 
 describe('getDecimalPlaces', () => {
   it('returns 2 for empty string (None)', () => {
@@ -41,4 +41,31 @@ describe('currency metadata', () => {
     expect(currencies[0].code).toBe('');
     expect(currencies[0].decimalPlaces).toBe(2);
   });
+});
+
+describe('display precision', () => {
+  it('keeps VND display precision in the table, apart from its storage scale', () => {
+    expect(getCurrency('VND').displayDecimalPlaces).toBe(0);
+    expect(getCurrency('VND').decimalPlaces).toBe(2);
+  });
+});
+
+describe('symbol spacing', () => {
+  it.each([
+    ['CHF', true],
+    ['BRL', true],
+    ['VND', true],
+    ['EUR', true],
+    ['USD', false],
+    ['GBP', false],
+  ])('%s spacing between amount and symbol is %s', (code, spaced) => {
+    expect(getCurrency(code).spaceBetweenAmountAndSymbol).toBe(spaced);
+  });
+
+  it.each(currencies)(
+    '$name ($code) declares its own symbol spacing',
+    currency => {
+      expect(typeof currency.spaceBetweenAmountAndSymbol).toBe('boolean');
+    },
+  );
 });

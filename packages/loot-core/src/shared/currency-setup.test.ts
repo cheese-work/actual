@@ -6,6 +6,7 @@ import {
   getCurrencySetup,
   getDisplayDecimalPlaces,
   getEffectiveAccountCurrency,
+  reformatAccountAmountInput,
 } from './currency-setup';
 import { setNumberFormat } from './util';
 
@@ -100,6 +101,8 @@ describe('display decimal places', () => {
   });
 });
 
+const commaDot = { format: 'comma-dot', hideFraction: false } as const;
+
 describe('formatAccountAmount', () => {
   beforeEach(() => {
     setNumberFormat({ format: 'comma-dot', hideFraction: false });
@@ -107,15 +110,49 @@ describe('formatAccountAmount', () => {
 
   it('formats VND fractionlessly while amounts stay stored at scale 100', () => {
     // 50,000 VND stored at the shared 2dp scale is 5,000,000.
-    expect(formatAccountAmount(5000000, 'VND')).toBe('50,000');
+    expect(formatAccountAmount(5000000, 'VND', commaDot)).toBe('50,000');
   });
 
   it('formats USD rows with their usual 2dp precision', () => {
-    expect(formatAccountAmount(1234, 'USD')).toBe('12.34');
+    expect(formatAccountAmount(1234, 'USD', commaDot)).toBe('12.34');
   });
 
   it('is not affected by the Main currency, only the given currency code', () => {
-    expect(formatAccountAmount(1234, 'USD')).toBe('12.34');
-    expect(formatAccountAmount(5000000, 'VND')).toBe('50,000');
+    expect(formatAccountAmount(1234, 'USD', commaDot)).toBe('12.34');
+    expect(formatAccountAmount(5000000, 'VND', commaDot)).toBe('50,000');
+  });
+
+  it('uses the given number format, not the global one useFormat syncs a render late', () => {
+    // The global config is still comma-dot (see beforeEach).
+    expect(
+      formatAccountAmount(123456, 'USD', {
+        format: 'dot-comma',
+        hideFraction: false,
+      }),
+    ).toBe('1.234,56');
+  });
+
+  it('hides the fraction when asked, like forCurrency', () => {
+    expect(
+      formatAccountAmount(123456, 'USD', {
+        format: 'comma-dot',
+        hideFraction: true,
+      }),
+    ).toBe('1,235');
+  });
+});
+
+describe('reformatAccountAmountInput', () => {
+  beforeEach(() => {
+    setNumberFormat({ format: 'comma-dot', hideFraction: false });
+  });
+
+  it("reformats a typed amount at the account currency's display precision", () => {
+    expect(reformatAccountAmountInput('50000', 'VND', commaDot)).toBe('50,000');
+    expect(reformatAccountAmountInput('12.3', 'USD', commaDot)).toBe('12.30');
+  });
+
+  it('keeps an empty input empty', () => {
+    expect(reformatAccountAmountInput('', 'USD', commaDot)).toBe('');
   });
 });
