@@ -526,6 +526,15 @@ class CandidateTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     staging.assert_tailnet_authorization()
 
+    TASK_ENV = {
+        'ACTUAL_ALERT_TARGET': 'CHE-828', 'ACTUAL_ALERT_PARENT': '01a0ec49-1adb-7e7c-92bd-67be58b94464',
+        'MULTICA_TOKEN': 'task-token', 'MULTICA_TASK_ID': 'task-1', 'MULTICA_AGENT_ID': 'agent-1',
+    }
+    POSTED = json.dumps({
+        'parent_id': '01a0ec49-1adb-7e7c-92bd-67be58b94464', 'author_type': 'agent',
+        'author_id': 'agent-1', 'source_task_id': 'task-1',
+    })
+
     def test_alert_uses_private_utf8_comment_file_and_fixed_issue_target(self):
         captured = {}
 
@@ -537,18 +546,17 @@ class CandidateTests(unittest.TestCase):
             captured['body'] = content.read_bytes().decode('utf-8')
             captured['mode'] = content.stat().st_mode & 0o777
             captured['directory_mode'] = content.parent.stat().st_mode & 0o777
-            return ''
+            return self.POSTED
 
-        with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+        with mock.patch.dict(os.environ, self.TASK_ENV), \
                 mock.patch.object(staging, 'run', side_effect=stub_run):
             staging.alert('alert delivery test')
 
         self.assertEqual(captured['command'][:7], (
-            'multica', 'issue', 'comment', 'add', 'CHE-828', '--parent', staging.ALERT_PARENT,
+            'multica', 'issue', 'comment', 'add', 'CHE-828', '--parent', '01a0ec49-1adb-7e7c-92bd-67be58b94464',
         ))
-        self.assertEqual(staging.ALERT_PARENT, '01a0eb2a-01d5-7502-b4e6-af49fc538366')
         self.assertEqual(captured['command'][7:10], ('--content-file', str(captured['path']), '--output'))
-        self.assertEqual(captured['command'][10], 'table')
+        self.assertEqual(captured['command'][10], 'json')
         self.assertEqual(captured['timeout'], 20)
         self.assertEqual(captured['mode'], 0o600)
         self.assertEqual(captured['directory_mode'], 0o700)
@@ -566,11 +574,37 @@ class CandidateTests(unittest.TestCase):
                     staging.alert('account balance: $100')
         run.assert_not_called()
 
+    def test_alert_fails_closed_without_agent_task_identity_or_trigger_parent(self):
+        cases = {
+            'systemd': {'MULTICA_TOKEN': '', 'MULTICA_TASK_ID': '', 'MULTICA_AGENT_ID': ''},
+            'no task id': {'MULTICA_TASK_ID': ''},
+            'no agent id': {'MULTICA_AGENT_ID': ''},
+            'no parent': {'ACTUAL_ALERT_PARENT': ''},
+            'malformed parent': {'ACTUAL_ALERT_PARENT': '01a0ec49 --parent x'},
+        }
+        for name, override in cases.items():
+            with self.subTest(name), mock.patch.dict(os.environ, {**self.TASK_ENV, **override}), \
+                    mock.patch.object(staging, 'run') as run:
+                with self.assertRaises(RuntimeError):
+                    staging.alert('alert delivery test')
+                run.assert_not_called()
+
+    def test_alert_rejects_readback_that_is_not_this_agent_task_reply(self):
+        for field, value in (('author_type', 'member'), ('author_id', 'agent-2'),
+                             ('parent_id', '01a0eb2a-01d5-7502-b4e6-af49fc538366'), ('source_task_id', 'task-2')):
+            posted = {**json.loads(self.POSTED), field: value}
+            with self.subTest(field), mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.dict(os.environ, self.TASK_ENV), \
+                    mock.patch.object(staging, 'run', return_value=json.dumps(posted)):
+                with self.assertRaisesRegex(RuntimeError, 'readback'):
+                    staging.alert('staging action failed; prior state preserved', dedupe=True)
+            self.assertEqual(list(self.root.glob('alert-*.stamp')), [])
+
     def test_deduped_alert_skips_within_window_and_resends_after(self):
         message = 'staging action failed; prior state preserved'
         with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
-                mock.patch.object(staging, 'run') as run:
+                mock.patch.dict(os.environ, self.TASK_ENV), \
+                mock.patch.object(staging, 'run', return_value=self.POSTED) as run:
             staging.alert(message, dedupe=True)
             staging.alert(message, dedupe=True)
             self.assertEqual(run.call_count, 1)
@@ -585,7 +619,7 @@ class CandidateTests(unittest.TestCase):
 
     def test_failed_deduped_alert_leaves_no_stamp(self):
         with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+                mock.patch.dict(os.environ, self.TASK_ENV), \
                 mock.patch.object(staging, 'run', side_effect=subprocess.CalledProcessError(1, 'x')):
             with self.assertRaises(subprocess.CalledProcessError):
                 staging.alert('alert delivery test', dedupe=True)
@@ -600,7 +634,7 @@ class CandidateTests(unittest.TestCase):
             self.assertTrue(content.is_file())
             raise subprocess.CalledProcessError(1, command)
 
-        with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+        with mock.patch.dict(os.environ, self.TASK_ENV), \
                 mock.patch.object(staging, 'run', side_effect=fail_run):
             with self.assertRaises(subprocess.CalledProcessError):
                 staging.alert('alert delivery test')
