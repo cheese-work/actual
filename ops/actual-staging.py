@@ -51,6 +51,7 @@ ALERT_MESSAGES = {
     'snapshot refresh stale over 26 hours',
     'staging action failed; prior state preserved',
 }
+ALERT_REPEAT_SECONDS = 6 * 3600
 MANIFEST_BYTES = 8 * 1024**2
 COPY_BLOCK_BYTES = 1024**2
 
@@ -183,12 +184,15 @@ def budget_count(root):
         return conn.execute('SELECT count(*) FROM files WHERE deleted = 0').fetchone()[0]
 
 
-def alert(message):
+def alert(message, dedupe=False):
     target = os.environ.get('ACTUAL_ALERT_TARGET')
     if target != ALERT_ISSUE:
         raise RuntimeError('alert destination must be CHE-828')
     if message not in ALERT_MESSAGES:
         raise ValueError('unsupported staging alert message')
+    stamp = ROOT / f'alert-{hashlib.sha256(message.encode()).hexdigest()[:16]}.stamp'
+    if dedupe and not stamp.is_symlink() and stamp.is_file() and time.time() - stamp.stat().st_mtime < ALERT_REPEAT_SECONDS:
+        return
     with tempfile.TemporaryDirectory(prefix='actual-staging-alert-', dir=Path.cwd()) as directory:
         content = Path(directory) / 'comment.md'
         content.write_text(f'CHE-828 staging alert — {message}\n\n{ALERT_ASSIGNEE}\n', encoding='utf-8')
@@ -197,6 +201,9 @@ def alert(message):
             'multica', 'issue', 'comment', 'add', target, '--parent', ALERT_PARENT,
             '--content-file', str(content), '--output', 'table', timeout=20,
         )
+    if dedupe:  # stamp only after a successful post so failed deliveries retry
+        ensure_dir(ROOT)
+        stamp.touch(mode=0o600)
 
 
 def alert_configured():
@@ -1148,7 +1155,7 @@ def freshness():
     cleanup_snapshots()
     marker = ROOT / 'last-success.json'
     if (ROOT / 'stale.json').exists() or not marker.exists() or time.time() - read_json(marker)['timestamp'] > 26 * 3600:
-        alert('snapshot refresh stale over 26 hours')
+        alert('snapshot refresh stale over 26 hours', dedupe=True)
         raise RuntimeError('staging stale')
 
 
@@ -1284,7 +1291,7 @@ def main():
                 print('STALE STATE WRITE FAILED', file=sys.stderr)
         if args.action not in ('recover', 'freshness', 'alert-test'):
             try:
-                alert('staging action failed; prior state preserved')
+                alert('staging action failed; prior state preserved', dedupe=True)
             except Exception:
                 print('ALERT DELIVERY FAILED', file=sys.stderr)
         raise

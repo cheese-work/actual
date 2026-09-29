@@ -566,6 +566,31 @@ class CandidateTests(unittest.TestCase):
                     staging.alert('account balance: $100')
         run.assert_not_called()
 
+    def test_deduped_alert_skips_within_window_and_resends_after(self):
+        message = 'staging action failed; prior state preserved'
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+                mock.patch.object(staging, 'run') as run:
+            staging.alert(message, dedupe=True)
+            staging.alert(message, dedupe=True)
+            self.assertEqual(run.call_count, 1)
+            stamp = next(self.root.glob('alert-*.stamp'))
+            self.assertEqual(stamp.stat().st_mode & 0o777, 0o600)
+            old = time.time() - staging.ALERT_REPEAT_SECONDS - 1
+            os.utime(stamp, (old, old))
+            staging.alert(message, dedupe=True)
+            self.assertEqual(run.call_count, 2)
+            staging.alert(message)
+            self.assertEqual(run.call_count, 3)
+
+    def test_failed_deduped_alert_leaves_no_stamp(self):
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}), \
+                mock.patch.object(staging, 'run', side_effect=subprocess.CalledProcessError(1, 'x')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                staging.alert('alert delivery test', dedupe=True)
+        self.assertEqual(list(self.root.glob('alert-*.stamp')), [])
+
     def test_alert_cli_failure_propagates_and_cleans_comment_file(self):
         captured = {}
 
