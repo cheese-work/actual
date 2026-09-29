@@ -320,18 +320,21 @@ export function useFormat(): UseFormatResult {
         numberFormatConfig,
       );
 
-      // Use this currency's own symbol placement and spacing (not the
-      // Main currency's user prefs) when displaying a different currency.
-      // Unknown codes resolve to the symbol-less None currency.
-      const styledValue =
-        currency.code === activeCurrency.code
-          ? applyCurrencyStyling(formattedString, currency.symbol)
-          : applyCurrencyStyling(
-              formattedString,
-              currency.symbol,
-              currency.symbolFirst ? 'before' : 'after',
-              currency.spaceBetweenAmountAndSymbol,
-            );
+      // Non-Main currencies use their own symbol placement and spacing;
+      // the Main currency keeps the user's prefs (applyCurrencyStyling's
+      // defaults). Unknown codes resolve to the symbol-less None currency.
+      let position: string | undefined;
+      let spaceEnabled: boolean | undefined;
+      if (currency.code !== activeCurrency.code) {
+        position = currency.symbolFirst ? 'before' : 'after';
+        spaceEnabled = currency.spaceBetweenAmountAndSymbol;
+      }
+      const styledValue = applyCurrencyStyling(
+        formattedString,
+        currency.symbol,
+        position,
+        spaceEnabled,
+      );
 
       return withSign(styledValue, value, type);
     },

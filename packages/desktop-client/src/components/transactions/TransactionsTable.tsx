@@ -67,11 +67,7 @@ import {
   ungroupTransactions,
   updateTransaction,
 } from '@actual-app/core/shared/transactions';
-import {
-  amountToCurrency,
-  integerToCurrency,
-  titleFirst,
-} from '@actual-app/core/shared/util';
+import { integerToCurrency, titleFirst } from '@actual-app/core/shared/util';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
 import type {
   AccountEntity,
@@ -1982,7 +1978,11 @@ const Transaction = memo(function Transaction({
             name="debit"
             exposed={focusedField === 'debit'}
             focused={focusedField === 'debit'}
-            value={debit === '' && credit === '' ? amountToCurrency(0) : debit}
+            value={
+              debit === '' && credit === ''
+                ? formatAccountAmount(0, accountCurrency, numberFormat)
+                : debit
+            }
             formatter={value =>
               // reformat value so since we might have kept decimals
               reformatAccountAmountInput(value, accountCurrency, numberFormat)
@@ -1998,7 +1998,9 @@ const Transaction = memo(function Transaction({
             }}
             inputProps={{
               value:
-                debit === '' && credit === '' ? amountToCurrency(0) : debit,
+                debit === '' && credit === ''
+                  ? formatAccountAmount(0, accountCurrency, numberFormat)
+                  : debit,
               onUpdate: onUpdate.bind(null, 'debit'),
               'data-1p-ignore': true,
             }}
@@ -2222,7 +2224,7 @@ const Transaction = memo(function Transaction({
                 textAlign: 'right',
               }}
             >
-              {integerToCurrency(amount)}
+              {formatAccountAmount(amount, accountCurrency, numberFormat)}
             </Text>
           </View>
         )}
@@ -2336,6 +2338,8 @@ function NotesCell({
 type TransactionErrorProps = {
   error: NonNullable<TransactionEntity['error']>;
   isDeposit: boolean;
+  /** The transaction account's own currency, unset to inherit Main. */
+  accountCurrency: string | null | undefined;
   onAddSplit: () => void;
   onDistributeRemainder: () => void;
   style?: CSSProperties;
@@ -2344,10 +2348,14 @@ type TransactionErrorProps = {
 function TransactionError({
   error,
   isDeposit,
+  accountCurrency,
   onAddSplit,
   onDistributeRemainder,
   style,
 }: TransactionErrorProps) {
+  const currency = useEffectiveAccountCurrency(accountCurrency);
+  const { numberFormat } = useFormat();
+
   switch (error.type) {
     case 'SplitTransactionError':
       if (error.version === 1) {
@@ -2365,8 +2373,10 @@ function TransactionError({
             <Text style={{ whiteSpace: 'nowrap' }}>
               <Trans>Amount left:</Trans>{' '}
               <Text style={{ fontWeight: 500 }}>
-                {integerToCurrency(
+                {formatAccountAmount(
                   isDeposit ? error.difference : -error.difference,
+                  currency,
+                  numberFormat,
                 )}
               </Text>
             </Text>
@@ -2568,6 +2578,9 @@ function NewTransaction({
           <TransactionError
             error={error}
             isDeposit={isDeposit}
+            accountCurrency={
+              getAccountsById(accounts)[transactions[0].account]?.currency
+            }
             onAddSplit={() => onAddSplit(transactions[0].id)}
             onDistributeRemainder={() =>
               onDistributeRemainder(transactions[0].id)
@@ -2868,6 +2881,9 @@ function TransactionTableInner({
             <TransactionError
               error={error}
               isDeposit={!!isChildDeposit}
+              accountCurrency={
+                getAccountsById(accounts)[trans.account]?.currency
+              }
               onAddSplit={() => props.onAddSplit(trans.id)}
               onDistributeRemainder={() =>
                 props.onDistributeRemainder(trans.id)
