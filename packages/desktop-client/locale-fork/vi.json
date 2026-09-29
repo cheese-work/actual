@@ -429,6 +429,6 @@
   "is greater than or equals": "lớn hơn hoặc bằng",
   "is less than": "nhỏ hơn",
   "is less than or equals": "nhỏ hơn hoặc bằng",
-  "is on budget": "thuộc ngân sách",
-  "is off budget": "ngoài ngân sách"
+  "is on budget": "là tài khoản trong ngân sách",
+  "is off budget": "là tài khoản theo dõi"
 }
