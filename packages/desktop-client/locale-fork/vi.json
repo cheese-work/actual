@@ -157,5 +157,16 @@
   "Selected balance:": "Số dư đã chọn:",
   "Filtered balance:": "Số dư đã lọc:",
   "Cleared total:": "Tổng đã xác nhận:",
-  "Uncleared total:": "Tổng chưa xác nhận:"
+  "Uncleared total:": "Tổng chưa xác nhận:",
+  "All reconciled!": "Đã đối chiếu xong!",
+  "Your cleared balance <2>{{clearedBalance}}</2> needs <5>{{difference}}</5> to match<7></7> your bank's balance of <10>{{bankBalance}}</10>": "Số dư đã xác nhận <2>{{clearedBalance}}</2> cần điều chỉnh <5>{{difference}}</5> để khớp với<7></7> số dư ngân hàng <10>{{bankBalance}}</10>",
+  "Lock transactions": "Khóa giao dịch",
+  "Exit reconciliation": "Thoát chế độ đối chiếu",
+  "Create reconciliation transaction": "Tạo giao dịch đối chiếu",
+  "Enter the current balance of your bank account that you want to reconcile with:": "Nhập số dư hiện tại của tài khoản ngân hàng để đối chiếu:",
+  "Last Balance from Bank: ": "Số dư gần nhất từ ngân hàng: ",
+  "Use last synced total": "Dùng số dư đồng bộ gần nhất",
+  "Reconcile": "Đối chiếu",
+  "Reconciled {{ relativeTimeAgo }} ({{ absoluteDate }})": "Đã đối chiếu {{ relativeTimeAgo }} ({{ absoluteDate }})",
+  "Not yet reconciled": "Chưa đối chiếu"
 }
