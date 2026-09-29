@@ -467,12 +467,12 @@ export function integerToCurrencyWithDecimal(
     return integerToCurrency(
       integerAmount,
       getNumberFormat({ ...numberFormatConfig, decimalPlaces: dp }).formatter,
-      2,
+      STORAGE_DECIMAL_PLACES,
     );
   }
 
   // If decimal digits exist, keep them. Otherwise format them as usual.
-  if (integerAmount % 100 !== 0) {
+  if (integerAmount % 10 ** STORAGE_DECIMAL_PLACES !== 0) {
     return integerToCurrency(
       integerAmount,
       getNumberFormat({
