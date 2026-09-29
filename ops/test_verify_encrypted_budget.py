@@ -109,6 +109,8 @@ class VerifierTests(unittest.TestCase):
         key = derive(E2E)
         blob, blob_meta = seal(key, b'PK\x03\x04fixture-budget')
         test_value, test_meta = seal(key, b'fixture-test-message')
+        (self.root / 'generations/gen/user-files').mkdir()
+        (self.root / f'generations/gen/user-files/file-{FILE_ID}.blob').write_bytes(blob)
         self.state = {
             'files': [FILE_ID], 'blob': blob, 'blob_meta': blob_meta, 'seen': [],
             'test': json.dumps({'value': base64.b64encode(test_value).decode(), 'meta': test_meta}),
@@ -135,6 +137,11 @@ class VerifierTests(unittest.TestCase):
         path.write_text(text + '\n')
         path.chmod(0o600)
 
+    def write_candidate(self):
+        path = self.root / 'candidate.json'
+        path.write_text(json.dumps(self.candidate))
+        path.chmod(0o600)
+
     def set_budgets(self, ids, candidate_edit=None):
         data = self.root / 'generations/gen'
         with contextlib.closing(sqlite3.connect(data / 'server-files/account.sqlite')) as db:
@@ -148,7 +155,7 @@ class VerifierTests(unittest.TestCase):
         }
         if candidate_edit:
             candidate_edit(self.candidate)
-        (self.root / 'candidate.json').write_text(json.dumps(self.candidate))
+        self.write_candidate()
         self.candidate_id = staging.verification_receipt(self.candidate)['candidate_id']
 
     def run_main(self, *args):
@@ -205,7 +212,7 @@ class VerifierTests(unittest.TestCase):
 
     def test_tampered_candidate_record(self):
         self.candidate['manifest'] = {'files': {'evil': 1}}
-        (self.root / 'candidate.json').write_text(json.dumps(self.candidate))
+        self.write_candidate()
         self.assertIn('identity mismatch', self.run_main()[1])
 
     def test_candidate_data_outside_root(self):
@@ -234,6 +241,31 @@ class VerifierTests(unittest.TestCase):
         source = (HERE / 'verify-encrypted-budget').read_text()
         self.assertIn("BASE = 'http://127.0.0.1:15009'", source)
         self.assertIn('ProxyHandler({})', source)
+
+    def test_served_blob_must_match_candidate_disk(self):
+        # validly encrypted but different bytes: only the disk comparison can reject
+        blob, meta = seal(derive(E2E), b'PK\x03\x04other-budget')
+        self.state['blob'], self.state['blob_meta'] = blob, meta
+        self.assertIn('does not match the candidate data', self.run_main()[1])
+
+    def test_candidate_record_must_be_private(self):
+        (self.root / 'candidate.json').chmod(0o644)
+        self.assertIn('candidate record must be a private', self.run_main()[1])
+
+    def test_symlinked_secret_rejected(self):
+        real = Path(self.tmp.name) / 'e2e.key'
+        link = Path(self.tmp.name) / 'link.key'
+        link.symlink_to(real)
+        with mock.patch.object(verifier, 'KEY_FILE', link):
+            self.assertIn('not a symlink', self.run_main()[1])
+
+    def test_generation_sibling_of_root_rejected(self):
+        nested = self.root / 'generations/gen/nested'
+        nested.mkdir()
+        self.candidate['data'], self.candidate['generation'] = str(nested), 'nested'
+        self.write_candidate()
+        self.candidate_id = staging.verification_receipt(self.candidate)['candidate_id']
+        self.assertIn('outside staging root', self.run_main()[1])
 
     def test_secret_files_must_be_private(self):
         (Path(self.tmp.name) / 'e2e.key').chmod(0o644)
