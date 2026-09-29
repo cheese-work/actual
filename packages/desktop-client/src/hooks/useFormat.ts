@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { evalArithmetic } from '@actual-app/core/shared/arithmetic';
 import { getCurrency } from '@actual-app/core/shared/currencies';
 import type { Currency } from '@actual-app/core/shared/currencies';
+import { getDisplayDecimalPlaces } from '@actual-app/core/shared/currency-setup';
 import {
   amountToInteger,
   currencyToAmount,
@@ -31,6 +32,17 @@ export type UseFormatResult = {
     value: string,
     defaultValue?: number | null,
   ) => IntegerAmount | null;
+  /**
+   * Formats a stored (scale-100) amount for display using an explicit
+   * currency code instead of the Main currency — for rendering an
+   * account's own currency (see getEffectiveAccountCurrency). Falls back
+   * to the Main currency's formatting when `currencyCode` is nullish.
+   */
+  forCurrency: (
+    value: IntegerAmount,
+    currencyCode: string | null | undefined,
+    type?: 'financial' | 'financial-with-sign',
+  ) => string;
   currency: Currency;
 };
 
@@ -138,7 +150,12 @@ export function useFormat(): UseFormatResult {
   }, [numberFormatConfig]);
 
   const applyCurrencyStyling = useCallback(
-    (formattedNumericValue: string, currencySymbol: string): string => {
+    (
+      formattedNumericValue: string,
+      currencySymbol: string,
+      position: string = symbolPositionPref || 'before',
+      spaceEnabled: boolean = spaceEnabledPref === 'true',
+    ): string => {
       if (!currencySymbol) {
         return formattedNumericValue;
       }
@@ -150,8 +167,7 @@ export function useFormat(): UseFormatResult {
         valueWithoutSign = formattedNumericValue.slice(1);
       }
 
-      const space = spaceEnabledPref === 'true' ? '\u202F' : '';
-      const position = symbolPositionPref || 'before';
+      const space = spaceEnabled ? '\u202F' : '';
 
       const styledAmount =
         position === 'after'
@@ -279,9 +295,68 @@ export function useFormat(): UseFormatResult {
     [fromAmount],
   );
 
+  const forCurrency = useCallback(
+    (
+      value: IntegerAmount,
+      currencyCode: string | null | undefined,
+      type: 'financial' | 'financial-with-sign' = 'financial',
+    ): string => {
+      if (!currencyCode) {
+        return formatDisplay(value, type);
+      }
+
+      const currency = getCurrency(currencyCode);
+      const displayDecimalPlaces =
+        hideFractionPref === 'true' ? 0 : getDisplayDecimalPlaces(currencyCode);
+
+      const formatter = getNumberFormat({
+        format: numberFormatConfig.format,
+        decimalPlaces: displayDecimalPlaces,
+      }).formatter;
+
+      // Storage is always at the shared two-decimal scale (see
+      // amountToInteger/currencyToInteger), regardless of which
+      // currency is being displayed.
+      const formattedString = integerToCurrency(value, formatter, 2);
+
+      let styledValue = formattedString;
+      if (currency.code !== '') {
+        // Use this currency's own symbol placement (not the Main
+        // currency's user prefs) when displaying a different currency —
+        // otherwise every non-Main account would inherit the Main
+        // currency's symbol position/spacing (e.g. Main=VND puts the
+        // symbol after with a space, which would wrongly apply to USD).
+        const position = currency.symbolFirst ? 'before' : 'after';
+        const spaceEnabled = !currency.symbolFirst;
+        styledValue =
+          currency.code === activeCurrency.code
+            ? applyCurrencyStyling(formattedString, currency.symbol)
+            : applyCurrencyStyling(
+                formattedString,
+                currency.symbol,
+                position,
+                spaceEnabled,
+              );
+      }
+
+      if (type === 'financial-with-sign' && value >= 0) {
+        return '+' + styledValue;
+      }
+      return styledValue;
+    },
+    [
+      activeCurrency.code,
+      formatDisplay,
+      hideFractionPref,
+      numberFormatConfig.format,
+      applyCurrencyStyling,
+    ],
+  );
+
   return Object.assign(formatDisplay, {
     forEdit,
     fromEdit,
+    forCurrency,
     currency: activeCurrency,
   });
 }
