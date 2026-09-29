@@ -147,6 +147,15 @@ describe('useFormat.forCurrency: exact strings per Main currency', () => {
     ).toBe('-\u202A$\u202C12.34');
   });
 
+  it('drops the fraction for financial-no-decimals in a non-Main currency', () => {
+    mockPrefs = vndMain;
+    const { result } = renderHook(() => useFormat());
+
+    expect(
+      result.current.forCurrency(123456, 'USD', 'financial-no-decimals'),
+    ).toBe('\u202A$\u202C1,235');
+  });
+
   it('renders an unknown currency code without a symbol', () => {
     mockPrefs = usdMain;
     const { result } = renderHook(() => useFormat());

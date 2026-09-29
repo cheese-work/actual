@@ -62,6 +62,32 @@ describe('symbol spacing', () => {
     expect(getCurrency(code).spaceBetweenAmountAndSymbol).toBe(spaced);
   });
 
+  it('spaces symbols placed after the amount', () => {
+    const unspaced = currencies.filter(
+      c => c.code !== '' && !c.symbolFirst && !c.spaceBetweenAmountAndSymbol,
+    );
+    expect(unspaced.map(c => c.code)).toEqual([]);
+  });
+
+  it('spaces exactly the symbol-first currencies CLDR spaces', () => {
+    const spacedFirst = currencies
+      .filter(c => c.symbolFirst && c.spaceBetweenAmountAndSymbol)
+      .map(c => c.code);
+    expect(spacedFirst).toEqual([
+      'ARS',
+      'BRL',
+      'CHF',
+      'COP',
+      'GTQ',
+      'IDR',
+      'LKR',
+      'MYR',
+      'PEN',
+      'PKR',
+      'UYU',
+    ]);
+  });
+
   it.each(currencies)(
     '$name ($code) declares its own symbol spacing',
     currency => {
