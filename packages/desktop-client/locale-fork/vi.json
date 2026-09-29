@@ -442,5 +442,19 @@
   "Sort Z to A": "Sắp xếp Z đến A",
   "Overwrite with templates": "Ghi đè bằng mẫu ngân sách",
   "Add category": "Thêm danh mục",
-  "New group name": "Tên nhóm mới"
+  "New group name": "Tên nhóm mới",
+  "Copy last month's budget": "Sao chép ngân sách tháng trước",
+  "Set budgets to zero": "Đặt ngân sách về không",
+  "Set budgets to 3 month average": "Đặt ngân sách theo trung bình 3 tháng",
+  "Set budgets to 6 month average": "Đặt ngân sách theo trung bình 6 tháng",
+  "Set budgets to 12 month average": "Đặt ngân sách theo trung bình 12 tháng",
+  "Check templates": "Kiểm tra mẫu",
+  "Apply budget template": "Áp dụng mẫu ngân sách",
+  "Overwrite with budget template": "Ghi đè bằng mẫu ngân sách",
+  "End of month cleanup": "Dọn dẹp cuối tháng",
+  "Set to 3 month average": "Đặt theo trung bình 3 tháng",
+  "Set to 6 month average": "Đặt theo trung bình 6 tháng",
+  "Set to yearly average": "Đặt theo trung bình năm",
+  "Copy until year end": "Sao chép đến cuối năm",
+  "Overwrite with template": "Ghi đè bằng mẫu"
 }
