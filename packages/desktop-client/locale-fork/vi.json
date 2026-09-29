@@ -2592,5 +2592,20 @@
   "Schedule deleted successfully": "Đã xóa giao dịch định kỳ thành công",
   "No schedules found. Create your first schedule to get started!": "Không tìm thấy giao dịch định kỳ nào. Hãy tạo giao dịch định kỳ đầu tiên để bắt đầu!",
   "Unnamed schedule": "Giao dịch định kỳ chưa đặt tên",
-  "Transfer {{direction}} {{accountName}}": "Chuyển khoản {{direction}} {{accountName}}"
+  "Transfer {{direction}} {{accountName}}": "Chuyển khoản {{direction}} {{accountName}}",
+  "Access Revocation Incomplete": "Thu hồi quyền truy cập chưa hoàn tất",
+  "Add new user": "Thêm người dùng mới",
+  "Back to file list": "Quay lại danh sách tệp",
+  "Delete {{selectedCount}} users_one": "Xóa {{selectedCount}} người dùng",
+  "Delete {{selectedCount}} users_other": "Xóa {{selectedCount}} người dùng",
+  "Determine which users can view and manage your budgets": "Xác định người dùng nào có thể xem và quản lý ngân sách của bạn",
+  "Error getting available users": "Lỗi khi lấy danh sách người dùng khả dụng",
+  "Filter users...": "Lọc người dùng...",
+  "Manage and view users who can create new budgets or be invited to access existing ones.": "Quản lý và xem những người dùng có thể tạo ngân sách mới hoặc được mời truy cập các ngân sách hiện có.",
+  "Owner": "Chủ sở hữu",
+  "Selected role does not exist, possibly a bug? Visit https://actualbudget.org/contact/ for support.": "Vai trò đã chọn không tồn tại, có thể là lỗi? Hãy truy cập https://actualbudget.org/contact/ để được hỗ trợ.",
+  "Server Owner": "Chủ sở hữu máy chủ",
+  "Some access permissions were not revoked successfully.": "Một số quyền truy cập chưa được thu hồi thành công.",
+  "Something happened while deleting users": "Đã xảy ra sự cố khi xóa người dùng",
+  "Something happened while editing access": "Đã xảy ra sự cố khi chỉnh sửa quyền truy cập"
 }
