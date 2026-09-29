@@ -88,6 +88,9 @@ describe('useFormat.forCurrency: effective account currency', () => {
     expect(result.current.forCurrency(5000000, undefined)).toBe(
       result.current(5000000, 'financial'),
     );
+    expect(result.current.forCurrency(5000000, '')).toBe(
+      result.current(5000000, 'financial'),
+    );
   });
 });
 

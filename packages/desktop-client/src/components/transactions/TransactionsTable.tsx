@@ -1360,7 +1360,7 @@ const Transaction = memo(function Transaction({
     (payees && payeeId && getPayeesById(payees)[payeeId]) || undefined;
   const account = accounts && accountId && getAccountsById(accounts)[accountId];
   const accountCurrency = useEffectiveAccountCurrency(
-    account ? account.currency : null,
+    getAccountCurrency(accounts, accountId),
   );
   const { numberFormat } = useFormat();
   const debitValue =
@@ -2332,6 +2332,13 @@ function NotesCell({
   );
 }
 
+function getAccountCurrency(
+  accounts: AccountEntity[] | null | undefined,
+  accountId: AccountEntity['id'] | null | undefined,
+): string | null | undefined {
+  return accountId ? getAccountsById(accounts)[accountId]?.currency : null;
+}
+
 type TransactionErrorProps = {
   error: NonNullable<TransactionEntity['error']>;
   isDeposit: boolean;
@@ -2575,9 +2582,10 @@ function NewTransaction({
           <TransactionError
             error={error}
             isDeposit={isDeposit}
-            accountCurrency={
-              getAccountsById(accounts)[transactions[0].account]?.currency
-            }
+            accountCurrency={getAccountCurrency(
+              accounts,
+              transactions[0].account,
+            )}
             onAddSplit={() => onAddSplit(transactions[0].id)}
             onDistributeRemainder={() =>
               onDistributeRemainder(transactions[0].id)
@@ -2878,9 +2886,7 @@ function TransactionTableInner({
             <TransactionError
               error={error}
               isDeposit={!!isChildDeposit}
-              accountCurrency={
-                getAccountsById(accounts)[trans.account]?.currency
-              }
+              accountCurrency={getAccountCurrency(accounts, trans.account)}
               onAddSplit={() => props.onAddSplit(trans.id)}
               onDistributeRemainder={() =>
                 props.onDistributeRemainder(trans.id)

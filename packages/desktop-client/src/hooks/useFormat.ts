@@ -26,6 +26,21 @@ export type FormatType =
   | 'financial-with-sign'
   | 'financial-no-decimals';
 
+export type FinancialFormatType = Extract<
+  FormatType,
+  'financial' | 'financial-with-sign' | 'financial-no-decimals'
+>;
+
+export function isFinancialFormatType(
+  type: FormatType | undefined,
+): type is FinancialFormatType {
+  return (
+    type === 'financial' ||
+    type === 'financial-with-sign' ||
+    type === 'financial-no-decimals'
+  );
+}
+
 export type UseFormatResult = {
   (value: unknown, type?: FormatType): string;
   forEdit: (value: IntegerAmount) => string;
@@ -37,12 +52,13 @@ export type UseFormatResult = {
    * Formats a stored (scale-100) amount for display using an explicit
    * currency code instead of the Main currency — for rendering an
    * account's own currency (see getEffectiveAccountCurrency). Falls back
-   * to the Main currency's formatting when `currencyCode` is nullish.
+   * to the Main currency's formatting when `currencyCode` is empty or
+   * nullish (no currency, as in budgets without a Main currency).
    */
   forCurrency: (
     value: IntegerAmount,
     currencyCode: string | null | undefined,
-    type?: 'financial' | 'financial-with-sign' | 'financial-no-decimals',
+    type?: FinancialFormatType,
   ) => string;
   currency: Currency;
   /** The user's number format prefs, for formatAccountAmount. */
@@ -309,10 +325,7 @@ export function useFormat(): UseFormatResult {
     (
       value: IntegerAmount,
       currencyCode: string | null | undefined,
-      type:
-        | 'financial'
-        | 'financial-with-sign'
-        | 'financial-no-decimals' = 'financial',
+      type: FinancialFormatType = 'financial',
     ): string => {
       if (!currencyCode) {
         return formatDisplay(value, type);
