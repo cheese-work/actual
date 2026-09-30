@@ -76,6 +76,13 @@ export function getManualRates(_prefs: Prefs): ManualRate[] {
   return notImplemented();
 }
 
+export function exchangeRatePrefError(
+  _id: string,
+  _value: string | undefined,
+): string | null {
+  return notImplemented();
+}
+
 export function setManualRatePatch(
   _prefs: Prefs,
   _from: string,

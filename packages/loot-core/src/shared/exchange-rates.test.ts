@@ -1,6 +1,7 @@
 import {
   convert,
   customUnitKey,
+  exchangeRatePrefError,
   formatInverseRate,
   formatRateForInput,
   getCustomUnits,
@@ -8,7 +9,9 @@ import {
   isValidRate,
   manualRateKey,
   parseRateInput,
+  removeCustomUnitPatch,
   serializeCustomUnit,
+  setManualRatePatch,
   validateCustomUnit,
 } from './exchange-rates';
 import type { CustomUnit } from './exchange-rates';
@@ -289,6 +292,118 @@ describe('formatRateForInput', () => {
     expect(
       parseRateInput(formatRateForInput('25400.5', 'dot-comma'), 'dot-comma'),
     ).toBe('25400.5');
+  });
+});
+
+describe('setManualRatePatch', () => {
+  it('writes the rate under its pair key', () => {
+    expect(setManualRatePatch({}, 'USD', 'VND', '25400')).toEqual({
+      'manualRate.USD.VND': '25400',
+    });
+  });
+
+  it('clears a stale reverse-direction rate so the two directions never disagree', () => {
+    const prefs = { [manualRateKey('VND', 'USD')]: '0.00005' };
+    const patch = setManualRatePatch(prefs, 'USD', 'VND', '26000');
+
+    expect(patch).toEqual({
+      'manualRate.USD.VND': '26000',
+      'manualRate.VND.USD': '',
+    });
+    // Without the clear, the stale VND->USD rate would win over the new one
+    const applied = { ...prefs, ...patch };
+    expect(convert(10000, 'VND', 'USD', applied)).toBe(
+      convert(10000, 'VND', 'USD', { [manualRateKey('USD', 'VND')]: '26000' }),
+    );
+  });
+
+  it('removes the rate in both directions when given an empty rate', () => {
+    const prefs = {
+      [manualRateKey('USD', 'VND')]: '25400',
+      [manualRateKey('VND', 'USD')]: '0.00005',
+    };
+    expect(setManualRatePatch(prefs, 'USD', 'VND', '')).toEqual({
+      'manualRate.USD.VND': '',
+      'manualRate.VND.USD': '',
+    });
+  });
+
+  it('does nothing for a currency paired with itself', () => {
+    expect(setManualRatePatch({}, 'USD', 'USD', '1')).toEqual({});
+  });
+});
+
+describe('removeCustomUnitPatch', () => {
+  it('clears the unit and every rate that involves it, in either direction', () => {
+    const prefs = {
+      [customUnitKey('X-BANANA')]: serializeCustomUnit(banana),
+      [manualRateKey('X-BANANA', 'VND')]: '3000',
+      [manualRateKey('EUR', 'X-BANANA')]: '2',
+      [manualRateKey('USD', 'VND')]: '25400',
+    };
+    expect(removeCustomUnitPatch(prefs, 'X-BANANA')).toEqual({
+      'customUnit.X-BANANA': '',
+      'manualRate.X-BANANA.VND': '',
+      'manualRate.EUR.X-BANANA': '',
+    });
+  });
+});
+
+describe('exchangeRatePrefError', () => {
+  it('ignores unrelated prefs', () => {
+    expect(exchangeRatePrefError('numberFormat', 'comma-dot')).toBeNull();
+    expect(exchangeRatePrefError('manualRateXYZ', 'abc')).toBeNull();
+  });
+
+  it('accepts valid rates, valid units and removals', () => {
+    expect(exchangeRatePrefError('manualRate.USD.VND', '25400')).toBeNull();
+    expect(exchangeRatePrefError('manualRate.USD.VND', '')).toBeNull();
+    expect(
+      exchangeRatePrefError('customUnit.X-BANANA', serializeCustomUnit(banana)),
+    ).toBeNull();
+    expect(exchangeRatePrefError('customUnit.X-BANANA', '')).toBeNull();
+  });
+
+  it.each(['0', '-1', '1e3', 'abc', ' 5', '1,5'])(
+    'rejects the rate %j (a rate must be greater than 0)',
+    bad => {
+      expect(exchangeRatePrefError('manualRate.USD.VND', bad)).toMatch(
+        /greater than 0/i,
+      );
+    },
+  );
+
+  it.each([
+    'manualRate.USD.USD',
+    'manualRate.usd.vnd',
+    'manualRate.USD',
+    'manualRate.USD.VND.EXTRA',
+  ])('rejects the malformed rate key %j', key => {
+    expect(exchangeRatePrefError(key, '5')).toMatch(/currency pair/i);
+  });
+
+  it('rejects an invalid unit definition', () => {
+    expect(exchangeRatePrefError('customUnit.X-BANANA', 'not json')).toMatch(
+      /custom unit/i,
+    );
+    expect(
+      exchangeRatePrefError('customUnit.USD', serializeCustomUnit(banana)),
+    ).toMatch(/code/i);
+    expect(
+      exchangeRatePrefError(
+        'customUnit.X-BANANA',
+        JSON.stringify({ name: 'Banana', symbol: '🍌', decimals: 3 }),
+      ),
+    ).toMatch(/decimals/i);
+  });
+
+  it('requires a string value: an empty string removes, undefined is refused', () => {
+    expect(exchangeRatePrefError('manualRate.USD.VND', undefined)).toMatch(
+      /empty string/i,
+    );
+    expect(exchangeRatePrefError('customUnit.X-BANANA', undefined)).toMatch(
+      /empty string/i,
+    );
   });
 });
 
