@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ReactNode } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { MemoryRouter } from 'react-router';
@@ -48,7 +49,7 @@ window.matchMedia = (query: string): MediaQueryList => ({
 
 const account = { ...generateAccount('USD savings'), currency: 'USD' };
 
-function renderRow(row: React.ReactNode) {
+function renderRow(row: ReactNode) {
   return render(
     <TestProviders>
       <MemoryRouter>
