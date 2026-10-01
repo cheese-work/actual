@@ -15,6 +15,7 @@ import { getServer } from '#server/server-config';
 import { batchMessages } from '#server/sync';
 import { undoable } from '#server/undo';
 import { finalizeCurrencySetup } from '#shared/currency-setup';
+import { exchangeRatePrefError } from '#shared/exchange-rates';
 import { stringToInteger } from '#shared/util';
 import type { GlobalPrefs, MetadataPrefs, SyncedPrefs } from '#types/prefs';
 
@@ -60,6 +61,11 @@ async function saveSyncedPrefs({
 }) {
   if (!id) {
     return;
+  }
+
+  const validationError = exchangeRatePrefError(id, value);
+  if (validationError) {
+    throw new PostError(validationError);
   }
 
   await db.update('preferences', {
