@@ -6,6 +6,7 @@ import {
   AUTOMATIC_RATE_RETRY_INTERVAL_MS,
   fetchAutomaticRates,
   getDueAutomaticRateSources,
+  getNextAutomaticRateRefreshAt,
   isAutomaticRateSourceSupported,
 } from './automatic-rates';
 
@@ -185,5 +186,68 @@ describe('getDueAutomaticRateSources', () => {
         now,
       ),
     ).toEqual([]);
+  });
+});
+
+describe('getNextAutomaticRateRefreshAt', () => {
+  it('schedules the next refresh for cache expiry', () => {
+    const fetchedAt = now - 60_000;
+    expect(
+      getNextAutomaticRateRefreshAt(
+        {
+          'rateMode.EUR': 'auto',
+          'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
+        },
+        'USD',
+        now,
+      ),
+    ).toBe(fetchedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS);
+  });
+
+  it('schedules retries after cooldown and no earlier than cache expiry', () => {
+    const failedAt = now - 60_000;
+    const failedAttempts = new Map([['USD.EUR', failedAt]]);
+    const staleCache = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+    };
+
+    expect(
+      getNextAutomaticRateRefreshAt(
+        staleCache,
+        'USD',
+        now,
+        failedAttempts,
+      ),
+    ).toBe(failedAt + AUTOMATIC_RATE_RETRY_INTERVAL_MS);
+    expect(
+      getNextAutomaticRateRefreshAt(
+        {
+          'rateMode.EUR': 'auto',
+          'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt: now }),
+        },
+        'USD',
+        now,
+        failedAttempts,
+      ),
+    ).toBe(now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS);
+  });
+
+  it('does not schedule unsupported, manual, or manually overridden sources', () => {
+    expect(
+      getNextAutomaticRateRefreshAt(
+        {
+          'rateMode.XYZ': 'auto',
+          'rateMode.CAD': 'manual',
+          'rateMode.EUR': 'auto',
+          'manualRate.EUR.USD': '1.2',
+        },
+        'USD',
+        now,
+      ),
+    ).toBeNull();
   });
 });

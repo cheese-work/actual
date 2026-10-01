@@ -1,6 +1,8 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AUTOMATIC_RATE_REFRESH_INTERVAL_MS } from '@actual-app/core/shared/automatic-rates';
+
 import { AutomaticRatesUpdater } from './AutomaticRatesUpdater';
 
 const mocks = vi.hoisted(() => ({
@@ -114,14 +116,64 @@ describe('AutomaticRatesUpdater', () => {
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
 
     await act(async () => {
-      await mocks.onVisible?.();
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000 - 1);
     });
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
-      await mocks.onVisible?.();
+      await vi.advanceTimersByTimeAsync(1);
     });
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+  });
+
+  it('schedules stale-cache refreshes at expiry without earlier provider calls', async () => {
+    vi.useFakeTimers();
+    mocks.fetchAutomaticRates.mockImplementation(async () => [
+      {
+        from: 'USD',
+        to: 'EUR',
+        rate: '0.9',
+        fetchedAt: Date.now(),
+      },
+    ]);
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOMATIC_RATE_REFRESH_INTERVAL_MS - 1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not save or schedule a refresh after unmount', async () => {
+    const request = deferred<
+      Array<{ from: string; to: string; rate: string; fetchedAt: number }>
+    >();
+    mocks.fetchAutomaticRates.mockReturnValue(request.promise);
+    const { unmount } = render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await waitFor(() =>
+      expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce(),
+    );
+    unmount();
+
+    await act(async () => {
+      request.resolve([
+        { from: 'USD', to: 'EUR', rate: '0.9', fetchedAt: Date.now() },
+      ]);
+      await request.promise;
+    });
+
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });

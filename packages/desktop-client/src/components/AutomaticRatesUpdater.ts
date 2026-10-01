@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 
 import {
-  AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
   fetchAutomaticRates,
   getDueAutomaticRateSources,
+  getNextAutomaticRateRefreshAt,
 } from '@actual-app/core/shared/automatic-rates';
 import {
   manualRateKey,
@@ -13,21 +13,33 @@ import {
 import { useOnVisible } from '#hooks/useOnVisible';
 import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
-type InProgressRefresh = {
-  mainCurrencyCode: string;
-  sourceCodes: string[];
-};
-
 export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
   const [prefs, setSyncedPrefs] = useSyncedPrefs();
   const prefsRef = useRef(prefs);
   const budgetIdRef = useRef(budgetId);
-  const inProgress = useRef(new Map<string, InProgressRefresh>());
-  const pendingRefresh = useRef(new Set<string>());
+  const mounted = useRef(false);
+  const inProgress = useRef(new Set<string>());
   const failedAttemptsByBudget = useRef(new Map<string, Map<string, number>>());
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  const refreshTimer = useRef<number | null>(null);
   prefsRef.current = prefs;
   budgetIdRef.current = budgetId;
+
+  const scheduleRefresh = useCallback((nextAt: number | null) => {
+    if (refreshTimer.current !== null) {
+      clearTimeout(refreshTimer.current);
+      refreshTimer.current = null;
+    }
+    if (!mounted.current || nextAt === null) {
+      return;
+    }
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      if (mounted.current) {
+        void refreshRef.current?.();
+      }
+    }, Math.max(0, nextAt - Date.now()));
+  }, []);
 
   const refresh = useCallback(async () => {
     const currentPrefs = prefsRef.current;
@@ -47,21 +59,23 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
       Date.now(),
       failedAttempts,
     );
-    const activeRefresh = inProgress.current.get(budgetId);
-    if (activeRefresh) {
-      if (
-        activeRefresh.mainCurrencyCode !== mainCurrencyCode ||
-        activeRefresh.sourceCodes.join('|') !== sourceCodes.join('|')
-      ) {
-        pendingRefresh.current.add(budgetId);
-      }
+    if (inProgress.current.has(budgetId)) {
       return;
     }
     if (sourceCodes.length === 0) {
+      scheduleRefresh(
+        getNextAutomaticRateRefreshAt(
+          currentPrefs,
+          mainCurrencyCode,
+          Date.now(),
+          failedAttempts,
+        ),
+      );
       return;
     }
 
-    inProgress.current.set(budgetId, { mainCurrencyCode, sourceCodes });
+    inProgress.current.add(budgetId);
+    let prefsForNextRefresh = currentPrefs;
     try {
       const rates = await fetchAutomaticRates(sourceCodes, mainCurrencyCode);
       const receivedCodes = new Set(
@@ -81,16 +95,23 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
 
       const currentRates = rates.filter(rate => {
         const sourceCode = rate.from === mainCurrencyCode ? rate.to : rate.from;
-        return prefsRef.current[`rateMode.${sourceCode}`] === 'auto';
+        return (
+          sourceCodes.includes(sourceCode) &&
+          prefsRef.current[`rateMode.${sourceCode}`] === 'auto'
+        );
       });
       if (
+        mounted.current &&
         budgetIdRef.current === budgetId &&
         prefsRef.current.defaultCurrencyCode === mainCurrencyCode &&
         currentRates.length > 0
       ) {
-        setSyncedPrefs(
-          Object.assign({}, ...currentRates.map(setAutomaticRatePatch)),
+        const patch = Object.assign(
+          {},
+          ...currentRates.map(setAutomaticRatePatch),
         );
+        setSyncedPrefs(patch);
+        prefsForNextRefresh = { ...prefsRef.current, ...patch };
       }
     } catch {
       const attemptedAt = Date.now();
@@ -99,11 +120,25 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
       }
     } finally {
       inProgress.current.delete(budgetId);
-      if (pendingRefresh.current.delete(budgetId)) {
-        setTimeout(() => void refreshRef.current?.(), 0);
+      if (mounted.current) {
+        const nextPrefs =
+          prefsRef.current.defaultCurrencyCode === mainCurrencyCode
+            ? prefsForNextRefresh
+            : prefsRef.current;
+        const nextMainCurrencyCode = nextPrefs.defaultCurrencyCode;
+        scheduleRefresh(
+          nextMainCurrencyCode
+            ? getNextAutomaticRateRefreshAt(
+                nextPrefs,
+                nextMainCurrencyCode,
+                Date.now(),
+                failedAttempts,
+              )
+            : null,
+        );
       }
     }
-  }, [budgetId, setSyncedPrefs]);
+  }, [budgetId, scheduleRefresh, setSyncedPrefs]);
 
   refreshRef.current = refresh;
 
@@ -119,21 +154,34 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
       ].join('|'),
     )
     .join('|');
+  const automaticRateSignature = Object.entries(prefs)
+    .filter(([key]) => key.startsWith('autoRate.'))
+    .sort(([left], [right]) => left.localeCompare(right, 'en'))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('|');
 
   useOnVisible(refresh);
 
   useEffect(() => {
+    mounted.current = true;
     void refresh();
-    const timer = window.setInterval(
-      () => void refresh(),
-      AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
+    return () => {
+      mounted.current = false;
+      if (refreshTimer.current !== null) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
+    };
   }, [refresh]);
 
   useEffect(() => {
     void refresh();
-  }, [autoModeSignature, prefs.defaultCurrencyCode, refresh]);
+  }, [
+    autoModeSignature,
+    automaticRateSignature,
+    prefs.defaultCurrencyCode,
+    refresh,
+  ]);
 
   return null;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -222,6 +222,17 @@ export function CurrencySettings() {
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const numberFormat = parseNumberFormat({ format: numberFormatPref }).format;
   const selectedCurrencyCode = defaultCurrencyCode || '';
+  const prefsRef = useRef(syncedPrefs);
+  const selectedCurrencyCodeRef = useRef(selectedCurrencyCode);
+  const mounted = useRef(false);
+  prefsRef.current = syncedPrefs;
+  selectedCurrencyCodeRef.current = selectedCurrencyCode;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const customUnits = getCustomUnits(syncedPrefs);
   const manualRates = getManualRates(syncedPrefs);
   const mainCurrency = selectedCurrencyCode
@@ -282,6 +293,7 @@ export function CurrencySettings() {
   });
 
   const handleCurrencyChange = (code: string) => {
+    selectedCurrencyCodeRef.current = code;
     setDefaultCurrencyCodePref(code);
     if (code !== '') {
       const cur = getCurrency(code);
@@ -358,6 +370,7 @@ export function CurrencySettings() {
       return;
     }
 
+    const mainCurrencyCode = selectedCurrencyCode;
     setRefreshingCode(code);
     setRefreshErrorCode(null);
     try {
@@ -365,11 +378,26 @@ export function CurrencySettings() {
       if (rates.length === 0) {
         throw new Error('No automatic exchange rate was returned');
       }
+      if (
+        !mounted.current ||
+        selectedCurrencyCodeRef.current !== mainCurrencyCode ||
+        getRateMode(prefsRef.current, code) !== 'auto'
+      ) {
+        return;
+      }
       setSyncedPrefs(Object.assign({}, ...rates.map(setAutomaticRatePatch)));
     } catch {
-      setRefreshErrorCode(code);
+      if (
+        mounted.current &&
+        selectedCurrencyCodeRef.current === mainCurrencyCode &&
+        getRateMode(prefsRef.current, code) === 'auto'
+      ) {
+        setRefreshErrorCode(code);
+      }
     } finally {
-      setRefreshingCode(null);
+      if (mounted.current) {
+        setRefreshingCode(null);
+      }
     }
   };
 

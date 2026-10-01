@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -42,6 +42,14 @@ vi.mock('@actual-app/core/shared/automatic-rates', async () => {
   );
   return { ...actual, fetchAutomaticRates: mocks.fetchAutomaticRates };
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe('CurrencySettings', () => {
   beforeEach(() => {
@@ -166,6 +174,35 @@ describe('CurrencySettings', () => {
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledWith(['EUR'], 'USD');
     expect(mocks.save).toHaveBeenCalledWith({
       'autoRate.USD.EUR': JSON.stringify({ rate: '0.91', fetchedAt }),
+    });
+  });
+
+  it('does not save an on-demand result after Main currency selection changes', async () => {
+    const request = deferred<
+      Array<{ from: string; to: string; rate: string; fetchedAt: number }>
+    >();
+    mocks.prefs = { ...mocks.prefs, 'rateMode.EUR': 'auto' };
+    mocks.fetchAutomaticRates.mockReturnValue(request.promise);
+    const user = userEvent.setup();
+    const { rerender } = render(<CurrencySettings />, {
+      wrapper: TestProviders,
+    });
+
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh EUR rate now' }),
+    );
+    mocks.prefs = { ...mocks.prefs, defaultCurrencyCode: 'GBP' };
+    rerender(<CurrencySettings />);
+
+    await act(async () => {
+      request.resolve([
+        { from: 'USD', to: 'EUR', rate: '0.91', fetchedAt: Date.now() },
+      ]);
+      await request.promise;
+    });
+
+    expect(mocks.save).not.toHaveBeenCalledWith({
+      'autoRate.USD.EUR': expect.any(String),
     });
   });
 

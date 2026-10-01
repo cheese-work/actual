@@ -230,3 +230,42 @@ export function getDueAutomaticRateSources(
     })
     .sort((a, b) => a.localeCompare(b, 'en'));
 }
+
+export function getNextAutomaticRateRefreshAt(
+  prefs: Partial<Record<string, string>>,
+  mainCurrencyCode: string,
+  now = Date.now(),
+  failedAttempts: ReadonlyMap<string, number> = new Map(),
+): number | null {
+  return Object.entries(prefs).reduce<number | null>((nextAt, [key, mode]) => {
+    const match = /^rateMode\.([A-Z]{3}|USDT)$/.exec(key);
+    if (
+      !match ||
+      mode !== 'auto' ||
+      !isAutomaticRateSourceSupported(match[1], mainCurrencyCode)
+    ) {
+      return nextAt;
+    }
+
+    const code = match[1];
+    const hasManualRate = [
+      prefs[manualRateKey(code, mainCurrencyCode)],
+      prefs[manualRateKey(mainCurrencyCode, code)],
+    ].some(rate => rate !== undefined && rate !== '' && isValidRate(rate));
+    if (hasManualRate) {
+      return nextAt;
+    }
+
+    const cached = getAutomaticRate(prefs, code, mainCurrencyCode);
+    const cacheDueAt = cached
+      ? cached.fetchedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS
+      : now;
+    const failedAt = failedAttempts.get(`${mainCurrencyCode}.${code}`);
+    const retryDueAt =
+      failedAt === undefined
+        ? now
+        : failedAt + AUTOMATIC_RATE_RETRY_INTERVAL_MS;
+    const dueAt = Math.max(now, cacheDueAt, retryDueAt);
+    return nextAt === null || dueAt < nextAt ? dueAt : nextAt;
+  }, null);
+}
