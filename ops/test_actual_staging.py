@@ -25,7 +25,7 @@ class CandidateTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.alert_env = self.root / 'alert.env'
-        self.alert_env.write_text('ACTUAL_ALERT_TARGET=CHE-828\n')
+        self.alert_env.write_text(f'ACTUAL_ALERT_TARGET=CHE-828\nACTUAL_ALERT_WEBHOOK_URL={self.WEBHOOK}\n')
         self.alert_env.chmod(0o600)
         self.alert_env_patch = mock.patch.object(staging, 'ALERT_ENV', self.alert_env)
         self.alert_env_patch.start()
@@ -179,9 +179,7 @@ class CandidateTests(unittest.TestCase):
 
         self.assertIn('actual-prod-watchdog.service', units)
         self.assertIn('ExecStart=/usr/bin/python3 /srv/actual/ops/actual-staging.py recover', units['actual-prod-watchdog.service'])
-        self.assertIn('EnvironmentFile=%h/.config/actual-staging/alert.env', units['actual-prod-watchdog.service'])
         self.assertIn('Restart=on-failure', units['actual-prod-watchdog.service'])
-        self.assertIn('EnvironmentFile=%h/.config/actual-staging/alert.env', units['actual-staging-refresh.service'])
         self.assertIn('OnCalendar=*-*-* 03:45:00', units['actual-staging-refresh.timer'])
         self.assertIn('Persistent=true', units['actual-staging-freshness.timer'])
         self.assertIn('OnUnitInactiveSec=5min', units['actual-staging-image-sync.timer'])
@@ -546,119 +544,107 @@ class CandidateTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     staging.assert_tailnet_authorization()
 
-    TASK_ENV = {
-        'ACTUAL_ALERT_TARGET': 'CHE-828', 'ACTUAL_ALERT_PARENT': '01a0ec49-1adb-7e7c-92bd-67be58b94464',
-        'MULTICA_TOKEN': 'task-token', 'MULTICA_TASK_ID': 'task-1', 'MULTICA_AGENT_ID': 'agent-1',
-    }
-    POSTED = json.dumps({
-        'parent_id': '01a0ec49-1adb-7e7c-92bd-67be58b94464', 'author_type': 'agent',
-        'author_id': 'agent-1', 'source_task_id': 'task-1',
-    })
+    WEBHOOK = 'https://multica.example/api/webhooks/autopilots/awt_fixture-token_1'
+    ACCEPTED = json.dumps({'status': 'accepted', 'run_id': 'run-1'}).encode()
 
-    def test_alert_uses_private_utf8_comment_file_and_fixed_issue_target(self):
-        captured = {}
+    def webhook_response(self, body=None):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = self.ACCEPTED if body is None else body
+        return response
 
-        def stub_run(*command, timeout):
-            captured['command'] = command
-            captured['timeout'] = timeout
-            content = Path(command[command.index('--content-file') + 1])
-            captured['path'] = content
-            captured['body'] = content.read_bytes().decode('utf-8')
-            captured['mode'] = content.stat().st_mode & 0o777
-            captured['directory_mode'] = content.parent.stat().st_mode & 0o777
-            return self.POSTED
+    def write_alert_env(self, *lines, mode=0o600):
+        self.alert_env.write_text('\n'.join(lines) + '\n')
+        self.alert_env.chmod(mode)
 
-        with mock.patch.dict(os.environ, self.TASK_ENV), \
-                mock.patch.object(staging, 'run', side_effect=stub_run):
+    def test_alert_posts_fixed_json_to_the_private_autopilot_webhook(self):
+        with mock.patch.object(staging.urllib.request, 'urlopen', return_value=self.webhook_response()) as urlopen, \
+                mock.patch.object(staging, 'run') as run:
             staging.alert('alert delivery test')
 
-        self.assertEqual(captured['command'][:7], (
-            'multica', 'issue', 'comment', 'add', 'CHE-828', '--parent', '01a0ec49-1adb-7e7c-92bd-67be58b94464',
-        ))
-        self.assertEqual(captured['command'][7:10], ('--content-file', str(captured['path']), '--output'))
-        self.assertEqual(captured['command'][10], 'json')
-        self.assertEqual(captured['timeout'], 20)
-        self.assertEqual(captured['mode'], 0o600)
-        self.assertEqual(captured['directory_mode'], 0o700)
-        self.assertIn('CHE-828 staging alert — alert delivery test', captured['body'])
-        self.assertIn(staging.ALERT_ASSIGNEE, captured['body'])
-        self.assertFalse(captured['path'].exists())
+        run.assert_not_called()  # never the multica CLI, so never the host's member login
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, self.WEBHOOK)
+        self.assertEqual(request.get_method(), 'POST')
+        self.assertEqual(urlopen.call_args.kwargs['timeout'], 20)
+        self.assertEqual(request.get_header('Content-type'), 'application/json')
+        self.assertRegex(request.get_header('Idempotency-key'), r'^[0-9a-f]{16}-\d+$')
+        self.assertEqual(json.loads(request.data), {
+            'event': 'actual-staging-alert', 'issue': 'CHE-828', 'message': 'alert delivery test',
+        })
+        self.assertNotIn(b'mention://', request.data)
 
     def test_alert_rejects_unapproved_target_or_untrusted_message(self):
-        with mock.patch.object(staging, 'run') as run:
-            with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-829'}):
-                with self.assertRaisesRegex(RuntimeError, 'CHE-828'):
-                    staging.alert('alert delivery test')
-            with mock.patch.dict(os.environ, {'ACTUAL_ALERT_TARGET': 'CHE-828'}):
-                with self.assertRaisesRegex(ValueError, 'unsupported'):
-                    staging.alert('account balance: $100')
-        run.assert_not_called()
+        with mock.patch.object(staging.urllib.request, 'urlopen') as urlopen:
+            with self.assertRaisesRegex(ValueError, 'unsupported'):
+                staging.alert('account balance: $100')
+            self.write_alert_env('ACTUAL_ALERT_TARGET=CHE-829', f'ACTUAL_ALERT_WEBHOOK_URL={self.WEBHOOK}')
+            with self.assertRaisesRegex(ValueError, 'CHE-828'):
+                staging.alert('alert delivery test')
+        urlopen.assert_not_called()
 
-    def test_alert_fails_closed_without_agent_task_identity_or_trigger_parent(self):
+    def test_alert_fails_closed_without_one_private_https_autopilot_webhook(self):
+        target = 'ACTUAL_ALERT_TARGET=CHE-828'
+        url = f'ACTUAL_ALERT_WEBHOOK_URL={self.WEBHOOK}'
         cases = {
-            'systemd': {'MULTICA_TOKEN': '', 'MULTICA_TASK_ID': '', 'MULTICA_AGENT_ID': ''},
-            'no task id': {'MULTICA_TASK_ID': ''},
-            'no agent id': {'MULTICA_AGENT_ID': ''},
-            'no parent': {'ACTUAL_ALERT_PARENT': ''},
-            'malformed parent': {'ACTUAL_ALERT_PARENT': '01a0ec49 --parent x'},
+            'no webhook': ((target,), 0o600),
+            'two webhooks': ((target, url, url), 0o600),
+            'plain http': ((target, url.replace('https:', 'http:')), 0o600),
+            'not an autopilot path': ((target, 'ACTUAL_ALERT_WEBHOOK_URL=https://multica.example/api/issues'), 0o600),
+            'group readable': ((target, url), 0o640),
         }
-        for name, override in cases.items():
-            with self.subTest(name), mock.patch.dict(os.environ, {**self.TASK_ENV, **override}), \
+        for name, (lines, mode) in cases.items():
+            self.write_alert_env(*lines, mode=mode)
+            with self.subTest(name), mock.patch.object(staging.urllib.request, 'urlopen') as urlopen, \
                     mock.patch.object(staging, 'run') as run:
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(ValueError):
                     staging.alert('alert delivery test')
+                urlopen.assert_not_called()
                 run.assert_not_called()
 
-    def test_alert_rejects_readback_that_is_not_this_agent_task_reply(self):
-        for field, value in (('author_type', 'member'), ('author_id', 'agent-2'),
-                             ('parent_id', '01a0eb2a-01d5-7502-b4e6-af49fc538366'), ('source_task_id', 'task-2')):
-            posted = {**json.loads(self.POSTED), field: value}
-            with self.subTest(field), mock.patch.object(staging, 'ROOT', self.root), \
-                    mock.patch.dict(os.environ, self.TASK_ENV), \
-                    mock.patch.object(staging, 'run', return_value=json.dumps(posted)):
-                with self.assertRaisesRegex(RuntimeError, 'readback'):
+    def test_alert_rejects_delivery_that_the_autopilot_did_not_accept(self):
+        failures = {
+            'unreachable': staging.urllib.error.URLError('down'),
+            'token rotated': staging.urllib.error.HTTPError(self.WEBHOOK, 404, 'Not Found', {}, None),
+            'skipped': self.webhook_response(json.dumps({'status': 'skipped'}).encode()),
+            'ignored': self.webhook_response(json.dumps({'status': 'ignored'}).encode()),
+            'not json': self.webhook_response(b'<html>'),
+        }
+        for name, failure in failures.items():
+            outcome = {'return_value': failure} if isinstance(failure, mock.MagicMock) else {'side_effect': failure}
+            with self.subTest(name), mock.patch.object(staging, 'ROOT', self.root), \
+                    mock.patch.object(staging.urllib.request, 'urlopen', **outcome):
+                with self.assertRaises(RuntimeError) as raised:
                     staging.alert('staging action failed; prior state preserved', dedupe=True)
+                self.assertNotIn('awt_', f'{raised.exception} {raised.exception.__cause__}')
             self.assertEqual(list(self.root.glob('alert-*.stamp')), [])
+
+    def test_duplicate_idempotency_key_counts_as_delivered(self):
+        duplicate = self.webhook_response(json.dumps({'status': 'duplicate'}).encode())
+        with mock.patch.object(staging.urllib.request, 'urlopen', return_value=duplicate):
+            staging.alert('alert delivery test')
 
     def test_deduped_alert_skips_within_window_and_resends_after(self):
         message = 'staging action failed; prior state preserved'
         with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.dict(os.environ, self.TASK_ENV), \
-                mock.patch.object(staging, 'run', return_value=self.POSTED) as run:
+                mock.patch.object(staging.urllib.request, 'urlopen', return_value=self.webhook_response()) as urlopen:
             staging.alert(message, dedupe=True)
             staging.alert(message, dedupe=True)
-            self.assertEqual(run.call_count, 1)
+            self.assertEqual(urlopen.call_count, 1)
             stamp = next(self.root.glob('alert-*.stamp'))
             self.assertEqual(stamp.stat().st_mode & 0o777, 0o600)
             old = time.time() - staging.ALERT_REPEAT_SECONDS - 1
             os.utime(stamp, (old, old))
             staging.alert(message, dedupe=True)
-            self.assertEqual(run.call_count, 2)
+            self.assertEqual(urlopen.call_count, 2)
             staging.alert(message)
-            self.assertEqual(run.call_count, 3)
+            self.assertEqual(urlopen.call_count, 3)
 
-    def test_failed_deduped_alert_leaves_no_stamp(self):
-        with mock.patch.object(staging, 'ROOT', self.root), \
-                mock.patch.dict(os.environ, self.TASK_ENV), \
-                mock.patch.object(staging, 'run', side_effect=subprocess.CalledProcessError(1, 'x')):
-            with self.assertRaises(subprocess.CalledProcessError):
-                staging.alert('alert delivery test', dedupe=True)
-        self.assertEqual(list(self.root.glob('alert-*.stamp')), [])
-
-    def test_alert_cli_failure_propagates_and_cleans_comment_file(self):
-        captured = {}
-
-        def fail_run(*command, timeout):
-            content = Path(command[command.index('--content-file') + 1])
-            captured['path'] = content
-            self.assertTrue(content.is_file())
-            raise subprocess.CalledProcessError(1, command)
-
-        with mock.patch.dict(os.environ, self.TASK_ENV), \
-                mock.patch.object(staging, 'run', side_effect=fail_run):
-            with self.assertRaises(subprocess.CalledProcessError):
-                staging.alert('alert delivery test')
-        self.assertFalse(captured['path'].exists())
+    def test_systemd_units_do_not_load_the_webhook_secret_into_their_environment(self):
+        for name, unit in staging.systemd_units(Path('/srv/actual/ops/actual-staging.py')).items():
+            with self.subTest(name):
+                self.assertNotIn('EnvironmentFile', unit)
+                self.assertNotIn('alert.env', unit)
 
     def test_sync_image_uses_active_snapshot_without_snapshotting_production(self):
         image = f'{staging.IMAGE}{"b" * 64}'
@@ -695,6 +681,12 @@ class CandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'staging stale'):
                 staging.freshness()
         alert.assert_called_once()
+
+    def test_freshness_reports_stale_state_even_when_alert_delivery_fails(self):
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging, 'alert', side_effect=RuntimeError('alert webhook request failed')):
+            with self.assertRaisesRegex(RuntimeError, 'staging stale'):
+                staging.freshness()
 
     def test_promotion_restores_previous_container_on_state_commit_failure(self):
         candidate = {
