@@ -42,6 +42,18 @@ ADDED_V4 = [
 ]
 ADDED_V6 = ['-A INPUT -i act-stg0 -j DROP', '-A FORWARD -i act-stg0 -j DROP']
 SUDOERS = '/etc/sudoers.d/che-828-staging-firewall-readonly'
+# Objects left when write N took effect but reported failure (or a concurrent
+# writer made it): never claimed, so rollback keeps them and demands recovery.
+# Writes 3-8 land inside staging chains this run created, so they roll back.
+UNCLAIMED = {
+    1: (['-N ACTUAL_STAGING_INPUT'], []),
+    2: (['-N ACTUAL_STAGING_FORWARD'], []),
+    9: ([ADDED_V4[2], '-N ACTUAL_STAGING_INPUT'], []),
+    10: ([ADDED_V4[4], '-N ACTUAL_STAGING_FORWARD'], []),
+    11: ([ADDED_V4[3], '-N ACTUAL_STAGING_FORWARD'], []),
+    12: ([], [ADDED_V6[0]]),
+    13: ([], [ADDED_V6[1]]),
+}
 
 HARNESS = r'''
 set -euo pipefail
@@ -91,6 +103,7 @@ case " \$* " in
       [[ \$(cat /fault/mode) == term ]] && kill -TERM \$PPID
       [[ \$(cat /fault/mode) == term-after ]] && { /usr/sbin/xtables-nft-multi $fam "\$@"; kill -TERM \$PPID; exit 0; }
       [[ \$(cat /fault/mode) == fail-after ]] && { /usr/sbin/xtables-nft-multi $fam "\$@"; exit 1; }
+      [[ \$(cat /fault/mode) == race ]] && { /usr/sbin/xtables-nft-multi $fam "\$@"; exec /usr/sbin/xtables-nft-multi $fam "\$@"; }
       exit 1
     fi ;;
   *' -D '*) [[ \$(cat /fault/mode) == delete ]] && exit 1 ;;
@@ -104,6 +117,13 @@ if [[ $FAULT_MODE == visudo || $FAULT_MODE == runuser ]]; then
   mv "$bin" "$bin.real"
   printf '#!/bin/sh\n[ "$1" = -cqf ] && exit 1\n[ "$1" = -u ] && exit 1\nexec %s.real "$@"\n' "$bin" > "$bin"
   chmod 0755 "$bin"
+fi
+if [[ $FAULT_MODE == race-sudoers ]]; then
+  # A concurrent writer installs an identical view between validation and link.
+  mv /usr/sbin/visudo /usr/sbin/visudo.real
+  printf '#!/bin/sh\n[ "$1" = -cqf ] && cp -p "$2" %s\nexec /usr/sbin/visudo.real "$@"\n' \
+    /etc/sudoers.d/che-828-staging-firewall-readonly > /usr/sbin/visudo
+  chmod 0755 /usr/sbin/visudo
 fi
 eval "$EXTRA_SETUP"
 state() { iptables -w -S; echo ---; ip6tables -w -S; echo ---; ls -A /etc/sudoers.d | grep -vx README || true; }
@@ -275,12 +295,48 @@ class FirewallRepairTests(unittest.TestCase):
                 else:
                     self.assert_unchanged(result, message)
 
+    def assert_unclaimed_kept(self, result, left4, left6):
+        output = '\n'.join(result['OUT'] + result['ERR'])
+        self.assertEqual(result['CODES'][0], 1, output)
+        self.assertIn('MANUAL RECOVERY REQUIRED', output)
+        self.assertNotIn('MATCH: adopted', output)
+        before4, before6, _ = split_state(result['BEFORE'])
+        after4, after6, sudoers = split_state(result['AFTER'])
+        self.assertEqual(without(after4, left4), before4, output)
+        self.assertEqual(without(after6, left6), before6, output)
+        self.assertEqual(sudoers, [])
+
     def test_failure_at_every_firewall_write_rolls_back_exactly(self):
         for write in range(1, WRITES + 1):
-            for mode in ('fail', 'fail-after'):
-                with self.subTest(write=write, mode=mode):
-                    self.assert_unchanged(self.repair(fault_write=write, fault_mode=mode),
-                                          'removing exactly this invocation')
+            with self.subTest(write=write):
+                self.assert_unchanged(self.repair(fault_write=write, fault_mode='fail'),
+                                      'removing exactly this invocation')
+
+    def test_write_applied_but_failed_is_never_claimed(self):
+        for write in range(1, WRITES + 1):
+            with self.subTest(write=write):
+                result = self.repair(fault_write=write, fault_mode='fail-after')
+                if write in UNCLAIMED:
+                    self.assert_unclaimed_kept(result, *UNCLAIMED[write])
+                else:
+                    self.assert_unchanged(result, 'removing exactly this invocation')
+
+    def test_chain_created_concurrently_after_preflight_is_kept(self):
+        for write in (1, 2):
+            with self.subTest(write=write):
+                result = self.repair(fault_write=write, fault_mode='race')
+                self.assertIn('Chain already exists', '\n'.join(result['ERR']))
+                self.assert_unclaimed_kept(result, *UNCLAIMED[write])
+
+    def test_sudoers_view_created_concurrently_is_kept(self):
+        result = self.repair(fault_mode='race-sudoers')
+        output = '\n'.join(result['OUT'] + result['ERR'])
+        self.assertEqual(result['CODES'][0], 1, output)
+        self.assertNotIn('MATCH: adopted', output)
+        before4, before6, _ = split_state(result['BEFORE'])
+        after4, after6, sudoers = split_state(result['AFTER'])
+        self.assertEqual((after4, after6), (before4, before6), output)
+        self.assertEqual(sudoers, ['che-828-staging-firewall-readonly'])
 
     def test_sigterm_during_apply_rolls_back_exactly(self):
         for write in (1, 2, 3, 8, 9, WRITES):
