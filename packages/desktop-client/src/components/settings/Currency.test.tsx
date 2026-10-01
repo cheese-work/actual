@@ -178,9 +178,10 @@ describe('CurrencySettings', () => {
   });
 
   it('does not save an on-demand result after Main currency selection changes', async () => {
-    const request = deferred<
-      Array<{ from: string; to: string; rate: string; fetchedAt: number }>
-    >();
+    const request =
+      deferred<
+        Array<{ from: string; to: string; rate: string; fetchedAt: number }>
+      >();
     mocks.prefs = { ...mocks.prefs, 'rateMode.EUR': 'auto' };
     mocks.fetchAutomaticRates.mockReturnValue(request.promise);
     const user = userEvent.setup();

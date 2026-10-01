@@ -216,12 +216,7 @@ describe('getNextAutomaticRateRefreshAt', () => {
     };
 
     expect(
-      getNextAutomaticRateRefreshAt(
-        staleCache,
-        'USD',
-        now,
-        failedAttempts,
-      ),
+      getNextAutomaticRateRefreshAt(staleCache, 'USD', now, failedAttempts),
     ).toBe(failedAt + AUTOMATIC_RATE_RETRY_INTERVAL_MS);
     expect(
       getNextAutomaticRateRefreshAt(

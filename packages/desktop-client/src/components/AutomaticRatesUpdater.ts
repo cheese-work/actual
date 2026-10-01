@@ -33,12 +33,15 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
     if (!mounted.current || nextAt === null) {
       return;
     }
-    refreshTimer.current = window.setTimeout(() => {
-      refreshTimer.current = null;
-      if (mounted.current) {
-        void refreshRef.current?.();
-      }
-    }, Math.max(0, nextAt - Date.now()));
+    refreshTimer.current = window.setTimeout(
+      () => {
+        refreshTimer.current = null;
+        if (mounted.current) {
+          void refreshRef.current?.();
+        }
+      },
+      Math.max(0, nextAt - Date.now()),
+    );
   }, []);
 
   const refresh = useCallback(async () => {

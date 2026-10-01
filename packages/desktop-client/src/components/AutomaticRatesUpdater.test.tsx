@@ -1,7 +1,6 @@
+import { AUTOMATIC_RATE_REFRESH_INTERVAL_MS } from '@actual-app/core/shared/automatic-rates';
 import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { AUTOMATIC_RATE_REFRESH_INTERVAL_MS } from '@actual-app/core/shared/automatic-rates';
 
 import { AutomaticRatesUpdater } from './AutomaticRatesUpdater';
 
@@ -156,9 +155,10 @@ describe('AutomaticRatesUpdater', () => {
   });
 
   it('does not save or schedule a refresh after unmount', async () => {
-    const request = deferred<
-      Array<{ from: string; to: string; rate: string; fetchedAt: number }>
-    >();
+    const request =
+      deferred<
+        Array<{ from: string; to: string; rate: string; fetchedAt: number }>
+      >();
     mocks.fetchAutomaticRates.mockReturnValue(request.promise);
     const { unmount } = render(<AutomaticRatesUpdater budgetId="budget" />);
 
