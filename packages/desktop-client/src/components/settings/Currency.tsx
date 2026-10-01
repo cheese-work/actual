@@ -39,15 +39,18 @@ function ManualRateInput({
   unit,
   mainCurrencyCode,
   initialRate,
+  isInverse,
   onSave,
 }: {
   unit: RateUnit;
   mainCurrencyCode: string;
   initialRate: string;
+  isInverse: boolean;
   onSave: (rate: string) => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(initialRate);
+  const [hasChanged, setHasChanged] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const numberFormat = parseNumberFormat({ format: numberFormatPref }).format;
@@ -55,10 +58,15 @@ function ManualRateInput({
 
   useEffect(() => {
     setValue(initialRate);
+    setHasChanged(false);
     setHasError(false);
-  }, [initialRate]);
+  }, [initialRate, isInverse]);
 
   const save = () => {
+    if (isInverse && !hasChanged) {
+      return;
+    }
+
     if (value.trim() === '') {
       onSave('');
       setHasError(false);
@@ -99,7 +107,10 @@ function ManualRateInput({
           inputMode="decimal"
           value={value}
           aria-invalid={hasError}
-          onChange={event => setValue(event.target.value)}
+          onChange={event => {
+            setValue(event.target.value);
+            setHasChanged(true);
+          }}
         />
       </FormField>
       <Button
@@ -213,6 +224,7 @@ export function CurrencySettings() {
   const [unitNameInput, setUnitNameInput] = useState('');
   const [unitSymbolInput, setUnitSymbolInput] = useState('');
   const [unitDecimalsInput, setUnitDecimalsInput] = useState('2');
+  const [hasEditedCustomUnit, setHasEditedCustomUnit] = useState(false);
 
   const [symbolPosition, setSymbolPositionPref] = useSyncedPref(
     'currencySymbolPosition',
@@ -304,6 +316,7 @@ export function CurrencySettings() {
     setUnitNameInput('');
     setUnitSymbolInput('');
     setUnitDecimalsInput('2');
+    setHasEditedCustomUnit(false);
   };
 
   const saveRate = (from: string, rate: string) => {
@@ -427,13 +440,14 @@ export function CurrencySettings() {
 
               return (
                 <ManualRateInput
-                  key={unit.code}
+                  key={`${unit.code}-${selectedCurrencyCode}`}
                   unit={unit}
                   mainCurrencyCode={selectedCurrencyCode}
                   initialRate={formatRateForInput(
                     rate,
                     parseNumberFormat({ format: numberFormat }).format,
                   )}
+                  isInverse={!direct && Boolean(inverse)}
                   onSave={value => saveRate(unit.code, value)}
                 />
               );
@@ -471,7 +485,10 @@ export function CurrencySettings() {
                   id="custom-unit-code"
                   value={unitCodeInput}
                   maxLength={12}
-                  onChange={event => setUnitCodeInput(event.target.value)}
+                  onChange={event => {
+                    setUnitCodeInput(event.target.value);
+                    setHasEditedCustomUnit(true);
+                  }}
                 />
               </FormField>
               <FormField style={{ flex: '2 1 140px' }}>
@@ -483,7 +500,10 @@ export function CurrencySettings() {
                   id="custom-unit-name"
                   value={unitNameInput}
                   maxLength={40}
-                  onChange={event => setUnitNameInput(event.target.value)}
+                  onChange={event => {
+                    setUnitNameInput(event.target.value);
+                    setHasEditedCustomUnit(true);
+                  }}
                 />
               </FormField>
               <FormField style={{ flex: '1 1 100px' }}>
@@ -495,7 +515,10 @@ export function CurrencySettings() {
                   id="custom-unit-symbol"
                   value={unitSymbolInput}
                   maxLength={8}
-                  onChange={event => setUnitSymbolInput(event.target.value)}
+                  onChange={event => {
+                    setUnitSymbolInput(event.target.value);
+                    setHasEditedCustomUnit(true);
+                  }}
                 />
               </FormField>
               <FormField style={{ width: 90 }}>
@@ -510,7 +533,10 @@ export function CurrencySettings() {
                   max={2}
                   step={1}
                   value={unitDecimalsInput}
-                  onChange={event => setUnitDecimalsInput(event.target.value)}
+                  onChange={event => {
+                    setUnitDecimalsInput(event.target.value);
+                    setHasEditedCustomUnit(true);
+                  }}
                 />
               </FormField>
               <Button
@@ -522,7 +548,7 @@ export function CurrencySettings() {
                 <Trans>Add custom unit</Trans>
               </Button>
             </View>
-            {customUnitError && (
+            {hasEditedCustomUnit && customUnitError && (
               <Text role="alert" style={{ color: theme.errorText }}>
                 {customUnitError}
               </Text>

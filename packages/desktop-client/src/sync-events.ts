@@ -103,7 +103,7 @@ export function listenForSyncEvent(store: AppStore, queryClient: QueryClient) {
 
       const tables = event.tables;
 
-      if (tables.includes('prefs')) {
+      if (tables.includes('prefs') || tables.includes('preferences')) {
         void store.dispatch(loadPrefs());
       }
 

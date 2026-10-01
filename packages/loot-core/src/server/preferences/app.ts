@@ -52,28 +52,35 @@ app.method('save-prefs', saveMetadataPrefs);
 app.method('load-prefs', loadMetadataPrefs);
 app.method('save-server-prefs', saveServerPrefs);
 
-async function saveSyncedPrefs({
-  id,
-  value,
-}: {
-  id: keyof SyncedPrefs;
-  value: string | undefined;
-}) {
-  if (!id) {
-    return;
+type SaveSyncedPrefsPayload =
+  | { id: keyof SyncedPrefs; value: string | undefined }
+  | { prefs: Partial<SyncedPrefs> };
+
+async function saveSyncedPrefs(args: SaveSyncedPrefsPayload) {
+  const changes: Array<[keyof SyncedPrefs, string | undefined]> =
+    'prefs' in args
+      ? (Object.entries(args.prefs) as Array<
+          [keyof SyncedPrefs, string | undefined]
+        >)
+      : [[args.id, args.value]];
+
+  for (const [prefId, prefValue] of changes) {
+    const validationError = exchangeRatePrefError(prefId, prefValue);
+    if (validationError) {
+      throw new PostError(validationError);
+    }
   }
 
-  const validationError = exchangeRatePrefError(id, value);
-  if (validationError) {
-    throw new PostError(validationError);
-  }
-
-  await db.update('preferences', {
-    id,
-    value,
+  await batchMessages(async () => {
+    for (const [prefId, prefValue] of changes) {
+      await db.update('preferences', {
+        id: prefId,
+        value: prefValue,
+      });
+    }
   });
 
-  if (FORMULA_FORMAT_SYNCED_PREFS.has(id)) {
+  if (changes.some(([prefId]) => FORMULA_FORMAT_SYNCED_PREFS.has(prefId))) {
     resetFormulaPreferencesCache();
   }
 }

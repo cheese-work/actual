@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as db from '#server/db';
 import { PostError } from '#server/errors';
@@ -6,6 +6,7 @@ import { handlers } from '#server/main';
 import { runHandler } from '#server/mutators';
 
 beforeEach(async () => {
+  vi.restoreAllMocks();
   await global.emptyDatabase()();
 });
 
@@ -59,5 +60,58 @@ describe('synced exchange-rate preferences', () => {
       id: 'customUnit.X-BANANA',
       value: JSON.stringify({ name: 'Banana', symbol: '🍌', decimals: 0 }),
     });
+  });
+
+  it('saves multiple synced preferences together', async () => {
+    await runHandler(handlers['preferences/save'], {
+      prefs: {
+        'manualRate.EUR.USD': '1.08',
+        'manualRate.USD.EUR': '',
+      },
+    });
+
+    expect(
+      await db.all('SELECT id, value FROM preferences ORDER BY id'),
+    ).toEqual([
+      { id: 'manualRate.EUR.USD', value: '1.08' },
+      { id: 'manualRate.USD.EUR', value: '' },
+    ]);
+  });
+
+  it('does not persist any preference when a multi-key write fails', async () => {
+    await db.update('preferences', {
+      id: 'manualRate.EUR.USD',
+      value: '0.4',
+    });
+    await db.update('preferences', {
+      id: 'manualRate.USD.EUR',
+      value: '2.5',
+    });
+
+    const originalUpdate = db.update;
+    let updateCount = 0;
+    vi.spyOn(db, 'update').mockImplementation(async (...args) => {
+      updateCount += 1;
+      if (updateCount === 2) {
+        throw new Error('Injected preference write failure');
+      }
+      return originalUpdate(...args);
+    });
+
+    await expect(
+      runHandler(handlers['preferences/save'], {
+        prefs: {
+          'manualRate.EUR.USD': '1.08',
+          'manualRate.USD.EUR': '',
+        },
+      }),
+    ).rejects.toThrow('Injected preference write failure');
+
+    expect(
+      await db.all('SELECT id, value FROM preferences ORDER BY id'),
+    ).toEqual([
+      { id: 'manualRate.EUR.USD', value: '0.4' },
+      { id: 'manualRate.USD.EUR', value: '2.5' },
+    ]);
   });
 });

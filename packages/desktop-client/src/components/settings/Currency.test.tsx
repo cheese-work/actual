@@ -26,6 +26,11 @@ vi.mock('#hooks/useSyncedPrefs', () => ({
 describe('CurrencySettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prefs = {
+      defaultCurrencyCode: 'USD',
+      numberFormat: 'comma-dot',
+      'manualRate.USD.EUR': '0.9',
+    };
   });
 
   it('adds a validated custom unit to synced preferences', async () => {
@@ -87,5 +92,64 @@ describe('CurrencySettings', () => {
     expect(
       screen.getByText('Enter a positive rate using your number format.'),
     ).toBeInTheDocument();
+  });
+
+  it('discards an unsaved rate when the Main currency changes', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<CurrencySettings />, {
+      wrapper: TestProviders,
+    });
+
+    await user.type(
+      screen.getByRole('textbox', { name: 'JPY to USD rate' }),
+      '1.08',
+    );
+
+    mocks.prefs = { ...mocks.prefs, defaultCurrencyCode: 'GBP' };
+    rerender(<CurrencySettings />);
+
+    const changedPairInput = screen.getByRole('textbox', {
+      name: 'JPY to GBP rate',
+    });
+    expect(changedPairInput).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: 'Save JPY rate' }));
+    expect(mocks.save).not.toHaveBeenCalledWith(
+      expect.objectContaining({ 'manualRate.JPY.GBP': '1.08' }),
+    );
+  });
+
+  it('does not persist the rounded display value for an untouched inverse rate', async () => {
+    mocks.prefs['manualRate.USD.EUR'] = '3';
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(
+      screen.getByRole('textbox', { name: 'EUR to USD rate' }),
+    ).toHaveValue('0.333333');
+    await user.click(screen.getByRole('button', { name: 'Save EUR rate' }));
+
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.prefs['manualRate.USD.EUR']).toBe('3');
+  });
+
+  it('does not announce a custom unit error before the form is touched', () => {
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows custom unit validation after the form is touched', async () => {
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    await user.type(
+      screen.getByRole('textbox', { name: 'Custom unit code' }),
+      '!!!',
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Use 1–10 letters or digits for the code.',
+    );
   });
 });
