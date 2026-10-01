@@ -130,12 +130,12 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const accountCurrency = useEffectiveAccountCurrency(account?.currency);
   const balance = useSheetValue(query);
   const balanceCell = (
-    <>
+    <View style={{ alignItems: 'flex-end' }}>
       <CellValue binding={query} type="financial" currency={accountCurrency} />
       {typeof balance === 'number' && (
         <ApproxMain value={balance} currency={account?.currency} />
       )}
-    </>
+    </View>
   );
 
   const isContextMenuOpen = useSelector(state =>

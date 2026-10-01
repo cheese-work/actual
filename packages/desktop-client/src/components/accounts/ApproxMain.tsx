@@ -42,9 +42,15 @@ export function ApproxMain({ value, currency }: ApproxMainProps) {
   }
 
   return (
-    <Text style={{ marginLeft: 4, color: theme.pageTextSubdued }}>
+    <Text
+      style={{
+        marginLeft: 4,
+        color: theme.pageTextSubdued,
+        whiteSpace: 'nowrap',
+      }}
+    >
       {converted === null ? (
-        t('no rate')
+        `(${t('no rate')})`
       ) : (
         <PrivacyFilter>
           <FinancialText>

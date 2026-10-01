@@ -46,7 +46,7 @@ describe('ApproxMain', () => {
 
   it('shows a no-rate hint and no number when the rate is missing', () => {
     renderApprox(40000, 'EUR');
-    expect(screen.getByText('no rate')).toBeInTheDocument();
+    expect(screen.getByText('(no rate)')).toBeInTheDocument();
     expect(screen.queryByText(/~/)).not.toBeInTheDocument();
   });
 
