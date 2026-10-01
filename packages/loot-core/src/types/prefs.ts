@@ -32,6 +32,8 @@ export type SyncedPrefs = Partial<
     | 'currencySetupFinalized'
     | `manualRate.${string}.${string}`
     | `customUnit.${string}`
+    | `rateMode.${string}`
+    | `autoRate.${string}.${string}`
     | `show-account-${string}-net-worth-chart`
     | `side-nav.show-balance-history-${string}`
     // @deprecated: superseded by `transaction-table-columns-${string}`; only

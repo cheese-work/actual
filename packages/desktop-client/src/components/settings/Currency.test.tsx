@@ -13,6 +13,19 @@ const mocks = vi.hoisted(() => ({
     'manualRate.USD.EUR': '0.9',
   } as Record<string, string>,
   save: vi.fn(),
+  fetchAutomaticRates: vi.fn<
+    (
+      sourceCodes: string[],
+      mainCurrencyCode: string,
+    ) => Promise<
+      Array<{
+        from: string;
+        to: string;
+        rate: string;
+        fetchedAt: number;
+      }>
+    >
+  >(),
 }));
 
 vi.mock('#hooks/useSyncedPref', () => ({
@@ -23,6 +36,10 @@ vi.mock('#hooks/useSyncedPrefs', () => ({
   useSyncedPrefs: () => [mocks.prefs, mocks.save],
 }));
 
+vi.mock('@actual-app/core/shared/automatic-rates', () => ({
+  fetchAutomaticRates: mocks.fetchAutomaticRates,
+}));
+
 describe('CurrencySettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -31,6 +48,7 @@ describe('CurrencySettings', () => {
       numberFormat: 'comma-dot',
       'manualRate.USD.EUR': '0.9',
     };
+    mocks.fetchAutomaticRates.mockReset();
   });
 
   it('adds a validated custom unit to synced preferences', async () => {
@@ -75,6 +93,74 @@ describe('CurrencySettings', () => {
       'manualRate.EUR.USD': '1.08',
       'manualRate.USD.EUR': '',
     });
+  });
+
+  it('lets a standard currency use automatic rates', async () => {
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    await user.click(screen.getByLabelText('EUR rate mode'));
+    await user.click(await screen.findByRole('button', { name: 'Automatic' }));
+
+    expect(mocks.save).toHaveBeenCalledWith({ 'rateMode.EUR': 'auto' });
+  });
+
+  it('shows the cached rate and age when an on-demand refresh is offline', async () => {
+    const fetchedAt = Date.now() - 60 * 60 * 1000;
+    mocks.prefs = {
+      ...mocks.prefs,
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
+    };
+    mocks.fetchAutomaticRates.mockRejectedValue(new Error('offline'));
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(screen.getByText('1 EUR = 1.11111 USD')).toBeInTheDocument();
+    expect(screen.getByText('Updated 1 hour ago')).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh EUR rate now' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not refresh the automatic rate. The cached rate is unchanged.',
+    );
+    expect(screen.getByText('1 EUR = 1.11111 USD')).toBeInTheDocument();
+  });
+
+  it('saves an on-demand automatic rate in the synced cache', async () => {
+    const fetchedAt = Date.now();
+    mocks.prefs = { ...mocks.prefs, 'rateMode.EUR': 'auto' };
+    mocks.fetchAutomaticRates.mockResolvedValue([
+      { from: 'USD', to: 'EUR', rate: '0.91', fetchedAt },
+    ]);
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh EUR rate now' }),
+    );
+
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledWith(['EUR'], 'USD');
+    expect(mocks.save).toHaveBeenCalledWith({
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.91', fetchedAt }),
+    });
+  });
+
+  it('explains when a saved manual rate overrides automatic mode', () => {
+    mocks.prefs = {
+      ...mocks.prefs,
+      'rateMode.EUR': 'auto',
+      'manualRate.EUR.USD': '1.2',
+    };
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(
+      screen.getByText(
+        'The manual rate takes precedence over the automatic rate.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('rejects invalid rate input without saving it', async () => {

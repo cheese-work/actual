@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { ErrorBoundary, useErrorBoundary } from 'react-error-boundary';
@@ -13,6 +13,15 @@ import {
   init as initConnection,
   send,
 } from '@actual-app/core/platform/client/connection';
+import {
+  AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+  fetchAutomaticRates,
+  getDueAutomaticRateSources,
+} from '@actual-app/core/shared/automatic-rates';
+import {
+  manualRateKey,
+  setAutomaticRatePatch,
+} from '@actual-app/core/shared/exchange-rates';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { setAppState, sync } from '#app/appSlice';
@@ -22,6 +31,7 @@ import { useIsTestEnv } from '#hooks/useIsTestEnv';
 import { useMetadataPref } from '#hooks/useMetadataPref';
 import { useOnVisible } from '#hooks/useOnVisible';
 import { SpreadsheetProvider } from '#hooks/useSpreadsheet';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { setI18NextLanguage } from '#i18n';
 import { addNotification } from '#notifications/notificationsSlice';
 import { loadGlobalPrefs } from '#prefs/prefsSlice';
@@ -152,7 +162,81 @@ function AppInner() {
     }
   }, [dispatch, t, userData?.tokenExpired]);
 
-  return budgetId ? <FinancesApp /> : <ManagementApp />;
+  return budgetId ? (
+    <>
+      <AutomaticRatesUpdater budgetId={budgetId} />
+      <FinancesApp />
+    </>
+  ) : (
+    <ManagementApp />
+  );
+}
+
+function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
+  const [prefs, setSyncedPrefs] = useSyncedPrefs();
+  const prefsRef = useRef(prefs);
+  const budgetIdRef = useRef(budgetId);
+  const inProgress = useRef(new Set<string>());
+  prefsRef.current = prefs;
+  budgetIdRef.current = budgetId;
+
+  const refresh = useCallback(async () => {
+    const currentPrefs = prefsRef.current;
+    const mainCurrencyCode = currentPrefs.defaultCurrencyCode;
+    if (!mainCurrencyCode || inProgress.current.has(budgetId)) {
+      return;
+    }
+
+    const sourceCodes = getDueAutomaticRateSources(
+      currentPrefs,
+      mainCurrencyCode,
+    );
+    if (sourceCodes.length === 0) {
+      return;
+    }
+
+    inProgress.current.add(budgetId);
+    try {
+      const rates = await fetchAutomaticRates(sourceCodes, mainCurrencyCode);
+      if (budgetIdRef.current === budgetId) {
+        setSyncedPrefs(Object.assign({}, ...rates.map(setAutomaticRatePatch)));
+      }
+    } catch {
+      return;
+    } finally {
+      inProgress.current.delete(budgetId);
+    }
+  }, [budgetId, setSyncedPrefs]);
+
+  const autoModeSignature = Object.entries(prefs)
+    .filter(([key, mode]) => key.startsWith('rateMode.') && mode === 'auto')
+    .map(([key]) => key.slice('rateMode.'.length))
+    .sort()
+    .map(code =>
+      [
+        `rateMode.${code}=${prefs[`rateMode.${code}`]}`,
+        `${manualRateKey(code, prefs.defaultCurrencyCode ?? '')}=${prefs[manualRateKey(code, prefs.defaultCurrencyCode ?? '')] ?? ''}`,
+        `${manualRateKey(prefs.defaultCurrencyCode ?? '', code)}=${prefs[manualRateKey(prefs.defaultCurrencyCode ?? '', code)] ?? ''}`,
+      ].join('|'),
+    )
+    .join('|');
+
+  useOnVisible(refresh);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(
+      () => void refresh(),
+      AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    void refresh();
+  }, [autoModeSignature, prefs.defaultCurrencyCode, refresh]);
+
+  return null;
 }
 
 function ErrorFallback({ error }: FallbackProps) {

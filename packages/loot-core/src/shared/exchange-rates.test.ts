@@ -4,6 +4,7 @@ import {
   exchangeRatePrefError,
   formatInverseRate,
   formatRateForInput,
+  getAutomaticRate,
   getCustomUnits,
   getManualRates,
   isValidRate,
@@ -112,6 +113,59 @@ describe('convert', () => {
 
   it('rejects a non-integer amount', () => {
     expect(() => convert(1.5, 'USD', 'VND', rates)).toThrow(/safeNumber/);
+  });
+});
+
+describe('automatic rates', () => {
+  const automaticPrefs = {
+    'rateMode.EUR': 'auto',
+    'autoRate.EUR.USD': JSON.stringify({
+      rate: '1.08',
+      fetchedAt: 1790870400000,
+    }),
+  };
+
+  it('uses a cached automatic rate only when its source is in auto mode', () => {
+    expect(convert(10000, 'EUR', 'USD', automaticPrefs)).toBe(10800);
+    expect(getAutomaticRate(automaticPrefs, 'EUR', 'USD')).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.08',
+      fetchedAt: 1790870400000,
+    });
+    expect(
+      convert(10000, 'EUR', 'USD', {
+        ...automaticPrefs,
+        'rateMode.EUR': 'manual',
+      }),
+    ).toBeNull();
+  });
+
+  it('always prefers a manual rate over the cached automatic rate', () => {
+    expect(
+      convert(10000, 'EUR', 'USD', {
+        ...automaticPrefs,
+        'manualRate.EUR.USD': '1.2',
+      }),
+    ).toBe(12000);
+  });
+
+  it('uses a cached Main-to-currency rate inversely for an auto currency', () => {
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '1.1',
+        fetchedAt: 1790870400000,
+      }),
+    };
+
+    expect(convert(11000, 'EUR', 'USD', prefs)).toBe(10000);
+    expect(getAutomaticRate(prefs, 'EUR', 'USD')).toEqual({
+      from: 'USD',
+      to: 'EUR',
+      rate: '1.1',
+      fetchedAt: 1790870400000,
+    });
   });
 });
 
@@ -362,6 +416,43 @@ describe('exchangeRatePrefError', () => {
       exchangeRatePrefError('customUnit.X-BANANA', serializeCustomUnit(banana)),
     ).toBeNull();
     expect(exchangeRatePrefError('customUnit.X-BANANA', '')).toBeNull();
+    expect(exchangeRatePrefError('rateMode.EUR', 'auto')).toBeNull();
+    expect(exchangeRatePrefError('rateMode.USDT', 'auto')).toBeNull();
+    expect(
+      exchangeRatePrefError(
+        'autoRate.EUR.USD',
+        JSON.stringify({ rate: '0.92', fetchedAt: 1790870400000 }),
+      ),
+    ).toBeNull();
+    expect(
+      exchangeRatePrefError(
+        'autoRate.USDT.USD',
+        JSON.stringify({ rate: '1', fetchedAt: 1790870400000 }),
+      ),
+    ).toBeNull();
+    expect(exchangeRatePrefError('autoRate.EUR.USD', '')).toBeNull();
+  });
+
+  it('rejects invalid automatic modes and cached values', () => {
+    expect(exchangeRatePrefError('rateMode.EUR', 'sometimes')).toMatch(/mode/i);
+    expect(exchangeRatePrefError('rateMode.X-BANANA', 'auto')).toMatch(
+      /currency code/i,
+    );
+    expect(exchangeRatePrefError('autoRate.USDT.USDT', '1')).toMatch(
+      /currency pair/i,
+    );
+    expect(
+      exchangeRatePrefError(
+        'autoRate.EUR.USD',
+        JSON.stringify({ rate: '1e3', fetchedAt: 1790870400000 }),
+      ),
+    ).toMatch(/automatic rate/i);
+    expect(
+      exchangeRatePrefError(
+        'autoRate.EUR.USD',
+        JSON.stringify({ rate: '0.92', fetchedAt: 'yesterday' }),
+      ),
+    ).toMatch(/automatic rate/i);
   });
 
   it.each(['0', '-1', '1e3', 'abc', ' 5', '1,5'])(
