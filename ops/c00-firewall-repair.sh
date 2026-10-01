@@ -126,7 +126,9 @@ for chain in INPUT FORWARD; do
 done
 printf 'BEFORE network=%s bridge=%s containers=0; prod_id=%s prod_ip=%s\n' "$NET_ID" "$BR" "$PROD_ID" "$PROD_IP"
 
-# Track each mutation before making it. Roll back only this invocation's objects.
+# Claim an object only after the command creating it succeeded, so rollback
+# never removes a chain, hook or file a concurrent writer created. Signals are
+# deferred to checkpoints, so no success can go unclaimed.
 created_input=0
 created_forward=0
 created_sudoers=0
@@ -171,25 +173,31 @@ rollback() {
   for chain in "$INPUT_CHAIN" "$FORWARD_CHAIN"; do
     if "$IPT" -w -S "$chain" >/dev/null 2>&1; then printf 'ROLLBACK-FAILED: %s remains\n' "$chain" >&2; failed=1; fi
   done
-  if ((failed)); then printf 'MANUAL RECOVERY REQUIRED: at least one staging-only object remains; do not run staging\n' >&2; fi
+  if ((failed)); then printf 'MANUAL RECOVERY REQUIRED: a staging-only object remains (this run'"'"'s or a concurrent writer'"'"'s); do not run staging\n' >&2; fi
 }
 fail() {
   # ERR is inherited by command substitutions; only the main shell rolls back.
   [[ $BASHPID == "$$" ]] || exit 1
-  trap - ERR HUP INT TERM; printf 'MISMATCH: %s; removing exactly this invocation\n' "$1" >&2; rollback; exit 1
+  # A second signal must not cut the rollback short.
+  trap - ERR; trap '' HUP INT TERM
+  printf 'MISMATCH: %s; removing exactly this invocation\n' "$1" >&2; rollback; exit 1
 }
+interrupted=0
+checkpoint() { ((interrupted == 0)) || fail 'interrupted'; }
 trap 'fail "apply/readback interrupted at line $LINENO"' ERR
-trap 'fail "interrupted"' HUP INT TERM
+trap 'interrupted=1' HUP INT TERM
 add() {
   local family=$1 chain=$2; shift 2
-  # Register first so an interruption right after the insert cannot orphan it.
-  added+=("$family|$chain|$*")
   "$family" -w -I "$chain" 1 "$@"
+  added+=("$family|$chain|$*")
+  checkpoint
 }
-created_input=1
 "$IPT" -w -N "$INPUT_CHAIN"
-created_forward=1
+created_input=1
+checkpoint
 "$IPT" -w -N "$FORWARD_CHAIN"
+created_forward=1
+checkpoint
 # Reverse insertion order: established replies, exact gateway/production
 # denials, then deny all other staging-origin traffic.
 add "$IPT" "$INPUT_CHAIN" -j DROP
@@ -218,9 +226,12 @@ printf '%s\n' "$sudoers_body" > "$sudoers_tmp"
 chown root:root "$sudoers_tmp"
 chmod 0440 "$sudoers_tmp"
 visudo -cqf "$sudoers_tmp" || fail 'sudoers view syntax'
+# link(2) refuses an existing name, so a concurrent file is never claimed.
+ln -T -- "$sudoers_tmp" "$SUDOERS"
 created_sudoers=1
-mv -nT -- "$sudoers_tmp" "$SUDOERS"
+rm -f -- "$sudoers_tmp"
 sudoers_tmp=
+checkpoint
 visudo -cq || fail 'sudo configuration check'
 
 # Readback of live rules, identity and helper view.
@@ -259,6 +270,7 @@ for read_cmd in "${READS[@]}"; do
   expected=$("${args[@]}")
   actual=$(runuser -u "$HELPER_USER" -- sudo -n "${args[@]}" 2>/dev/null) || fail "helper cannot read: $read_cmd"
   [[ $actual == "$expected" ]] || fail "helper view differs: $read_cmd"
+  checkpoint
 done
 # Negative controls: non-exact argv is refused without a password. Only
 # read-only commands are executed here; write denial rests on the same exact
@@ -268,6 +280,7 @@ for denied in "$IPT -w -S" "$IPT -S INPUT" "$IPT -w -L INPUT" "$IPT -w -t nat -S
   if runuser -u "$HELPER_USER" -- sudo -n "${args[@]}" >/dev/null 2>&1; then fail "helper view allows: $denied"; fi
 done
 
+checkpoint
 printf 'AFTER iptables INPUT, FORWARD and DOCKER-USER first rules:\n'
 for chain in INPUT FORWARD DOCKER-USER; do "$IPT" -w -S "$chain" | grep -- '^-A ' | sed -n '1p'; done
 printf 'AFTER iptables staging-only chains:\n'
