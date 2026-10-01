@@ -120,14 +120,7 @@ type SaveSyncedPrefsPayload = {
 export const saveSyncedPrefs = createAppAsyncThunk(
   `${sliceName}/saveSyncedPrefs`,
   async ({ prefs }: SaveSyncedPrefsPayload, { dispatch }) => {
-    await Promise.all(
-      Object.entries(prefs).map(([prefName, value]) =>
-        send('preferences/save', {
-          id: prefName as keyof SyncedPrefs,
-          value,
-        }),
-      ),
-    );
+    await send('preferences/save', { prefs });
     dispatch(mergeSyncedPrefs(prefs));
   },
 );

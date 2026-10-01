@@ -30,6 +30,50 @@ afterEach(() => {
 });
 
 describe('Sync', () => {
+  it('syncs custom units and manual rates from one client to another', async () => {
+    await prefs.loadPrefs();
+    await prefs.savePrefs({
+      groupId: 'group',
+      lastSyncedTimestamp: Timestamp.zero.toString(),
+    });
+    await db.update('preferences', {
+      id: 'customUnit.X-BANANA',
+      value: JSON.stringify({ name: 'Banana', symbol: '🍌', decimals: 0 }),
+    });
+    await db.update('preferences', {
+      id: 'manualRate.X-BANANA.USD',
+      value: '3.5',
+    });
+
+    const clientASync = await fullSync();
+    if (isError(clientASync)) throw clientASync.error;
+
+    await global.emptyDatabase()();
+    await prefs.loadPrefs();
+    await prefs.savePrefs({
+      groupId: 'group',
+      lastSyncedTimestamp: Timestamp.zero.toString(),
+    });
+
+    const clientBSync = await fullSync();
+    if (isError(clientBSync)) throw clientBSync.error;
+
+    expect(
+      await db.first<{ value: string }>(
+        'SELECT value FROM preferences WHERE id = ?',
+        ['customUnit.X-BANANA'],
+      ),
+    ).toEqual({
+      value: JSON.stringify({ name: 'Banana', symbol: '🍌', decimals: 0 }),
+    });
+    expect(
+      await db.first<{ value: string }>(
+        'SELECT value FROM preferences WHERE id = ?',
+        ['manualRate.X-BANANA.USD'],
+      ),
+    ).toEqual({ value: '3.5' });
+  });
+
   it('should send messages to the server', async () => {
     void prefs.loadPrefs();
     void prefs.savePrefs({ groupId: 'group' });
