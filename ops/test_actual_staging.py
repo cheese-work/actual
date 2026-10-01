@@ -3,6 +3,8 @@ import fcntl
 import importlib.util
 import json
 import os
+import re
+import sys
 from pathlib import Path
 import shutil
 import sqlite3
@@ -96,19 +98,37 @@ class CandidateTests(unittest.TestCase):
                 '-N ACTUAL_STAGING_FORWARD',
                 '-A ACTUAL_STAGING_FORWARD -s 172.25.0.0/24 -d 172.20.0.2/32 -j DROP',
             )),
+            'ip6:INPUT': '\n'.join((
+                '-P INPUT DROP',
+                '-A INPUT -i act-stg0 -j DROP',
+                '-A INPUT -j ts-input',
+            )),
+            'ip6:FORWARD': '\n'.join((
+                '-P FORWARD DROP',
+                '-A FORWARD -i act-stg0 -j DROP',
+                '-A FORWARD -j DOCKER-USER',
+            )),
         }
         return network, production, policies
 
     def assert_network_fixture(self, network, production, policies):
+        reads = []
+
         def firewall(*command, **kwargs):
-            if command[:2] == ('iptables', '-S'):
-                return policies[command[2]]
-            return ''
+            reads.append(' '.join(command[2:]))
+            if command[:2] != ('sudo', '-n') or command[3:5] != ('-w', '-S') or len(command) != 6:
+                raise AssertionError(f'unexpected privileged command {command}')
+            if command[2] == '/usr/sbin/iptables':
+                return policies[command[5]]
+            if command[2] == '/usr/sbin/ip6tables':
+                return policies[f'ip6:{command[5]}']
+            raise AssertionError(f'unexpected privileged command {command}')
 
         with mock.patch.object(staging, 'docker', return_value=json.dumps([network])), \
                 mock.patch.object(staging, 'prod', return_value=production), \
                 mock.patch.object(staging, 'run', side_effect=firewall):
             staging.assert_network_isolation()
+        return reads
 
     def test_sanitize_revokes_all_copied_auth_but_keeps_budget(self):
         self.assertEqual(staging.budget_count(self.root), 1)
@@ -815,6 +835,47 @@ class CandidateTests(unittest.TestCase):
 
     def test_network_isolation_requires_ordered_input_and_forwarding_denies(self):
         self.assert_network_fixture(*self.network_fixture())
+
+    def test_network_isolation_reads_only_the_repair_sudoers_view(self):
+        script = (Path(__file__).parent / 'c00-firewall-repair.sh').read_text()
+        block = re.search(r'^READS=\((.*?)^\)', script, re.S | re.M).group(1)
+        values = {'IPT': '/usr/sbin/iptables', 'IP6T': '/usr/sbin/ip6tables',
+                  'INPUT_CHAIN': 'ACTUAL_STAGING_INPUT', 'FORWARD_CHAIN': 'ACTUAL_STAGING_FORWARD'}
+        allowed = {
+            re.sub(r'\$(\w+)', lambda match: values[match.group(1)], entry)
+            for entry in re.findall(r'"([^"]+)"', block)
+        }
+        reads = self.assert_network_fixture(*self.network_fixture())
+        self.assertEqual(set(reads), allowed)
+
+    def test_network_isolation_requires_ipv6_bridge_denials(self):
+        for chain in ('INPUT', 'FORWARD'):
+            for rule in ('', f'-A {chain} -i act-stg0 -p tcp -j DROP', f'-A {chain} -i act-stg0 -j ACCEPT'):
+                with self.subTest(chain=chain, rule=rule):
+                    network, production, policies = self.network_fixture()
+                    policies[f'ip6:{chain}'] = '\n'.join(filter(None, (f'-P {chain} DROP', rule)))
+                    with self.assertRaisesRegex(ValueError, f'missing IPv6 {chain} isolation hook'):
+                        self.assert_network_fixture(network, production, policies)
+
+    def test_network_isolation_rejects_ipv6_accept_before_denial(self):
+        network, production, policies = self.network_fixture()
+        policies['ip6:FORWARD'] = '\n'.join((
+            '-P FORWARD DROP',
+            '-A FORWARD -i act-stg0 -j ACCEPT',
+            '-A FORWARD -i act-stg0 -j DROP',
+        ))
+        with self.assertRaisesRegex(ValueError, 'IPv6 FORWARD isolation hook is shadowed'):
+            self.assert_network_fixture(network, production, policies)
+
+    def test_firewall_check_action_reports_match_without_alerting(self):
+        with mock.patch.object(staging, 'assert_network_isolation') as check, \
+                mock.patch.object(staging, 'alert') as alert, \
+                mock.patch.object(sys, 'argv', ['actual-staging.py', 'firewall-check']), \
+                mock.patch('builtins.print') as output:
+            staging.main()
+        check.assert_called_once_with()
+        alert.assert_not_called()
+        output.assert_called_once_with('firewall isolation MATCH')
 
     def test_network_isolation_rejects_new_connection_accept_before_input_hook(self):
         network, production, policies = self.network_fixture()
