@@ -343,7 +343,7 @@ class CandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'did not observe a new start'):
                 staging.recover(capture='1', deadline=10)
         docker.assert_not_called()
-        alert.assert_called_once_with('production remains down after SIGTERM')
+        alert.assert_called_once_with('production remains down after SIGTERM', dedupe=True)
         self.assertTrue((self.root / 'pending-prod-1.json').exists())
 
     def test_recover_waits_for_delayed_shutdown_then_starts_production(self):
@@ -640,6 +640,16 @@ class CandidateTests(unittest.TestCase):
             self.assertEqual(urlopen.call_count, 2)
             staging.alert(message)
             self.assertEqual(urlopen.call_count, 3)
+
+    def test_restarting_watchdog_posts_one_alert_per_message_inside_the_window(self):
+        # The watchdog restarts every 2 s while production is down; each restart calls recovery_alert again.
+        with mock.patch.object(staging, 'ROOT', self.root), \
+                mock.patch.object(staging.urllib.request, 'urlopen', return_value=self.webhook_response()) as urlopen:
+            for _ in range(5):
+                staging.recovery_alert('production remains down after SIGTERM')
+            self.assertEqual(urlopen.call_count, 1)
+            staging.recovery_alert('production restart failed')
+            self.assertEqual(urlopen.call_count, 2)
 
     def test_systemd_units_do_not_load_the_webhook_secret_into_their_environment(self):
         for name, unit in staging.systemd_units(Path('/srv/actual/ops/actual-staging.py')).items():
