@@ -701,30 +701,34 @@ def assert_network_isolation():
     assert_effective_forward_hook(bridge, 'ACTUAL_STAGING_FORWARD')
     assert_firewall_hook('DOCKER-USER', bridge, 'ACTUAL_STAGING_FORWARD')
     assert_firewall_deny('ACTUAL_STAGING_FORWARD', subnet, production_ips)
+    assert_firewall_hook('INPUT', bridge, 'DROP', family='ip6tables')
+    assert_firewall_hook('FORWARD', bridge, 'DROP', family='ip6tables')
 
 
-def firewall_rules(chain):
+def firewall_rules(chain, family='iptables'):
+    # Exact argv granted by the read-only sudoers view from c00-firewall-repair.sh.
     prefix = f'-A {chain} '
     return [
         shlex.split(line)
-        for line in run('iptables', '-S', chain, timeout=10).splitlines()
+        for line in run('sudo', '-n', f'/usr/sbin/{family}', '-w', '-S', chain, timeout=10).splitlines()
         if line.startswith(prefix)
     ]
 
 
-def assert_firewall_hook(chain, bridge, policy):
-    rules = firewall_rules(chain)
+def assert_firewall_hook(chain, bridge, policy, family='iptables'):
+    rules = firewall_rules(chain, family)
+    name = f'IPv6 {chain}' if family == 'ip6tables' else chain
     try:
         index = next(
             index for index, rule in enumerate(rules)
             if firewall_is_full_hook(rule, chain, bridge, policy)
         )
     except StopIteration as error:
-        raise ValueError(f'missing {chain} isolation hook') from error
+        raise ValueError(f'missing {name} isolation hook') from error
     assert_safe_preceding(
         rules[:index],
         lambda rule: firewall_interface_may_match(firewall_value(rule, '-i'), bridge),
-        f'{chain} isolation hook',
+        f'{name} isolation hook',
     )
 
 
@@ -1257,7 +1261,7 @@ def main():
     parser.add_argument(
         'action',
         choices=('snapshot', 'recover', 'restore', 'verify', 'promote', 'rollback', 'refresh', 'sync-image', 'freshness',
-                 'alert-test', 'install-units', 'enable-units'),
+                 'alert-test', 'install-units', 'enable-units', 'firewall-check'),
     )
     parser.add_argument('--snapshot', type=Path)
     parser.add_argument('--image')
@@ -1270,6 +1274,9 @@ def main():
             locked(freshness)
         elif args.action == 'alert-test':
             alert('alert delivery test')
+        elif args.action == 'firewall-check':
+            assert_network_isolation()
+            print('firewall isolation MATCH')
         elif args.action == 'install-units':
             install_units()
         elif args.action == 'enable-units':
@@ -1298,7 +1305,7 @@ def main():
                 write_json(ROOT / 'stale.json', {'timestamp': time.time(), 'reason': 'refresh failed'})
             except Exception:
                 print('STALE STATE WRITE FAILED', file=sys.stderr)
-        if args.action not in ('recover', 'freshness', 'alert-test'):
+        if args.action not in ('recover', 'freshness', 'alert-test', 'firewall-check'):
             try:
                 alert('staging action failed; prior state preserved', dedupe=True)
             except Exception:
