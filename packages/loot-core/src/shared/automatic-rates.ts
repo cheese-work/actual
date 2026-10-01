@@ -3,6 +3,8 @@ import { getAutomaticRate, isValidRate, manualRateKey } from './exchange-rates';
 import type { AutomaticRate } from './exchange-rates';
 
 export const AUTOMATIC_RATE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const AUTOMATIC_RATE_RETRY_INTERVAL_MS = 15 * 60 * 1000;
+export const AUTOMATIC_RATE_REQUEST_TIMEOUT_MS = 15 * 1000;
 const CURRENCY_CODES = new Set(
   currencies.map(currency => currency.code).filter(Boolean),
 );
@@ -16,6 +18,17 @@ type FetchOptions = {
   fetchImpl?: typeof fetch;
   now?: number;
 };
+
+export function isAutomaticRateSourceSupported(
+  sourceCode: string,
+  mainCurrencyCode: string,
+): boolean {
+  return (
+    sourceCode !== mainCurrencyCode &&
+    CURRENCY_CODES.has(mainCurrencyCode) &&
+    (CURRENCY_CODES.has(sourceCode) || COINGECKO_IDS[sourceCode] !== undefined)
+  );
+}
 
 function normalizeRate(value: unknown): string | null {
   const numericValue =
@@ -39,13 +52,32 @@ async function fetchJson(
   fetchImpl: typeof fetch,
   url: string,
 ): Promise<unknown> {
-  const response = await fetchImpl(url);
-  if (!response.ok) {
-    throw new Error(
-      `Exchange rate request failed with HTTP ${response.status}`,
-    );
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const request = (async () => {
+      const response = await fetchImpl(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(
+          `Exchange rate request failed with HTTP ${response.status}`,
+        );
+      }
+      return response.json();
+    })();
+    return await Promise.race([
+      request,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Exchange rate request timed out'));
+        }, AUTOMATIC_RATE_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
   }
-  return response.json();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -160,15 +192,28 @@ export function getDueAutomaticRateSources(
   prefs: Partial<Record<string, string>>,
   mainCurrencyCode: string,
   now = Date.now(),
+  failedAttempts: ReadonlyMap<string, number> = new Map(),
 ): string[] {
   return Object.entries(prefs)
     .flatMap(([key, mode]) => {
       const match = /^rateMode\.([A-Z]{3}|USDT)$/.exec(key);
-      if (!match || mode !== 'auto') {
+      if (
+        !match ||
+        mode !== 'auto' ||
+        !isAutomaticRateSourceSupported(match[1], mainCurrencyCode)
+      ) {
         return [];
       }
 
       const code = match[1];
+      const failedAt = failedAttempts.get(`${mainCurrencyCode}.${code}`);
+      if (
+        failedAt !== undefined &&
+        now - failedAt < AUTOMATIC_RATE_RETRY_INTERVAL_MS
+      ) {
+        return [];
+      }
+
       const hasManualRate = [
         prefs[manualRateKey(code, mainCurrencyCode)],
         prefs[manualRateKey(mainCurrencyCode, code)],

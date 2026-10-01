@@ -7,7 +7,10 @@ import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
-import { fetchAutomaticRates } from '@actual-app/core/shared/automatic-rates';
+import {
+  fetchAutomaticRates,
+  isAutomaticRateSourceSupported,
+} from '@actual-app/core/shared/automatic-rates';
 import { currencies, getCurrency } from '@actual-app/core/shared/currencies';
 import {
   customUnitKey,
@@ -489,7 +492,10 @@ export function CurrencySettings() {
               const rate =
                 direct?.rate ??
                 (inverse ? formatInverseRate(inverse.rate) : '');
-              const canUseAutomaticRates = !unit.code.startsWith('X-');
+              const canUseAutomaticRates = isAutomaticRateSourceSupported(
+                unit.code,
+                selectedCurrencyCode,
+              );
               const rateMode = canUseAutomaticRates
                 ? getRateMode(syncedPrefs, unit.code)
                 : 'manual';

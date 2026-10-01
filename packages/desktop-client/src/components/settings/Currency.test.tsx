@@ -36,9 +36,12 @@ vi.mock('#hooks/useSyncedPrefs', () => ({
   useSyncedPrefs: () => [mocks.prefs, mocks.save],
 }));
 
-vi.mock('@actual-app/core/shared/automatic-rates', () => ({
-  fetchAutomaticRates: mocks.fetchAutomaticRates,
-}));
+vi.mock('@actual-app/core/shared/automatic-rates', async () => {
+  const actual = await vi.importActual(
+    '@actual-app/core/shared/automatic-rates',
+  );
+  return { ...actual, fetchAutomaticRates: mocks.fetchAutomaticRates };
+});
 
 describe('CurrencySettings', () => {
   beforeEach(() => {
@@ -103,6 +106,24 @@ describe('CurrencySettings', () => {
     await user.click(await screen.findByRole('button', { name: 'Automatic' }));
 
     expect(mocks.save).toHaveBeenCalledWith({ 'rateMode.EUR': 'auto' });
+  });
+
+  it('keeps custom units manual and the crypto picker deferred', () => {
+    mocks.prefs = {
+      ...mocks.prefs,
+      'customUnit.X-BANANA': JSON.stringify({
+        name: 'Banana',
+        symbol: '🍌',
+        decimals: 2,
+      }),
+      'rateMode.USDT': 'auto',
+    };
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(
+      screen.queryByLabelText('X-BANANA rate mode'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('USDT rate mode')).not.toBeInTheDocument();
   });
 
   it('shows the cached rate and age when an on-demand refresh is offline', async () => {

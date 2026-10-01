@@ -411,6 +411,8 @@ describe('exchangeRatePrefError', () => {
 
   it('accepts valid rates, valid units and removals', () => {
     expect(exchangeRatePrefError('manualRate.USD.VND', '25400')).toBeNull();
+    expect(exchangeRatePrefError('manualRate.USDT.USD', '1')).toBeNull();
+    expect(exchangeRatePrefError('manualRate.USD.USDT', '1')).toBeNull();
     expect(exchangeRatePrefError('manualRate.USD.VND', '')).toBeNull();
     expect(
       exchangeRatePrefError('customUnit.X-BANANA', serializeCustomUnit(banana)),

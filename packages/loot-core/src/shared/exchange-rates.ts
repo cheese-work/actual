@@ -45,7 +45,7 @@ const RATE_MODE_PREFIX = 'rateMode.';
 const AUTOMATIC_RATE_PREFIX = 'autoRate.';
 
 // A currency in a rate key: a 3-letter ISO-style code or a custom unit code.
-const CURRENCY_CODE = '(?:[A-Z]{3}|X-[A-Z0-9]{1,10})';
+const CURRENCY_CODE = '(?:[A-Z]{3}|USDT|X-[A-Z0-9]{1,10})';
 const RATE_KEY = new RegExp(
   `^manualRate\\.(${CURRENCY_CODE})\\.(${CURRENCY_CODE})$`,
 );

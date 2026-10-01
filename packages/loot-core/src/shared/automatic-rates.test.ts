@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+  AUTOMATIC_RATE_REQUEST_TIMEOUT_MS,
+  AUTOMATIC_RATE_RETRY_INTERVAL_MS,
   fetchAutomaticRates,
   getDueAutomaticRateSources,
+  isAutomaticRateSourceSupported,
 } from './automatic-rates';
 
 const now = 1790870400000;
@@ -12,7 +16,10 @@ function response(body: unknown, status = 200) {
 }
 
 describe('fetchAutomaticRates', () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('fetches fiat rates in one request and records the cache time', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
@@ -53,7 +60,7 @@ describe('fetchAutomaticRates', () => {
     expect(String(fetchImpl.mock.calls[0][0])).toContain(
       'api.coingecko.com/api/v3/simple/price?ids=bitcoin%2Cethereum%2Ctether&vs_currencies=usd',
     );
-    expect(fetchImpl.mock.calls[0][1]).toBeUndefined();
+    expect(fetchImpl.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('rejects an unsuccessful provider response', async () => {
@@ -64,6 +71,39 @@ describe('fetchAutomaticRates', () => {
     await expect(
       fetchAutomaticRates(['EUR'], 'USD', { fetchImpl, now }),
     ).rejects.toThrow(/exchange rate/i);
+  });
+
+  it('aborts provider requests that exceed the timeout', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementation((_input, init) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      });
+
+    const request = fetchAutomaticRates(['EUR'], 'USD', { fetchImpl, now });
+    const rejection = expect(request).rejects.toThrow(/timed out/i);
+    await vi.advanceTimersByTimeAsync(AUTOMATIC_RATE_REQUEST_TIMEOUT_MS);
+
+    await rejection;
+    expect(fetchImpl.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+});
+
+describe('isAutomaticRateSourceSupported', () => {
+  it('allows supported fiat and deferred crypto sources only', () => {
+    expect(isAutomaticRateSourceSupported('EUR', 'USD')).toBe(true);
+    expect(isAutomaticRateSourceSupported('BTC', 'USD')).toBe(true);
+    expect(isAutomaticRateSourceSupported('USDT', 'USD')).toBe(true);
+    expect(isAutomaticRateSourceSupported('X-BANANA', 'USD')).toBe(false);
+    expect(isAutomaticRateSourceSupported('ABC', 'USD')).toBe(false);
+    expect(isAutomaticRateSourceSupported('EUR', 'X-BANANA')).toBe(false);
   });
 });
 
@@ -106,6 +146,29 @@ describe('getDueAutomaticRateSources', () => {
         now,
       ),
     ).toEqual([]);
+  });
+
+  it('backs off failed attempts without changing successful cache age', () => {
+    const fetchedAt = now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS;
+    const failedAt = now - 60_000;
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
+    };
+    const failedAttempts = new Map([['USD.EUR', failedAt]]);
+
+    expect(
+      getDueAutomaticRateSources(prefs, 'USD', now, failedAttempts),
+    ).toEqual([]);
+    expect(
+      getDueAutomaticRateSources(
+        prefs,
+        'USD',
+        failedAt + AUTOMATIC_RATE_RETRY_INTERVAL_MS,
+        failedAttempts,
+      ),
+    ).toEqual(['EUR']);
+    expect(JSON.parse(prefs['autoRate.USD.EUR']).fetchedAt).toBe(fetchedAt);
   });
 
   it('treats a Main-to-currency cache as fresh for an auto-mode currency', () => {
