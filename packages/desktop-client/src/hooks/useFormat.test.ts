@@ -12,6 +12,10 @@ vi.mock('./useSyncedPref', () => ({
   useSyncedPref: (id: string) => [mockPrefs[id], vi.fn()],
 }));
 
+vi.mock('./useSyncedPrefs', () => ({
+  useSyncedPrefs: () => [mockPrefs, vi.fn()],
+}));
+
 vi.mock('@actual-app/core/shared/currency-setup', { spy: true });
 
 describe('useFormat VND storage scale', () => {
@@ -176,5 +180,17 @@ describe('useFormat.forCurrency: exact strings per Main currency', () => {
       format: 'dot-comma',
       hideFraction: true,
     });
+  });
+});
+
+describe('useFormat.forCurrency: custom units', () => {
+  it('formats a custom unit with its own symbol and decimals', () => {
+    mockPrefs = {
+      defaultCurrencyCode: 'VND',
+      'customUnit.X-BANANA': '{"name":"Banana","symbol":"🍌","decimals":0}',
+    };
+    const { result } = renderHook(() => useFormat());
+
+    expect(result.current.forCurrency(40000, 'X-BANANA')).toBe('400 🍌');
   });
 });

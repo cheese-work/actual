@@ -5,6 +5,7 @@ import { getCurrency } from '@actual-app/core/shared/currencies';
 import type { Currency } from '@actual-app/core/shared/currencies';
 import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
 import type { AmountFormat } from '@actual-app/core/shared/currency-setup';
+import { getCustomUnits } from '@actual-app/core/shared/exchange-rates';
 import {
   amountToInteger,
   currencyToAmount,
@@ -13,10 +14,12 @@ import {
   integerToCurrency,
   parseNumberFormat,
   setNumberFormat,
+  STORAGE_DECIMAL_PLACES,
 } from '@actual-app/core/shared/util';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
 
 import { useSyncedPref } from './useSyncedPref';
+import { useSyncedPrefs } from './useSyncedPrefs';
 
 export type FormatType =
   | 'string'
@@ -154,6 +157,8 @@ export function useFormat(): UseFormatResult {
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const [hideFractionPref] = useSyncedPref('hideFraction');
   const [defaultCurrencyCodePref] = useSyncedPref('defaultCurrencyCode');
+  const [syncedPrefs] = useSyncedPrefs();
+  const customUnits = useMemo(() => getCustomUnits(syncedPrefs), [syncedPrefs]);
   const [symbolPositionPref] = useSyncedPref('currencySymbolPosition');
   const [spaceEnabledPref] = useSyncedPref(
     'currencySpaceBetweenAmountAndSymbol',
@@ -328,6 +333,29 @@ export function useFormat(): UseFormatResult {
         return formatDisplay(value, type);
       }
 
+      // Custom units carry their own symbol and decimals; the symbol
+      // always follows the amount.
+      const unit = customUnits.find(u => u.code === currencyCode);
+      if (unit) {
+        const unitFormatter = getNumberFormat({
+          format: numberFormatConfig.format,
+          decimalPlaces:
+            numberFormatConfig.hideFraction || type === 'financial-no-decimals'
+              ? 0
+              : unit.decimals,
+        }).formatter;
+        return withSign(
+          applyCurrencyStyling(
+            integerToCurrency(value, unitFormatter, STORAGE_DECIMAL_PLACES),
+            unit.symbol,
+            'after',
+            true,
+          ),
+          value,
+          type,
+        );
+      }
+
       const currency = getCurrency(currencyCode);
       const formattedString = formatAccountAmount(value, currencyCode, {
         ...numberFormatConfig,
@@ -355,6 +383,7 @@ export function useFormat(): UseFormatResult {
     },
     [
       activeCurrency.code,
+      customUnits,
       formatDisplay,
       numberFormatConfig,
       applyCurrencyStyling,

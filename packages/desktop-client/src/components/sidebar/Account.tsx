@@ -21,6 +21,7 @@ import type { AccountEntity } from '@actual-app/core/types/models';
 import { css, cx } from '@emotion/css';
 
 import { useReopenAccountMutation, useUpdateAccountMutation } from '#accounts';
+import { ApproxMain } from '#components/accounts/ApproxMain';
 import { BalanceHistoryGraph } from '#components/accounts/BalanceHistoryGraph';
 import { Link } from '#components/common/Link';
 import { Notes } from '#components/Notes';
@@ -32,6 +33,7 @@ import { useDragRef } from '#hooks/useDragRef';
 import { useEffectiveAccountCurrency } from '#hooks/useEffectiveAccountCurrency';
 import { useIsTestEnv } from '#hooks/useIsTestEnv';
 import { useNotes } from '#hooks/useNotes';
+import { useSheetValue } from '#hooks/useSheetValue';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { openAccountCloseModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
@@ -126,8 +128,14 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const updateAccount = useUpdateAccountMutation();
 
   const accountCurrency = useEffectiveAccountCurrency(account?.currency);
+  const balance = useSheetValue(query);
   const balanceCell = (
-    <CellValue binding={query} type="financial" currency={accountCurrency} />
+    <>
+      <CellValue binding={query} type="financial" currency={accountCurrency} />
+      {typeof balance === 'number' && (
+        <ApproxMain value={balance} currency={account?.currency} />
+      )}
+    </>
   );
 
   const isContextMenuOpen = useSelector(state =>
