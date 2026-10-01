@@ -71,8 +71,8 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    authorized login and decrypt check without printing a secret, and exits
    nonzero on failure. Also create
    `~/.config/actual-staging/alert.env` mode `0600` with exactly
-   `ACTUAL_ALERT_TARGET=CHE-828` and `ACTUAL_ALERT_WEBHOOK_URL=<https webhook
-   URL of the alert autopilot>`. The URL token is the credential: copy it from
+   `ACTUAL_ALERT_TARGET=CHE-828` and `ACTUAL_ALERT_WEBHOOK_URL=<webhook url>`,
+   the https webhook of the alert autopilot. The URL token is the credential: copy it from
    `multica autopilot get <id> --show-secrets` straight into that file, never
    into a comment, journal, or unit file. Alerts contain only fixed,
    non-financial status messages. The helper POSTs one JSON event to that URL
