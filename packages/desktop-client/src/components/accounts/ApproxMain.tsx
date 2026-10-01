@@ -2,7 +2,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Text } from '@actual-app/components/text';
-import { theme } from '@actual-app/components/theme';
 import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
 import { convert } from '@actual-app/core/shared/exchange-rates';
 
@@ -45,7 +44,6 @@ export function ApproxMain({ value, currency }: ApproxMainProps) {
     <Text
       style={{
         marginLeft: 4,
-        color: theme.pageTextSubdued,
         whiteSpace: 'nowrap',
       }}
     >
