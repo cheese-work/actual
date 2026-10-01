@@ -70,18 +70,17 @@ ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
    snapshot name, pinned image digest, and candidate identity, performs the
    authorized login and decrypt check without printing a secret, and exits
    nonzero on failure. Also create
-   `~/.config/actual-staging/alert.env` mode `0600` containing
-   `ACTUAL_ALERT_TARGET=CHE-828`. Alerts use a private UTF-8 temporary
-   comment file and contain only fixed, non-financial status messages. They
-   post only from a live Multica agent task (daemon-injected `MULTICA_TOKEN`,
-   `MULTICA_TASK_ID`, `MULTICA_AGENT_ID`) as a reply under
-   `ACTUAL_ALERT_PARENT`, which the invoking agent sets to its CHE-828 trigger
-   comment id: a comment-triggered task may reply only there. The post is read
-   back and rejected unless it is this agent task's reply under that parent.
-   Anything else fails closed without calling `multica`, including every
-   `systemd --user` unit, where the CLI would post as the host's member login.
-   Scheduled failures therefore surface only as failed units in the journal
-   until an agent-attributed service path exists. Create
+   `~/.config/actual-staging/alert.env` mode `0600` with exactly
+   `ACTUAL_ALERT_TARGET=CHE-828` and `ACTUAL_ALERT_WEBHOOK_URL=<https webhook
+   URL of the alert autopilot>`. The URL token is the credential: copy it from
+   `multica autopilot get <id> --show-secrets` straight into that file, never
+   into a comment, journal, or unit file. Alerts contain only fixed,
+   non-financial status messages. The helper POSTs one JSON event to that URL
+   and counts the alert delivered only when the webhook answers `accepted` (or
+   `duplicate` for a repeat inside the same minute); the autopilot's agent run
+   then posts the CHE-828 comment as an agent. No unit holds a Multica login or
+   loads `alert.env` into its environment, so nothing posts as the host's member
+   account. A rotated or disabled webhook fails closed in the journal. Create
    `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
    signs each manifest into private `ROOT/snapshot-signatures/`, outside the
    writable archive store. This boundary excludes backup-store writers only;
@@ -95,7 +94,8 @@ if arming fails, snapshot capture does not start. Preserve command output,
 container IDs, image digests, alert receipt, and cleanup evidence.
 
 1. `python3 ops/actual-staging.py install-units`
-2. `ACTUAL_ALERT_TARGET=CHE-828 ACTUAL_ALERT_PARENT=<trigger comment id> python3 ops/actual-staging.py alert-test`
+2. `python3 ops/actual-staging.py alert-test`, then confirm the agent-authored
+   CHE-828 comment from the autopilot run (`multica autopilot runs <id>`)
 3. `python3 ops/actual-staging.py refresh`
 4. Confirm the authorized encrypted-budget verifier, staging version, source
    count, tailnet-only access, prior-generation rollback, and production
@@ -106,8 +106,8 @@ The daily refresh is `03:45`; a five-minute image-sync timer pulls published
 `master` and promotes it from the latest approved snapshot only, without a
 second production interruption or freshness reset. The freshness timer fails
 after 26 hours or any recorded refresh failure and runs retention even when a
-refresh failed. Like the watchdog units, scheduled units recover or fail but
-cannot post alerts. Completed snapshots are retained for 14 days; failed spools,
+refresh failed. Like the watchdog units, scheduled units recover or fail and alert through
+the same webhook. Completed snapshots are retained for 14 days; failed spools,
 partial archives, and expired unreferenced generations are removed.
 
 The X99 offline suite is:

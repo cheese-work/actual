@@ -188,6 +188,7 @@ class CandidateTests(unittest.TestCase):
         with mock.patch.object(staging, 'run') as run:
             staging.schedule_watchdog('fixture')
         self.assertIn('--on-active=20s', run.call_args.args)
+        self.assertFalse([a for a in run.call_args.args if a.startswith('--property=EnvironmentFile')])
         self.assertIn('--timer-property=AccuracySec=1us', run.call_args.args)
         self.assertIn('--property=Restart=on-failure', run.call_args.args)
         self.assertEqual(run.call_args.args[-2:], ('--capture', 'fixture'))

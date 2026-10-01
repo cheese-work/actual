@@ -19,7 +19,6 @@ import sqlite3
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 
@@ -41,7 +40,7 @@ RECOVERY_SECONDS = 10
 INTERRUPTION_SECONDS = CAPTURE_SECONDS + RECOVERY_SECONDS
 ALERT_ENV = Path.home() / '.config/actual-staging/alert.env'
 ALERT_ISSUE = 'CHE-828'
-ALERT_ASSIGNEE = '[@c00-hermes-devops](mention://agent/b2b52f93-32e6-4caf-80ad-1b48cf60b821)'
+ALERT_WEBHOOK = re.compile(r'https://[^/\s]+/api/webhooks/autopilots/[A-Za-z0-9_-]+')
 ALERT_MESSAGES = {
     'alert delivery test',
     'production remains down after SIGTERM',
@@ -183,34 +182,27 @@ def budget_count(root):
 
 
 def alert(message, dedupe=False):
-    target = os.environ.get('ACTUAL_ALERT_TARGET')
-    if target != ALERT_ISSUE:
-        raise RuntimeError('alert destination must be CHE-828')
     if message not in ALERT_MESSAGES:
         raise ValueError('unsupported staging alert message')
-    # Only a daemon-injected task token posts as an agent; without one the CLI falls back to the host's member login.
-    agent, task = os.environ.get('MULTICA_AGENT_ID'), os.environ.get('MULTICA_TASK_ID')
-    if not (os.environ.get('MULTICA_TOKEN') and task and agent):
-        raise RuntimeError('no Multica agent task identity; refusing member-attributed alert')
-    # A comment-triggered task may reply only under its trigger comment, which the invoking agent supplies.
-    parent = os.environ.get('ACTUAL_ALERT_PARENT', '')
-    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', parent):
-        raise RuntimeError('ACTUAL_ALERT_PARENT must be the invoking task trigger comment id')
-    stamp = ROOT / f'alert-{hashlib.sha256(message.encode()).hexdigest()[:16]}.stamp'
+    url = alert_configured()
+    digest = hashlib.sha256(message.encode()).hexdigest()[:16]
+    stamp = ROOT / f'alert-{digest}.stamp'
     if dedupe and not stamp.is_symlink() and stamp.is_file() and time.time() - stamp.stat().st_mtime < ALERT_REPEAT_SECONDS:
         return
-    with tempfile.TemporaryDirectory(prefix='actual-staging-alert-', dir=Path.cwd()) as directory:
-        content = Path(directory) / 'comment.md'
-        content.write_text(f'CHE-828 staging alert — {message}\n\n{ALERT_ASSIGNEE}\n', encoding='utf-8')
-        content.chmod(0o600)
-        posted = json.loads(run(
-            'multica', 'issue', 'comment', 'add', target, '--parent', parent,
-            '--content-file', str(content), '--output', 'json', timeout=20,
-        ))
-    if (posted.get('parent_id'), posted.get('author_type'), posted.get('author_id'), posted.get('source_task_id')) != (
-            parent, 'agent', agent, task):
-        raise RuntimeError('alert readback does not match agent reply under trigger comment')
-    if dedupe:  # stamp only after a successful post so failed deliveries retry
+    # The autopilot run, not this unit, posts the comment as an agent; the URL token is the only credential.
+    request = urllib.request.Request(
+        url, method='POST',
+        data=json.dumps({'event': 'actual-staging-alert', 'issue': ALERT_ISSUE, 'message': message}).encode(),
+        headers={'Content-Type': 'application/json', 'Idempotency-Key': f'{digest}-{int(time.time()) // 60}'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            status = json.loads(response.read()).get('status')
+    except Exception:  # urllib errors can carry the URL; never let the token reach a journal
+        raise RuntimeError('alert webhook request failed') from None
+    if status not in ('accepted', 'duplicate'):
+        raise RuntimeError(f'alert webhook did not accept the alert: {status}')
+    if dedupe:  # stamp only after an accepted post so failed deliveries retry
         ensure_dir(ROOT)
         stamp.touch(mode=0o600)
 
@@ -218,10 +210,13 @@ def alert(message, dedupe=False):
 def alert_configured():
     if ALERT_ENV.is_symlink() or not ALERT_ENV.is_file() or ALERT_ENV.stat().st_mode & 0o077:
         raise ValueError('scheduled alert configuration must be a private regular file')
-    targets = [line.partition('=')[2] for line in ALERT_ENV.read_text(encoding='utf-8').splitlines()
-               if line.startswith('ACTUAL_ALERT_TARGET=')]
-    if targets != [ALERT_ISSUE]:
+    settings = [line.partition('=')[::2] for line in ALERT_ENV.read_text(encoding='utf-8').splitlines()]
+    if [value for key, value in settings if key == 'ACTUAL_ALERT_TARGET'] != [ALERT_ISSUE]:
         raise ValueError('scheduled alert destination must be CHE-828')
+    urls = [value for key, value in settings if key == 'ACTUAL_ALERT_WEBHOOK_URL']
+    if len(urls) != 1 or not ALERT_WEBHOOK.fullmatch(urls[0]):
+        raise ValueError('scheduled alert webhook must be one https autopilot URL')
+    return urls[0]
 
 
 def snapshot_auth_key():
@@ -415,8 +410,7 @@ def schedule_watchdog(stamp):
     run(
         'systemd-run', '--user', '--collect', f'--unit=actual-prod-watchdog-{stamp}',
         '--on-active=20s', '--timer-property=AccuracySec=1us',
-        f'--property=EnvironmentFile={ALERT_ENV}', '--property=Restart=on-failure',
-        '--property=RestartSec=2s',
+        '--property=Restart=on-failure', '--property=RestartSec=2s',
         sys.executable, str(Path(__file__).resolve()), 'recover', '--capture', stamp,
         timeout=10,
     )
@@ -1168,7 +1162,10 @@ def freshness():
     cleanup_snapshots()
     marker = ROOT / 'last-success.json'
     if (ROOT / 'stale.json').exists() or not marker.exists() or time.time() - read_json(marker)['timestamp'] > 26 * 3600:
-        alert('snapshot refresh stale over 26 hours', dedupe=True)
+        try:
+            alert('snapshot refresh stale over 26 hours', dedupe=True)
+        except Exception:
+            print('ALERT DELIVERY FAILED', file=sys.stderr)
         raise RuntimeError('staging stale')
 
 
@@ -1178,13 +1175,12 @@ def systemd_units(script):
         'actual-prod-watchdog.service': '\n'.join((
             '[Unit]', 'Description=Recover unchanged Actual production container after boot',
             'After=default.target', '', '[Service]', 'Type=oneshot',
-            'EnvironmentFile=%h/.config/actual-staging/alert.env',
             'Restart=on-failure', 'RestartSec=2s', f'ExecStart={command} recover', '',
             '[Install]', 'WantedBy=default.target', '',
         )),
         'actual-staging-refresh.service': '\n'.join((
             '[Unit]', 'Description=Refresh private Actual staging', '', '[Service]', 'Type=oneshot',
-            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} refresh', '',
+            f'ExecStart={command} refresh', '',
         )),
         'actual-staging-refresh.timer': '\n'.join((
             '[Unit]', 'Description=Daily private Actual staging refresh', '', '[Timer]',
@@ -1193,7 +1189,7 @@ def systemd_units(script):
         )),
         'actual-staging-image-sync.service': '\n'.join((
             '[Unit]', 'Description=Apply a newly published Actual master image', '', '[Service]', 'Type=oneshot',
-            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} sync-image', '',
+            f'ExecStart={command} sync-image', '',
         )),
         'actual-staging-image-sync.timer': '\n'.join((
             '[Unit]', 'Description=Detect newly published Actual master images', '', '[Timer]',
@@ -1202,7 +1198,7 @@ def systemd_units(script):
         )),
         'actual-staging-freshness.service': '\n'.join((
             '[Unit]', 'Description=Alert stale Actual staging', '', '[Service]', 'Type=oneshot',
-            'EnvironmentFile=%h/.config/actual-staging/alert.env', f'ExecStart={command} freshness', '',
+            f'ExecStart={command} freshness', '',
         )),
         'actual-staging-freshness.timer': '\n'.join((
             '[Unit]', 'Description=Check Actual staging freshness', '', '[Timer]',
