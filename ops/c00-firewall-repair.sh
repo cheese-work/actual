@@ -143,21 +143,34 @@ rollback() {
       printf 'ROLLBACK-FAILED: sudoers view changed; refusing removal\n' >&2; failed=1
     fi
   fi
+  # Hooks in shared chains: delete exactly the registered rule if present.
   for ((i=${#added[@]}-1; i>=0; i--)); do
     IFS='|' read -r family chain spec <<< "${added[i]}"
+    [[ $chain == "$INPUT_CHAIN" || $chain == "$FORWARD_CHAIN" ]] && continue
     read -r -a args <<< "$spec"
-    if ! rules=$("$family" -w -S "$chain"); then
-      printf 'ROLLBACK-FAILED: cannot inspect %s %s\n' "$family" "$chain" >&2; failed=1; continue
-    fi
-    # -S canonicalizes conntrack state order; -C uses kernel matching.
     if "$family" -w -C "$chain" "${args[@]}" >/dev/null 2>&1; then
       "$family" -w -D "$chain" "${args[@]}" || { printf 'ROLLBACK-FAILED: %s -D %s %s\n' "$family" "$chain" "$spec" >&2; failed=1; }
-    elif [[ $chain == "$INPUT_CHAIN" || $chain == "$FORWARD_CHAIN" ]] && [[ $rules == *"-A $chain "* ]]; then
-      printf 'ROLLBACK-FAILED: cannot prove %s %s rule absent\n' "$family" "$chain" >&2; failed=1
     fi
   done
-  if ((created_forward)); then "$IPT" -w -X "$FORWARD_CHAIN" || { printf 'ROLLBACK-FAILED: forward chain\n' >&2; failed=1; }; fi
-  if ((created_input)); then "$IPT" -w -X "$INPUT_CHAIN" || { printf 'ROLLBACK-FAILED: input chain\n' >&2; failed=1; }; fi
+  # Staging chains were proven absent in preflight, so they are wholly ours.
+  if ((created_forward)) && "$IPT" -w -S "$FORWARD_CHAIN" >/dev/null 2>&1; then
+    { "$IPT" -w -F "$FORWARD_CHAIN" && "$IPT" -w -X "$FORWARD_CHAIN"; } || { printf 'ROLLBACK-FAILED: forward chain\n' >&2; failed=1; }
+  fi
+  if ((created_input)) && "$IPT" -w -S "$INPUT_CHAIN" >/dev/null 2>&1; then
+    { "$IPT" -w -F "$INPUT_CHAIN" && "$IPT" -w -X "$INPUT_CHAIN"; } || { printf 'ROLLBACK-FAILED: input chain\n' >&2; failed=1; }
+  fi
+  # Proof of absence: preflight found no staging token in any of these.
+  for spec in "$IPT INPUT" "$IPT FORWARD" "$IPT DOCKER-USER" "$IP6T INPUT" "$IP6T FORWARD"; do
+    read -r family chain <<< "$spec"
+    if ! rules=$("$family" -w -S "$chain"); then
+      printf 'ROLLBACK-FAILED: cannot inspect %s\n' "$spec" >&2; failed=1
+    elif grep -qE -- "$staging_token" <<< "$rules"; then
+      printf 'ROLLBACK-FAILED: staging rule remains in %s\n' "$spec" >&2; failed=1
+    fi
+  done
+  for chain in "$INPUT_CHAIN" "$FORWARD_CHAIN"; do
+    if "$IPT" -w -S "$chain" >/dev/null 2>&1; then printf 'ROLLBACK-FAILED: %s remains\n' "$chain" >&2; failed=1; fi
+  done
   if ((failed)); then printf 'MANUAL RECOVERY REQUIRED: at least one staging-only object remains; do not run staging\n' >&2; fi
 }
 fail() {

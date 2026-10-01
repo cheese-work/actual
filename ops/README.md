@@ -114,4 +114,20 @@ The X99 offline suite is:
 
 ```bash
 python3 -m unittest discover -s ops -p 'test_actual_staging.py' -v
+python3 -m unittest discover -s ops -p 'test_c00_firewall_repair.py' -v  # needs Docker
 ```
+
+## Firewall repair after a reboot or firewall reload
+
+The staging rules are not persistent. When they vanish, the helper fails
+closed. `c00-firewall-repair.sh` is the reviewed one-shot repair. It adopts the
+existing empty `actual-staging-isolated` network (exact ID, never created or
+removed) and checks the production identity and the current `FORWARD` baseline.
+It then restores only the `act-stg0` IPv4 hooks and chains plus the IPv6
+denials, and installs `/etc/sudoers.d/che-828-staging-firewall-readonly`. That
+file grants `congvc` only the exact `iptables`/`ip6tables -w -S <chain>` reads
+the helper performs, with no password. Any mismatch removes exactly this run's
+changes. Run it as root on C00 only after an independent review of its exact
+bytes, then run `python3 ops/actual-staging.py firewall-check` as `congvc` for
+the live helper readback. A rerun on a repaired host refuses and changes
+nothing.
