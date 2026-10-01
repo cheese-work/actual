@@ -357,7 +357,7 @@ def assert_prod_identity(before=None, deadline=None):
 
 def recovery_alert(message):
     try:
-        alert(message)
+        alert(message, dedupe=True)
     except Exception:
         print('PRODUCTION RECOVERY ALERT FAILED', file=sys.stderr)
 
