@@ -123,6 +123,8 @@ export function useSidebarAccountTree(): SidebarAccountTree {
     closed: closedAccounts,
     accountsLoaded:
       onBudgetAccountsQuery.data !== undefined &&
-      offBudgetAccountsQuery.data !== undefined,
+      !onBudgetAccountsQuery.isPlaceholderData &&
+      offBudgetAccountsQuery.data !== undefined &&
+      !offBudgetAccountsQuery.isPlaceholderData,
   };
 }
