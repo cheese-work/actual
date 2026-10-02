@@ -1,3 +1,5 @@
+import { afterEach, vi } from 'vitest';
+
 import { aggregateAccountAmountsInMainCurrency } from './currency-aggregation';
 import type { CurrencyAccount } from './currency-aggregation';
 import { automaticRateKey, manualRateKey } from './exchange-rates';
@@ -8,6 +10,10 @@ const accounts = [
   { id: 'usd', currency: 'USD' },
   { id: 'banana', currency: 'X-BANANA' },
 ] satisfies readonly CurrencyAccount[];
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('aggregateAccountAmountsInMainCurrency', () => {
   it('converts each account and custom unit into Main before totaling', () => {
@@ -109,6 +115,82 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         prefs,
       ),
     ).toEqual({ status: 'complete', amount: -2 });
+  });
+
+  it('keeps safe completed sums independent of intermediate overflow and order', () => {
+    const sameLeafCases = [
+      { amounts: [MAX_SAFE_NUMBER, 1, -1], expected: MAX_SAFE_NUMBER },
+      { amounts: [MAX_SAFE_NUMBER, -1, 1], expected: MAX_SAFE_NUMBER },
+      { amounts: [-MAX_SAFE_NUMBER, -1, 1], expected: -MAX_SAFE_NUMBER },
+      { amounts: [-MAX_SAFE_NUMBER, 1, -1], expected: -MAX_SAFE_NUMBER },
+    ];
+
+    for (const { amounts, expected } of sameLeafCases) {
+      expect(
+        aggregateAccountAmountsInMainCurrency(
+          amounts.map(amount => ({ accountId: 'vnd', amount })),
+          accounts,
+          { defaultCurrencyCode: 'VND' },
+        ),
+      ).toEqual({ status: 'complete', amount: expected });
+    }
+
+    const leafAmounts = [MAX_SAFE_NUMBER, 1, -1].map((amount, index) => ({
+      accountId: 'vnd',
+      bucketId: String(index),
+      amount,
+    }));
+    expect(
+      aggregateAccountAmountsInMainCurrency(leafAmounts, accounts, {
+        defaultCurrencyCode: 'VND',
+      }),
+    ).toEqual({ status: 'complete', amount: MAX_SAFE_NUMBER });
+  });
+
+  it('keeps rounding-adjustment child sums exact through cancellation', () => {
+    expect(
+      aggregateAccountAmountsInMainCurrency(
+        [{ accountId: 'vnd', amount: MAX_SAFE_NUMBER }],
+        accounts,
+        { defaultCurrencyCode: 'VND' },
+        {
+          displayDecimalPlaces: 2,
+          immediateChildAmounts: [MAX_SAFE_NUMBER, 1, -1],
+        },
+      ),
+    ).toEqual({ status: 'complete', amount: MAX_SAFE_NUMBER });
+  });
+
+  it('uses one valuation time to select cached automatic rates for all leaves', () => {
+    const now = 1_800_000_000_000;
+    const dateNow = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(now)
+      .mockReturnValueOnce(now + 1);
+    const prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.USD': 'auto',
+      [automaticRateKey('USD', 'EUR')]: JSON.stringify({
+        rate: '3',
+        fetchedAt: now + 1,
+      }),
+      [automaticRateKey('EUR', 'USD')]: JSON.stringify({
+        rate: '0.5',
+        fetchedAt: now - 1,
+      }),
+    };
+
+    expect(
+      aggregateAccountAmountsInMainCurrency(
+        [
+          { accountId: 'usd', bucketId: 'first', amount: 100 },
+          { accountId: 'usd', bucketId: 'second', amount: 100 },
+        ],
+        accounts,
+        prefs,
+      ),
+    ).toEqual({ status: 'complete', amount: 400 });
+    expect(dateNow).toHaveBeenCalledTimes(1);
   });
 
   it('rounds separately at each account-and-bucket leaf', () => {

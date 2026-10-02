@@ -46,9 +46,9 @@ function isSafeAmount(amount: number): amount is IntegerAmount {
   );
 }
 
-function safeAdd(a: IntegerAmount, b: IntegerAmount): IntegerAmount | null {
-  const sum = a + b;
-  return isSafeAmount(sum) ? sum : null;
+function toSafeAmount(amount: bigint): IntegerAmount | null {
+  const maximum = BigInt(MAX_SAFE_NUMBER);
+  return amount >= -maximum && amount <= maximum ? Number(amount) : null;
 }
 
 function roundToDisplayPrecision(
@@ -96,7 +96,7 @@ function getPresentationAdjustment(
     return undefined;
   }
 
-  let roundedChildren = 0;
+  let roundedChildren = 0n;
   for (const childAmount of options.immediateChildAmounts) {
     if (!isSafeAmount(childAmount)) {
       return undefined;
@@ -108,14 +108,10 @@ function getPresentationAdjustment(
     if (roundedChild === null) {
       return undefined;
     }
-    const nextRoundedChildren = safeAdd(roundedChildren, roundedChild);
-    if (nextRoundedChildren === null) {
-      return undefined;
-    }
-    roundedChildren = nextRoundedChildren;
+    roundedChildren += BigInt(roundedChild);
   }
 
-  const adjustment = safeAdd(roundedTotal, -roundedChildren);
+  const adjustment = toSafeAmount(BigInt(roundedTotal) - roundedChildren);
   if (adjustment === null) {
     return undefined;
   }
@@ -144,10 +140,11 @@ export function aggregateAccountAmountsInMainCurrency(
     return { status: 'loading' };
   }
 
+  const valuationTime = Date.now();
   const accountsById = new Map(accounts.map(account => [account.id, account]));
   const amountsByAccountAndBucket = new Map<
     string,
-    Map<string | undefined, IntegerAmount>
+    Map<string | undefined, bigint>
   >();
 
   for (const { accountId, bucketId, amount } of amounts) {
@@ -160,15 +157,14 @@ export function aggregateAccountAmountsInMainCurrency(
     }
 
     const bucketAmounts = amountsByAccountAndBucket.get(accountId) ?? new Map();
-    const nativeAmount = safeAdd(bucketAmounts.get(bucketId) ?? 0, amount);
-    if (nativeAmount === null) {
-      return { status: 'unavailable' };
-    }
-    bucketAmounts.set(bucketId, nativeAmount);
+    bucketAmounts.set(
+      bucketId,
+      (bucketAmounts.get(bucketId) ?? 0n) + BigInt(amount),
+    );
     amountsByAccountAndBucket.set(accountId, bucketAmounts);
   }
 
-  let total = 0;
+  let total = 0n;
   for (const [accountId, bucketAmounts] of amountsByAccountAndBucket) {
     const account = accountsById.get(accountId);
     if (!account) {
@@ -182,7 +178,12 @@ export function aggregateAccountAmountsInMainCurrency(
       return { status: 'unavailable' };
     }
 
-    for (const nativeAmount of bucketAmounts.values()) {
+    for (const nativeAmountSum of bucketAmounts.values()) {
+      const nativeAmount = toSafeAmount(nativeAmountSum);
+      if (nativeAmount === null) {
+        return { status: 'unavailable' };
+      }
+
       let converted: IntegerAmount | null;
       try {
         converted = convert(
@@ -190,6 +191,7 @@ export function aggregateAccountAmountsInMainCurrency(
           accountCurrency,
           mainCurrencyCode,
           prefs,
+          valuationTime,
         );
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('safeNumber:')) {
@@ -201,25 +203,26 @@ export function aggregateAccountAmountsInMainCurrency(
       if (converted === null || !isSafeAmount(converted)) {
         return { status: 'unavailable' };
       }
-      const nextTotal = safeAdd(total, converted);
-      if (nextTotal === null) {
-        return { status: 'unavailable' };
-      }
-      total = nextTotal;
+      total += BigInt(converted);
     }
   }
 
-  if (!display) {
-    return { status: 'complete', amount: total };
+  const safeTotal = toSafeAmount(total);
+  if (safeTotal === null) {
+    return { status: 'unavailable' };
   }
 
-  const presentationAdjustment = getPresentationAdjustment(total, display);
+  if (!display) {
+    return { status: 'complete', amount: safeTotal };
+  }
+
+  const presentationAdjustment = getPresentationAdjustment(safeTotal, display);
   if (presentationAdjustment === undefined) {
     return { status: 'unavailable' };
   }
   return {
     status: 'complete',
-    amount: total,
+    amount: safeTotal,
     ...(presentationAdjustment && { presentationAdjustment }),
   };
 }

@@ -126,6 +126,7 @@ export function convert(
   from: string,
   to: string,
   rates: Prefs,
+  valuationTime?: number,
 ): IntegerAmount | null {
   safeNumber(amount);
   if (from === to) {
@@ -148,7 +149,7 @@ export function convert(
     );
   }
 
-  const automatic = getAutomaticRate(rates, from, to);
+  const automatic = getAutomaticRate(rates, from, to, valuationTime);
   if (automatic) {
     const { numerator, denominator } = toFraction(automatic.rate);
     const [multiplier, divisor] =
