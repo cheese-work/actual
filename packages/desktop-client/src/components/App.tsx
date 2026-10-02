@@ -36,6 +36,7 @@ import { signOut } from '#users/usersSlice';
 import { ExposeNavigate } from '#util/router-tools';
 
 import { AppBackground } from './AppBackground';
+import { AutomaticRatesUpdater } from './AutomaticRatesUpdater';
 import { BudgetMonthCountProvider } from './budget/BudgetMonthCountContext';
 import { AriaRouterProvider } from './common/AriaRouterProvider';
 import { DevelopmentTopBar } from './DevelopmentTopBar';
@@ -152,7 +153,14 @@ function AppInner() {
     }
   }, [dispatch, t, userData?.tokenExpired]);
 
-  return budgetId ? <FinancesApp /> : <ManagementApp />;
+  return budgetId ? (
+    <>
+      <AutomaticRatesUpdater budgetId={budgetId} />
+      <FinancesApp />
+    </>
+  ) : (
+    <ManagementApp />
+  );
 }
 
 function ErrorFallback({ error }: FallbackProps) {

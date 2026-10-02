@@ -20,19 +20,39 @@ export type CustomUnit = {
 
 export type ManualRate = { from: string; to: string; rate: string };
 
+export type AutomaticRate = {
+  from: string;
+  to: string;
+  rate: string;
+  fetchedAt: number;
+};
+
 type Prefs = Partial<Record<string, string>>;
 
 export type ExchangeRatePrefs = Partial<
-  Record<`manualRate.${string}.${string}` | `customUnit.${string}`, string>
+  Record<
+    | `manualRate.${string}.${string}`
+    | `customUnit.${string}`
+    | `rateMode.${string}`
+    | `autoRate.${string}.${string}`,
+    string
+  >
 >;
 
 const RATE_PREFIX = 'manualRate.';
 const UNIT_PREFIX = 'customUnit.';
+const RATE_MODE_PREFIX = 'rateMode.';
+const AUTOMATIC_RATE_PREFIX = 'autoRate.';
 
-// A currency in a rate key: a 3-letter ISO-style code or a custom unit code.
-const CURRENCY_CODE = '(?:[A-Z]{3}|X-[A-Z0-9]{1,10})';
+// A currency in a rate key: an ISO-style code, USDT, or a custom unit code.
+const CURRENCY_CODE = '(?:[A-Z]{3}|USDT|X-[A-Z0-9]{1,10})';
 const RATE_KEY = new RegExp(
   `^manualRate\\.(${CURRENCY_CODE})\\.(${CURRENCY_CODE})$`,
+);
+const AUTOMATIC_CURRENCY_CODE = '(?:[A-Z]{3}|USDT)';
+const RATE_MODE_KEY = new RegExp(`^rateMode\\.(${AUTOMATIC_CURRENCY_CODE})$`);
+const AUTOMATIC_RATE_KEY = new RegExp(
+  `^autoRate\\.(${AUTOMATIC_CURRENCY_CODE})\\.(${AUTOMATIC_CURRENCY_CODE})$`,
 );
 // The X- prefix keeps custom units from colliding with any ISO code.
 const UNIT_CODE = /^X-[A-Z0-9]{1,10}$/;
@@ -46,6 +66,14 @@ export function manualRateKey(from: string, to: string) {
 
 export function customUnitKey(code: string) {
   return `${UNIT_PREFIX}${code}` as const;
+}
+
+export function rateModeKey(code: string) {
+  return `${RATE_MODE_PREFIX}${code}` as const;
+}
+
+export function automaticRateKey(from: string, to: string) {
+  return `${AUTOMATIC_RATE_PREFIX}${from}.${to}` as const;
 }
 
 /** The unit code of a `customUnit.<CODE>` pref id, or null for any other id. */
@@ -117,6 +145,18 @@ export function convert(
     const { numerator, denominator } = toFraction(inverse);
     return safeNumber(
       Number(divideHalfEven(BigInt(amount) * denominator, numerator)),
+    );
+  }
+
+  const automatic = getAutomaticRate(rates, from, to);
+  if (automatic) {
+    const { numerator, denominator } = toFraction(automatic.rate);
+    const [multiplier, divisor] =
+      automatic.from === from
+        ? [numerator, denominator]
+        : [denominator, numerator];
+    return safeNumber(
+      Number(divideHalfEven(BigInt(amount) * multiplier, divisor)),
     );
   }
 
@@ -252,6 +292,107 @@ export function getManualRates(prefs: Prefs): ManualRate[] {
   );
 }
 
+export function getRateMode(prefs: Prefs, code: string): 'manual' | 'auto' {
+  return prefs[rateModeKey(code)] === 'auto' ? 'auto' : 'manual';
+}
+
+export function getEffectiveRateMode(
+  prefs: Prefs,
+  code: string,
+  mainCurrencyCode: string,
+): 'manual' | 'auto' {
+  const mode = prefs[rateModeKey(code)];
+  if (mode === 'manual' || mode === 'auto') {
+    return mode;
+  }
+
+  return code !== mainCurrencyCode &&
+    prefs[rateModeKey(mainCurrencyCode)] === 'auto'
+    ? 'auto'
+    : 'manual';
+}
+
+export function isAutomaticRateEnabled(
+  prefs: Prefs,
+  from: string,
+  to: string,
+  mainCurrencyCode = prefs.defaultCurrencyCode ?? to,
+): boolean {
+  const sourceCode =
+    from === mainCurrencyCode ? to : to === mainCurrencyCode ? from : null;
+  return (
+    sourceCode !== null &&
+    sourceCode !== mainCurrencyCode &&
+    getEffectiveRateMode(prefs, sourceCode, mainCurrencyCode) === 'auto'
+  );
+}
+
+function readAutomaticRate(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  try {
+    const body: unknown = JSON.parse(value);
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'rate' in body &&
+      typeof body.rate === 'string' &&
+      isValidRate(body.rate) &&
+      'fetchedAt' in body &&
+      typeof body.fetchedAt === 'number' &&
+      Number.isSafeInteger(body.fetchedAt) &&
+      body.fetchedAt > 0
+    ) {
+      return { rate: body.rate, fetchedAt: body.fetchedAt };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function getAutomaticRate(
+  prefs: Prefs,
+  from: string,
+  to: string,
+  now = Date.now(),
+  mainCurrencyCode = prefs.defaultCurrencyCode ?? to,
+): AutomaticRate | null {
+  if (!isAutomaticRateEnabled(prefs, from, to, mainCurrencyCode)) {
+    return null;
+  }
+
+  const direct = readAutomaticRate(prefs[automaticRateKey(from, to)]);
+  const inverse = readAutomaticRate(prefs[automaticRateKey(to, from)]);
+  if (
+    !inverse ||
+    (direct &&
+      getAutomaticRateFreshnessTimestamp(direct.fetchedAt, now) >=
+        getAutomaticRateFreshnessTimestamp(inverse.fetchedAt, now))
+  ) {
+    return direct ? { from, to, ...direct } : null;
+  }
+
+  return { from: to, to: from, ...inverse };
+}
+
+export function getAutomaticRateFreshnessTimestamp(
+  fetchedAt: number,
+  now = Date.now(),
+): number {
+  return fetchedAt > now ? 0 : fetchedAt;
+}
+
+export function setAutomaticRatePatch(rate: AutomaticRate): ExchangeRatePrefs {
+  return {
+    [automaticRateKey(rate.from, rate.to)]: JSON.stringify({
+      rate: rate.rate,
+      fetchedAt: rate.fetchedAt,
+    }),
+  };
+}
+
 const UNIT_HINTS: Record<keyof CustomUnit, string> = {
   code: 'use X- followed by 1 to 10 capital letters or digits, like X-BANANA',
   name: 'required, at most 40 characters',
@@ -277,6 +418,33 @@ export function exchangeRatePrefError(
     }
     if (value !== '' && !isValidRate(value)) {
       return 'An exchange rate must be greater than 0, written as a plain number like 25400 or 0.000039';
+    }
+    return null;
+  }
+
+  if (id.startsWith(RATE_MODE_PREFIX)) {
+    if (!RATE_MODE_KEY.test(id)) {
+      return `Invalid currency code in "${id}": use rateMode.<CODE>`;
+    }
+    if (value !== '' && value !== 'manual' && value !== 'auto') {
+      return 'An exchange-rate mode must be manual or auto';
+    }
+    return null;
+  }
+
+  if (id.startsWith(AUTOMATIC_RATE_PREFIX)) {
+    const match = AUTOMATIC_RATE_KEY.exec(id);
+    if (!match || match[1] === match[2]) {
+      return `Invalid currency pair in "${id}": use autoRate.<FROM>.<TO> with two different currency codes`;
+    }
+    if (value === undefined) {
+      return 'An automatic exchange rate must be a string: use an empty string to remove it';
+    }
+    if (value === '') {
+      return null;
+    }
+    if (!readAutomaticRate(value)) {
+      return 'An automatic rate must contain a positive rate and a valid fetched timestamp';
     }
     return null;
   }

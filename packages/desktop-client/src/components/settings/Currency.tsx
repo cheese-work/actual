@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -7,16 +7,24 @@ import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import {
+  fetchAutomaticRates,
+  isAutomaticRateSourceSupported,
+} from '@actual-app/core/shared/automatic-rates';
 import { currencies, getCurrency } from '@actual-app/core/shared/currencies';
 import {
   customUnitKey,
   formatInverseRate,
   formatRateForInput,
+  getAutomaticRate,
   getCustomUnits,
   getManualRates,
+  isAutomaticRateEnabled,
   parseRateInput,
+  rateModeKey,
   removeCustomUnitPatch,
   serializeCustomUnit,
+  setAutomaticRatePatch,
   setManualRatePatch,
   validateCustomUnit,
 } from '@actual-app/core/shared/exchange-rates';
@@ -35,17 +43,33 @@ type RateUnit = {
   name: string;
 };
 
+function formatRateAge(fetchedAt: number, locale: string) {
+  const age = Math.max(0, Date.now() - fetchedAt);
+  const relativeTime = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const intervals = [
+    ['day', 24 * 60 * 60 * 1000],
+    ['hour', 60 * 60 * 1000],
+    ['minute', 60 * 1000],
+  ] as const;
+  const interval = intervals.find(([, duration]) => age >= duration);
+  return interval
+    ? relativeTime.format(-Math.floor(age / interval[1]), interval[0])
+    : relativeTime.format(0, 'second');
+}
+
 function ManualRateInput({
   unit,
   mainCurrencyCode,
   initialRate,
   isInverse,
+  isOverride,
   onSave,
 }: {
   unit: RateUnit;
   mainCurrencyCode: string;
   initialRate: string;
   isInverse: boolean;
+  isOverride: boolean;
   onSave: (rate: string) => void;
 }) {
   const { t } = useTranslation();
@@ -96,10 +120,12 @@ function ManualRateInput({
       <FormField style={{ flex: 1 }}>
         <FormLabel
           htmlFor={id}
-          title={t('{{from}} to {{to}} rate', {
-            from: unit.code,
-            to: mainCurrencyCode,
-          })}
+          title={t(
+            isOverride
+              ? '{{from}} to {{to}} manual override'
+              : '{{from}} to {{to}} rate',
+            { from: unit.code, to: mainCurrencyCode },
+          )}
         />
         <Input
           id={id}
@@ -129,7 +155,7 @@ function ManualRateInput({
 }
 
 export function CurrencySettings() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [syncedPrefs, setSyncedPrefs] = useSyncedPrefs();
 
   const currencyTranslations = useMemo(
@@ -196,6 +222,17 @@ export function CurrencySettings() {
   const [numberFormatPref] = useSyncedPref('numberFormat');
   const numberFormat = parseNumberFormat({ format: numberFormatPref }).format;
   const selectedCurrencyCode = defaultCurrencyCode || '';
+  const prefsRef = useRef(syncedPrefs);
+  const selectedCurrencyCodeRef = useRef(selectedCurrencyCode);
+  const mounted = useRef(false);
+  prefsRef.current = syncedPrefs;
+  selectedCurrencyCodeRef.current = selectedCurrencyCode;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const customUnits = getCustomUnits(syncedPrefs);
   const manualRates = getManualRates(syncedPrefs);
   const mainCurrency = selectedCurrencyCode
@@ -225,6 +262,8 @@ export function CurrencySettings() {
   const [unitSymbolInput, setUnitSymbolInput] = useState('');
   const [unitDecimalsInput, setUnitDecimalsInput] = useState('2');
   const [hasEditedCustomUnit, setHasEditedCustomUnit] = useState(false);
+  const [refreshingCode, setRefreshingCode] = useState<string | null>(null);
+  const [refreshErrorCode, setRefreshErrorCode] = useState<string | null>(null);
 
   const [symbolPosition, setSymbolPositionPref] = useSyncedPref(
     'currencySymbolPosition',
@@ -254,6 +293,7 @@ export function CurrencySettings() {
   });
 
   const handleCurrencyChange = (code: string) => {
+    selectedCurrencyCodeRef.current = code;
     setDefaultCurrencyCodePref(code);
     if (code !== '') {
       const cur = getCurrency(code);
@@ -323,6 +363,42 @@ export function CurrencySettings() {
     setSyncedPrefs(
       setManualRatePatch(syncedPrefs, from, selectedCurrencyCode, rate),
     );
+  };
+
+  const refreshRate = async (code: string) => {
+    if (!selectedCurrencyCode || refreshingCode) {
+      return;
+    }
+
+    const mainCurrencyCode = selectedCurrencyCode;
+    setRefreshingCode(code);
+    setRefreshErrorCode(null);
+    try {
+      const rates = await fetchAutomaticRates([code], selectedCurrencyCode);
+      if (rates.length === 0) {
+        throw new Error('No automatic exchange rate was returned');
+      }
+      if (
+        !mounted.current ||
+        selectedCurrencyCodeRef.current !== mainCurrencyCode ||
+        !isAutomaticRateEnabled(prefsRef.current, code, mainCurrencyCode)
+      ) {
+        return;
+      }
+      setSyncedPrefs(Object.assign({}, ...rates.map(setAutomaticRatePatch)));
+    } catch {
+      if (
+        mounted.current &&
+        selectedCurrencyCodeRef.current === mainCurrencyCode &&
+        isAutomaticRateEnabled(prefsRef.current, code, mainCurrencyCode)
+      ) {
+        setRefreshErrorCode(code);
+      }
+    } finally {
+      if (mounted.current) {
+        setRefreshingCode(null);
+      }
+    }
   };
 
   return (
@@ -408,7 +484,14 @@ export function CurrencySettings() {
         <View style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
           <View>
             <Text style={{ fontWeight: 600 }}>
-              <Trans>Manual exchange rates</Trans>
+              <Trans>Exchange rates</Trans>
+            </Text>
+            <Text>
+              <Trans>
+                Choose manual or automatic rates. Automatic rates refresh daily
+                and can be refreshed now. Manual rates always take precedence;
+                custom units remain manual.
+              </Trans>
             </Text>
             <Text>
               {mainCurrency ? (
@@ -437,19 +520,137 @@ export function CurrencySettings() {
               const rate =
                 direct?.rate ??
                 (inverse ? formatInverseRate(inverse.rate) : '');
+              const canUseAutomaticRates = isAutomaticRateSourceSupported(
+                unit.code,
+                selectedCurrencyCode,
+              );
+              const rateMode = canUseAutomaticRates
+                ? isAutomaticRateEnabled(
+                    syncedPrefs,
+                    unit.code,
+                    selectedCurrencyCode,
+                  )
+                  ? 'auto'
+                  : 'manual'
+                : 'manual';
+              const automaticRate = getAutomaticRate(
+                syncedPrefs,
+                unit.code,
+                selectedCurrencyCode,
+              );
+              const automaticRateValue = automaticRate
+                ? automaticRate.from === unit.code
+                  ? automaticRate.rate
+                  : formatInverseRate(automaticRate.rate)
+                : null;
+              const hasManualOverride = Boolean(direct || inverse);
 
               return (
-                <ManualRateInput
+                <View
                   key={`${unit.code}-${selectedCurrencyCode}`}
-                  unit={unit}
-                  mainCurrencyCode={selectedCurrencyCode}
-                  initialRate={formatRateForInput(
-                    rate,
-                    parseNumberFormat({ format: numberFormat }).format,
+                  style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                >
+                  {canUseAutomaticRates && (
+                    <FormField style={{ width: 180 }}>
+                      <FormLabel
+                        htmlFor={`rate-mode-${unit.code}`}
+                        title={t('{{code}} rate mode', { code: unit.code })}
+                      />
+                      <Select
+                        id={`rate-mode-${unit.code}`}
+                        value={rateMode}
+                        onChange={mode =>
+                          setSyncedPrefs({ [rateModeKey(unit.code)]: mode })
+                        }
+                        options={[
+                          ['manual', t('Manual')],
+                          ['auto', t('Automatic')],
+                        ]}
+                        className={selectButtonClassName}
+                        style={{ width: '100%' }}
+                      />
+                    </FormField>
                   )}
-                  isInverse={!direct && Boolean(inverse)}
-                  onSave={value => saveRate(unit.code, value)}
-                />
+                  {rateMode === 'auto' && (
+                    <View
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                      }}
+                    >
+                      <View
+                        style={{ display: 'flex', flexDirection: 'column' }}
+                      >
+                        <Text>
+                          {automaticRateValue
+                            ? t('1 {{from}} = {{rate}} {{to}}', {
+                                from: unit.code,
+                                rate: formatRateForInput(
+                                  automaticRateValue,
+                                  parseNumberFormat({ format: numberFormat })
+                                    .format,
+                                ),
+                                to: selectedCurrencyCode,
+                              })
+                            : t('No automatic rate cached yet.')}
+                        </Text>
+                        {automaticRate && (
+                          <Text>
+                            {t('Updated {{age}}', {
+                              age: formatRateAge(
+                                automaticRate.fetchedAt,
+                                i18n.language,
+                              ),
+                            })}
+                          </Text>
+                        )}
+                        {hasManualOverride && (
+                          <Text>
+                            <Trans>
+                              The manual rate takes precedence over the
+                              automatic rate.
+                            </Trans>
+                          </Text>
+                        )}
+                      </View>
+                      <Button
+                        onPress={() => void refreshRate(unit.code)}
+                        isDisabled={Boolean(refreshingCode)}
+                        aria-label={t('Refresh {{code}} rate now', {
+                          code: unit.code,
+                        })}
+                      >
+                        {refreshingCode === unit.code ? (
+                          <Trans>Refreshing…</Trans>
+                        ) : (
+                          <Trans>Refresh now</Trans>
+                        )}
+                      </Button>
+                      {refreshErrorCode === unit.code && (
+                        <Text role="alert" style={{ color: theme.errorText }}>
+                          <Trans>
+                            Could not refresh the automatic rate. The cached
+                            rate is unchanged.
+                          </Trans>
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                  <ManualRateInput
+                    unit={unit}
+                    mainCurrencyCode={selectedCurrencyCode}
+                    initialRate={formatRateForInput(
+                      rate,
+                      parseNumberFormat({ format: numberFormat }).format,
+                    )}
+                    isInverse={!direct && Boolean(inverse)}
+                    isOverride={rateMode === 'auto'}
+                    onSave={value => saveRate(unit.code, value)}
+                  />
+                </View>
               );
             })}
           <View
