@@ -191,6 +191,27 @@ describe('automatic rates', () => {
     expect(convert(8000, 'EUR', 'USD', prefs)).toBe(10000);
   });
 
+  it('restores saved counterpart intent when Main flips back', () => {
+    const prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({
+        rate: '1.25',
+        fetchedAt: 1790870400000,
+      }),
+    };
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR')).not.toBeNull();
+    prefs.defaultCurrencyCode = 'USD';
+    expect(getAutomaticRate(prefs, 'EUR', 'USD')).toBeNull();
+    prefs.defaultCurrencyCode = 'EUR';
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR')).not.toBeNull();
+    expect(prefs['rateMode.EUR']).toBe('manual');
+    expect(prefs['rateMode.USD']).toBe('auto');
+  });
+
   it.each([undefined, ''])('uses Main auto as fallback for mode %j', mode => {
     const prefs: Record<string, string> = {
       defaultCurrencyCode: 'EUR',
