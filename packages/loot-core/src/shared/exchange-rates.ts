@@ -352,7 +352,7 @@ export function getAutomaticRateFreshnessTimestamp(
   fetchedAt: number,
   now = Date.now(),
 ): number {
-  return Math.min(fetchedAt, now);
+  return fetchedAt > now ? 0 : fetchedAt;
 }
 
 export function setAutomaticRatePatch(rate: AutomaticRate): ExchangeRatePrefs {

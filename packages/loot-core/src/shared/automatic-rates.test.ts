@@ -302,15 +302,27 @@ describe('getNextAutomaticRateRefreshAt', () => {
     ).toBe(fetchedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS);
   });
 
-  it('clamps future synced timestamps to the current time for freshness', () => {
+  it('refreshes a future synced timestamp once then schedules normally', async () => {
+    const fetchedAt = now + 30 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS;
     const prefs = {
       'rateMode.EUR': 'auto',
-      'autoRate.USD.EUR': JSON.stringify({
-        rate: '0.9',
-        fetchedAt: now + 30 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
-      }),
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
     };
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response([{ base: 'USD', quote: 'EUR', rate: 0.8 }]));
 
+    expect(getDueAutomaticRateSources(prefs, 'USD', now)).toEqual(['EUR']);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'USD', now)).toBe(now);
+    expect(JSON.parse(prefs['autoRate.USD.EUR']).fetchedAt).toBe(fetchedAt);
+
+    const refreshed = await fetchAutomaticRates(['EUR'], 'USD', {
+      fetchImpl,
+      now,
+    });
+    Object.assign(prefs, ...refreshed.map(setAutomaticRatePatch));
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
     expect(getDueAutomaticRateSources(prefs, 'USD', now)).toEqual([]);
     expect(getNextAutomaticRateRefreshAt(prefs, 'USD', now)).toBe(
       now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
