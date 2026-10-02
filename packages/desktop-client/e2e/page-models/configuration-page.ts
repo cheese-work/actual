@@ -3,6 +3,8 @@ import type { Locator, Page } from '@playwright/test';
 import { BootstrapPage } from './bootstrap-page';
 import { BudgetPage } from './budget-page';
 
+export const TEST_BUDGET_MAIN_CURRENCY = 'USD';
+
 export class ConfigurationPage {
   readonly page: Page;
   readonly heading: Locator;
@@ -22,6 +24,17 @@ export class ConfigurationPage {
     // callers don't race the virtualized budget-table's layout step.
     await budgetPage.waitFor();
     return budgetPage;
+  }
+
+  async initializeTestMainCurrency() {
+    await this.page.evaluate(async currencyCode => {
+      await window.__actionsForMenu.saveSyncedPrefs({
+        prefs: {
+          defaultCurrencyCode: currencyCode,
+          currencySetupFinalized: 'true',
+        },
+      });
+    }, TEST_BUDGET_MAIN_CURRENCY);
   }
 
   async createDemoFile() {

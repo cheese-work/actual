@@ -94,6 +94,25 @@ describe('AccountCurrencyBalance', () => {
     expect(screen.getByTestId('group-balance')).toHaveTextContent('0');
   });
 
+  it('keeps totals unavailable when no Main currency is configured', () => {
+    const usd = makeAccount('USD savings', 'USD');
+    mocks.prefs = { ...mocks.prefs, defaultCurrencyCode: '' };
+    mocks.balances = { [usd.id]: 40_000 };
+
+    render(
+      <TestProviders>
+        <AccountCurrencyBalance
+          accounts={[usd]}
+          balances={mocks.balances}
+          testId="group-balance"
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('group-balance')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('group-balance')).not.toHaveTextContent('40,000');
+  });
+
   it('keeps group totals independent and recalculates when membership changes', () => {
     const usd = makeAccount('USD savings', 'USD');
     const vnd = makeAccount('VND cash', 'VND');

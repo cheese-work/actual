@@ -33,7 +33,9 @@ export function Accounts() {
   const onBudgetAccounts = onBudgetAccountsQuery.data ?? [];
   const aggregateAccounts =
     offBudgetAccountsQuery.data === undefined ||
-    onBudgetAccountsQuery.data === undefined
+    offBudgetAccountsQuery.isPlaceholderData ||
+    onBudgetAccountsQuery.data === undefined ||
+    onBudgetAccountsQuery.isPlaceholderData
       ? null
       : [...onBudgetAccountsQuery.data, ...offBudgetAccountsQuery.data];
   const accountBalances = useAccountBalances(
@@ -124,7 +126,11 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-on-budget-balance"
-            aggregateAccounts={onBudgetAccountsQuery.data ?? null}
+            aggregateAccounts={
+              onBudgetAccountsQuery.isPlaceholderData
+                ? null
+                : (onBudgetAccountsQuery.data ?? null)
+            }
             aggregateBalances={accountBalances}
           />
         )}
@@ -158,7 +164,11 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-off-budget-balance"
-            aggregateAccounts={offBudgetAccountsQuery.data ?? null}
+            aggregateAccounts={
+              offBudgetAccountsQuery.isPlaceholderData
+                ? null
+                : (offBudgetAccountsQuery.data ?? null)
+            }
             aggregateBalances={accountBalances}
           />
         )}
