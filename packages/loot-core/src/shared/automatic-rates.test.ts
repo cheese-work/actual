@@ -144,6 +144,42 @@ describe('isAutomaticRateSourceSupported', () => {
 });
 
 describe('getDueAutomaticRateSources', () => {
+  it.each([
+    ['unset', undefined],
+    ['cleared', ''],
+  ])(
+    'discovers eligible catalog sources for Main Auto with %s counterpart mode and no cache',
+    (_label, counterpartMode) => {
+      const prefs: Record<string, string> = { 'rateMode.EUR': 'auto' };
+      if (counterpartMode !== undefined) {
+        prefs['rateMode.USD'] = counterpartMode;
+      }
+
+      const dueSources = getDueAutomaticRateSources(prefs, 'EUR', now);
+
+      expect(dueSources).toContain('USD');
+      expect(dueSources).not.toContain('XYZ');
+      expect(dueSources).not.toContain('USDT');
+      expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(now);
+    },
+  );
+
+  it('does not include manual or unsupported sources in Main Auto fallback', () => {
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'rateMode.USD': 'manual',
+      'rateMode.XYZ': 'auto',
+      'rateMode.X-TEST': 'auto',
+    };
+
+    const dueSources = getDueAutomaticRateSources(prefs, 'EUR', now);
+
+    expect(dueSources).not.toContain('USD');
+    expect(dueSources).not.toContain('XYZ');
+    expect(dueSources).not.toContain('X-TEST');
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(now);
+  });
+
   it('refreshes stale auto rates, but not manual modes or manual overrides', () => {
     const stale = JSON.stringify({ rate: '0.9', fetchedAt: now - 90000000 });
 
@@ -287,8 +323,8 @@ describe('getDueAutomaticRateSources', () => {
     };
 
     expect(getAutomaticRate(prefs, 'USD', 'EUR', now)).toBeNull();
-    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
-    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBeNull();
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).not.toContain('USD');
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(now);
     expect(convert(10000, 'USD', 'EUR', prefs)).toBeNull();
   });
 
@@ -296,7 +332,8 @@ describe('getDueAutomaticRateSources', () => {
     const slowClock = now;
     const fastClock = now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS + 60_000;
     const fastPeerCache = {
-      'rateMode.EUR': 'auto',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
       'autoRate.USD.EUR': JSON.stringify({
         rate: '0.8',
         fetchedAt: fastClock,
@@ -325,7 +362,8 @@ describe('getDueAutomaticRateSources', () => {
     expect(
       getDueAutomaticRateSources(
         {
-          'rateMode.EUR': 'auto',
+          'rateMode.EUR': 'manual',
+          'rateMode.USD': 'auto',
           'autoRate.USD.EUR': JSON.stringify({
             rate: '0.9',
             fetchedAt: slowClock,
@@ -348,7 +386,7 @@ describe('getDueAutomaticRateSources', () => {
       .fn<typeof fetch>()
       .mockResolvedValue(response([{ base: 'EUR', quote: 'USD', rate: 1.25 }]));
 
-    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual(['USD']);
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toContain('USD');
     expect(convert(10000, 'USD', 'EUR', prefs)).toBe(9000);
     expect(JSON.parse(prefs['autoRate.USD.EUR']).fetchedAt).toBe(fetchedAt);
 
@@ -371,16 +409,16 @@ describe('getDueAutomaticRateSources', () => {
     } finally {
       dateNow.mockRestore();
     }
-    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
-    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(
-      now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
-    );
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).not.toContain('USD');
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(now);
     expect(prefs['autoRate.USD.EUR']).toBe(
       JSON.stringify({ rate: '0.9', fetchedAt }),
     );
 
     const manualPrefs = { ...prefs, 'manualRate.USD.EUR': '0.75' };
-    expect(getDueAutomaticRateSources(manualPrefs, 'EUR', now)).toEqual([]);
+    expect(getDueAutomaticRateSources(manualPrefs, 'EUR', now)).not.toContain(
+      'USD',
+    );
     expect(convert(10000, 'USD', 'EUR', manualPrefs)).toBe(7500);
   });
 });

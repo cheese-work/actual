@@ -320,24 +320,8 @@ function getAutomaticRateSourceCandidates(
       continue;
     }
 
-    for (const cacheKey of Object.keys(prefs)) {
-      const cacheMatch = /^autoRate\.([A-Z]{3}|USDT)\.([A-Z]{3}|USDT)$/.exec(
-        cacheKey,
-      );
-      if (!cacheMatch) {
-        continue;
-      }
-
-      const sourceCode =
-        cacheMatch[1] === mainCurrencyCode
-          ? cacheMatch[2]
-          : cacheMatch[2] === mainCurrencyCode
-            ? cacheMatch[1]
-            : null;
-      if (
-        sourceCode &&
-        isAutomaticRateSourceSupported(sourceCode, mainCurrencyCode)
-      ) {
+    for (const sourceCode of CURRENCY_CODES) {
+      if (isAutomaticRateSourceSupported(sourceCode, mainCurrencyCode)) {
         sources.add(sourceCode);
       }
     }

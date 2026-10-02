@@ -280,6 +280,82 @@ describe('AutomaticRatesUpdater', () => {
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
   });
 
+  it('cold-starts Main Auto, writes rates, and waits for daily expiry', async () => {
+    vi.useFakeTimers();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'auto',
+    };
+    mocks.fetchAutomaticRates.mockImplementation(
+      async (sourceCodes, mainCurrencyCode) =>
+        sourceCodes.map(to => ({
+          from: mainCurrencyCode,
+          to,
+          rate: '1',
+          fetchedAt: Date.now(),
+        })),
+    );
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+    expect(mocks.fetchAutomaticRates.mock.calls[0][0]).toContain('USD');
+    expect(mocks.fetchAutomaticRates.mock.calls[0][1]).toBe('EUR');
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        'autoRate.EUR.USD': JSON.stringify({
+          rate: '1',
+          fetchedAt: Date.now(),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOMATIC_RATE_REFRESH_INTERVAL_MS - 1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+  });
+
+  it('backs off a failed Main Auto cold start until retry cooldown', async () => {
+    vi.useFakeTimers();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'auto',
+    };
+    mocks.fetchAutomaticRates.mockRejectedValue(new Error('offline'));
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOMATIC_RATE_RETRY_INTERVAL_MS - 1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+  });
+
   it('writes and schedules an auto counterpart when Main retains a manual row mode', async () => {
     vi.useFakeTimers();
     const fetchedAt = Date.now();
