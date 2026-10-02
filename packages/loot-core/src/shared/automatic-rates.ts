@@ -246,7 +246,13 @@ export function getDueAutomaticRateSources(
         return false;
       }
 
-      const cached = getAutomaticRate(prefs, code, mainCurrencyCode, now);
+      const cached = getAutomaticRate(
+        prefs,
+        code,
+        mainCurrencyCode,
+        now,
+        mainCurrencyCode,
+      );
       return (
         !cached ||
         now - getAutomaticRateFreshnessTimestamp(cached.fetchedAt, now) >=
@@ -273,7 +279,13 @@ export function getNextAutomaticRateRefreshAt(
       return nextAt;
     }
 
-    const cached = getAutomaticRate(prefs, code, mainCurrencyCode, now);
+    const cached = getAutomaticRate(
+      prefs,
+      code,
+      mainCurrencyCode,
+      now,
+      mainCurrencyCode,
+    );
     const cacheDueAt = cached
       ? getAutomaticRateFreshnessTimestamp(cached.fetchedAt, now) +
         AUTOMATIC_RATE_REFRESH_INTERVAL_MS
@@ -332,6 +344,8 @@ function getAutomaticRateSourceCandidates(
   }
 
   return [...sources]
-    .filter(code => isAutomaticRateEnabled(prefs, code, mainCurrencyCode))
+    .filter(code =>
+      isAutomaticRateEnabled(prefs, code, mainCurrencyCode, mainCurrencyCode),
+    )
     .sort((a, b) => a.localeCompare(b, 'en'));
 }

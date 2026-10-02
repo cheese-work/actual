@@ -170,6 +170,48 @@ describe('automatic rates', () => {
     });
   });
 
+  it('keeps an auto counterpart enabled when the Main row is manual', () => {
+    const prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({
+        rate: '1.25',
+        fetchedAt: 1790870400000,
+      }),
+    };
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR')).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.25',
+      fetchedAt: 1790870400000,
+    });
+    expect(convert(10000, 'USD', 'EUR', prefs)).toBe(8000);
+    expect(convert(8000, 'EUR', 'USD', prefs)).toBe(10000);
+  });
+
+  it.each([undefined, ''])('uses Main auto as fallback for mode %j', mode => {
+    const prefs: Record<string, string> = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({
+        rate: '1.25',
+        fetchedAt: 1790870400000,
+      }),
+    };
+    if (mode !== undefined) {
+      prefs['rateMode.USD'] = mode;
+    }
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR')).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.25',
+      fetchedAt: 1790870400000,
+    });
+  });
+
   it('uses the fresher inverse cache after the Main currency flips', () => {
     const fetchedAt = 1790870400000;
     const prefs = {

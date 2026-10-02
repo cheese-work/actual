@@ -240,6 +240,42 @@ describe('getDueAutomaticRateSources', () => {
     );
   });
 
+  it('schedules and accepts a refresh when the Main row is manual but its counterpart is auto', async () => {
+    const fetchedAt = now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS;
+    const prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({ rate: '0.9', fetchedAt }),
+    };
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response([{ base: 'EUR', quote: 'USD', rate: 1.25 }]));
+
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual(['USD']);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(now);
+
+    const refreshed = await fetchAutomaticRates(['USD'], 'EUR', {
+      fetchImpl,
+      now,
+    });
+    Object.assign(prefs, ...refreshed.map(setAutomaticRatePatch));
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(getAutomaticRate(prefs, 'USD', 'EUR', now)).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.25',
+      fetchedAt: now,
+    });
+    expect(convert(10000, 'USD', 'EUR', prefs)).toBe(8000);
+    expect(convert(8000, 'EUR', 'USD', prefs)).toBe(10000);
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(
+      now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+    );
+  });
+
   it('lets explicit manual mode override an automatic Main cache', () => {
     const prefs = {
       'rateMode.EUR': 'auto',

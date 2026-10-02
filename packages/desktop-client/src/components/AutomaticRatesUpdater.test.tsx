@@ -280,6 +280,40 @@ describe('AutomaticRatesUpdater', () => {
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
   });
 
+  it('writes and schedules an auto counterpart when Main retains a manual row mode', async () => {
+    vi.useFakeTimers();
+    const fetchedAt = Date.now();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: fetchedAt - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+    };
+    mocks.fetchAutomaticRates.mockResolvedValue([
+      { from: 'EUR', to: 'USD', rate: '1.25', fetchedAt },
+    ]);
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledWith(['USD'], 'EUR');
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+    expect(mocks.save).toHaveBeenCalledWith({
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.25', fetchedAt }),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+  });
+
   it('backs off a successful refresh after a future timestamp sync', async () => {
     vi.useFakeTimers();
     const attemptedAt = Date.now();

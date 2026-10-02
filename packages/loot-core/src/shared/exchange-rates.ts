@@ -296,17 +296,34 @@ export function getRateMode(prefs: Prefs, code: string): 'manual' | 'auto' {
   return prefs[rateModeKey(code)] === 'auto' ? 'auto' : 'manual';
 }
 
+export function getEffectiveRateMode(
+  prefs: Prefs,
+  code: string,
+  mainCurrencyCode: string,
+): 'manual' | 'auto' {
+  const mode = prefs[rateModeKey(code)];
+  if (mode === 'manual' || mode === 'auto') {
+    return mode;
+  }
+
+  return code !== mainCurrencyCode &&
+    prefs[rateModeKey(mainCurrencyCode)] === 'auto'
+    ? 'auto'
+    : 'manual';
+}
+
 export function isAutomaticRateEnabled(
   prefs: Prefs,
   from: string,
   to: string,
+  mainCurrencyCode = prefs.defaultCurrencyCode ?? to,
 ): boolean {
-  const fromMode = prefs[rateModeKey(from)];
-  const toMode = prefs[rateModeKey(to)];
+  const sourceCode =
+    from === mainCurrencyCode ? to : to === mainCurrencyCode ? from : null;
   return (
-    (fromMode === 'auto' || toMode === 'auto') &&
-    (fromMode === undefined || fromMode === 'auto') &&
-    (toMode === undefined || toMode === 'auto')
+    sourceCode !== null &&
+    sourceCode !== mainCurrencyCode &&
+    getEffectiveRateMode(prefs, sourceCode, mainCurrencyCode) === 'auto'
   );
 }
 
@@ -340,8 +357,9 @@ export function getAutomaticRate(
   from: string,
   to: string,
   now = Date.now(),
+  mainCurrencyCode = prefs.defaultCurrencyCode ?? to,
 ): AutomaticRate | null {
-  if (!isAutomaticRateEnabled(prefs, from, to)) {
+  if (!isAutomaticRateEnabled(prefs, from, to, mainCurrencyCode)) {
     return null;
   }
 

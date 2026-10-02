@@ -207,6 +207,26 @@ describe('CurrencySettings', () => {
     expect(screen.queryByText('1 USD = 0.9 EUR')).not.toBeInTheDocument();
   });
 
+  it('shows counterpart auto controls when Main retains a manual row mode', () => {
+    const fetchedAt = Date.now();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      numberFormat: 'comma-dot',
+      'rateMode.EUR': 'manual',
+      'rateMode.USD': 'auto',
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.25', fetchedAt }),
+    };
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(screen.getByLabelText('USD rate mode')).toHaveTextContent(
+      'Automatic',
+    );
+    expect(screen.getByText('1 USD = 0.8 EUR')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh USD rate now' }),
+    ).toBeInTheDocument();
+  });
+
   it('saves an on-demand automatic rate in the synced cache', async () => {
     const fetchedAt = Date.now();
     mocks.prefs = { ...mocks.prefs, 'rateMode.EUR': 'auto' };
