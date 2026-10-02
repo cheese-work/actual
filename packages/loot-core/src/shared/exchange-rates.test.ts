@@ -1,3 +1,5 @@
+import { vi } from 'vitest';
+
 import {
   convert,
   customUnitKey,
@@ -179,13 +181,37 @@ describe('automatic rates', () => {
       'autoRate.EUR.USD': JSON.stringify({ rate: '1.1', fetchedAt }),
     };
 
-    expect(getAutomaticRate(prefs, 'USD', 'EUR')).toEqual({
+    expect(getAutomaticRate(prefs, 'USD', 'EUR', fetchedAt)).toEqual({
       from: 'EUR',
       to: 'USD',
       rate: '1.1',
       fetchedAt,
     });
-    expect(convert(11000, 'USD', 'EUR', prefs)).toBe(10000);
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(fetchedAt);
+    try {
+      expect(convert(11000, 'USD', 'EUR', prefs)).toBe(10000);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
+  it('does not treat a synced future timestamp as newer than a current cache', () => {
+    const now = 1790870400000;
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt: now }),
+      'autoRate.EUR.USD': JSON.stringify({
+        rate: '1.25',
+        fetchedAt: now + 30 * 86400000,
+      }),
+    };
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR', now)).toEqual({
+      from: 'USD',
+      to: 'EUR',
+      rate: '0.9',
+      fetchedAt: now,
+    });
   });
 });
 

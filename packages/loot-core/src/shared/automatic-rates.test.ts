@@ -9,6 +9,11 @@ import {
   getNextAutomaticRateRefreshAt,
   isAutomaticRateSourceSupported,
 } from './automatic-rates';
+import {
+  convert,
+  getAutomaticRate,
+  setAutomaticRatePatch,
+} from './exchange-rates';
 
 const now = 1790870400000;
 
@@ -234,6 +239,52 @@ describe('getDueAutomaticRateSources', () => {
       freshAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
     );
   });
+
+  it('refreshes a cached auto currency after it becomes Main', async () => {
+    const fetchedAt = now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS;
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
+    };
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response([{ base: 'EUR', quote: 'USD', rate: 1.25 }]));
+
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual(['USD']);
+    expect(convert(10000, 'USD', 'EUR', prefs)).toBe(9000);
+    expect(JSON.parse(prefs['autoRate.USD.EUR']).fetchedAt).toBe(fetchedAt);
+
+    const refreshed = await fetchAutomaticRates(['USD'], 'EUR', {
+      fetchImpl,
+      now,
+    });
+    Object.assign(prefs, ...refreshed.map(setAutomaticRatePatch));
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(getAutomaticRate(prefs, 'USD', 'EUR', now)).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.25',
+      fetchedAt: now,
+    });
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      expect(convert(10000, 'USD', 'EUR', prefs)).toBe(8000);
+    } finally {
+      dateNow.mockRestore();
+    }
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(
+      now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+    );
+    expect(prefs['autoRate.USD.EUR']).toBe(
+      JSON.stringify({ rate: '0.9', fetchedAt }),
+    );
+
+    const manualPrefs = { ...prefs, 'manualRate.USD.EUR': '0.75' };
+    expect(getDueAutomaticRateSources(manualPrefs, 'EUR', now)).toEqual([]);
+    expect(convert(10000, 'USD', 'EUR', manualPrefs)).toBe(7500);
+  });
 });
 
 describe('getNextAutomaticRateRefreshAt', () => {
@@ -249,6 +300,21 @@ describe('getNextAutomaticRateRefreshAt', () => {
         now,
       ),
     ).toBe(fetchedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS);
+  });
+
+  it('clamps future synced timestamps to the current time for freshness', () => {
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: now + 30 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+    };
+
+    expect(getDueAutomaticRateSources(prefs, 'USD', now)).toEqual([]);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'USD', now)).toBe(
+      now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+    );
   });
 
   it('schedules retries after cooldown and no earlier than cache expiry', () => {

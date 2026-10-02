@@ -325,6 +325,7 @@ export function getAutomaticRate(
   prefs: Prefs,
   from: string,
   to: string,
+  now = Date.now(),
 ): AutomaticRate | null {
   if (
     getRateMode(prefs, from) !== 'auto' &&
@@ -335,11 +336,23 @@ export function getAutomaticRate(
 
   const direct = readAutomaticRate(prefs[automaticRateKey(from, to)]);
   const inverse = readAutomaticRate(prefs[automaticRateKey(to, from)]);
-  if (!inverse || (direct && direct.fetchedAt >= inverse.fetchedAt)) {
+  if (
+    !inverse ||
+    (direct &&
+      getAutomaticRateFreshnessTimestamp(direct.fetchedAt, now) >=
+        getAutomaticRateFreshnessTimestamp(inverse.fetchedAt, now))
+  ) {
     return direct ? { from, to, ...direct } : null;
   }
 
   return { from: to, to: from, ...inverse };
+}
+
+export function getAutomaticRateFreshnessTimestamp(
+  fetchedAt: number,
+  now = Date.now(),
+): number {
+  return Math.min(fetchedAt, now);
 }
 
 export function setAutomaticRatePatch(rate: AutomaticRate): ExchangeRatePrefs {

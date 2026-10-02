@@ -1,5 +1,10 @@
 import { currencies } from './currencies';
-import { getAutomaticRate, isValidRate, manualRateKey } from './exchange-rates';
+import {
+  getAutomaticRate,
+  getAutomaticRateFreshnessTimestamp,
+  isValidRate,
+  manualRateKey,
+} from './exchange-rates';
 import type { AutomaticRate } from './exchange-rates';
 
 export const AUTOMATIC_RATE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -222,24 +227,14 @@ export function getDueAutomaticRateSources(
   now = Date.now(),
   failedAttempts: ReadonlyMap<string, number> = new Map(),
 ): string[] {
-  return Object.entries(prefs)
-    .flatMap(([key, mode]) => {
-      const match = /^rateMode\.([A-Z]{3}|USDT)$/.exec(key);
-      if (
-        !match ||
-        mode !== 'auto' ||
-        !isAutomaticRateSourceSupported(match[1], mainCurrencyCode)
-      ) {
-        return [];
-      }
-
-      const code = match[1];
+  return getAutomaticRateSourceCandidates(prefs, mainCurrencyCode).filter(
+    code => {
       const failedAt = failedAttempts.get(`${mainCurrencyCode}.${code}`);
       if (
         failedAt !== undefined &&
         now - failedAt < AUTOMATIC_RATE_RETRY_INTERVAL_MS
       ) {
-        return [];
+        return false;
       }
 
       const hasManualRate = [
@@ -247,16 +242,17 @@ export function getDueAutomaticRateSources(
         prefs[manualRateKey(mainCurrencyCode, code)],
       ].some(rate => rate !== undefined && rate !== '' && isValidRate(rate));
       if (hasManualRate) {
-        return [];
+        return false;
       }
 
-      const cached = getAutomaticRate(prefs, code, mainCurrencyCode);
-      return !cached ||
-        now - cached.fetchedAt >= AUTOMATIC_RATE_REFRESH_INTERVAL_MS
-        ? [code]
-        : [];
-    })
-    .sort((a, b) => a.localeCompare(b, 'en'));
+      const cached = getAutomaticRate(prefs, code, mainCurrencyCode, now);
+      return (
+        !cached ||
+        now - getAutomaticRateFreshnessTimestamp(cached.fetchedAt, now) >=
+          AUTOMATIC_RATE_REFRESH_INTERVAL_MS
+      );
+    },
+  );
 }
 
 export function getNextAutomaticRateRefreshAt(
@@ -265,17 +261,9 @@ export function getNextAutomaticRateRefreshAt(
   now = Date.now(),
   failedAttempts: ReadonlyMap<string, number> = new Map(),
 ): number | null {
-  return Object.entries(prefs).reduce<number | null>((nextAt, [key, mode]) => {
-    const match = /^rateMode\.([A-Z]{3}|USDT)$/.exec(key);
-    if (
-      !match ||
-      mode !== 'auto' ||
-      !isAutomaticRateSourceSupported(match[1], mainCurrencyCode)
-    ) {
-      return nextAt;
-    }
-
-    const code = match[1];
+  return getAutomaticRateSourceCandidates(prefs, mainCurrencyCode).reduce<
+    number | null
+  >((nextAt, code) => {
     const hasManualRate = [
       prefs[manualRateKey(code, mainCurrencyCode)],
       prefs[manualRateKey(mainCurrencyCode, code)],
@@ -284,9 +272,10 @@ export function getNextAutomaticRateRefreshAt(
       return nextAt;
     }
 
-    const cached = getAutomaticRate(prefs, code, mainCurrencyCode);
+    const cached = getAutomaticRate(prefs, code, mainCurrencyCode, now);
     const cacheDueAt = cached
-      ? cached.fetchedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS
+      ? getAutomaticRateFreshnessTimestamp(cached.fetchedAt, now) +
+        AUTOMATIC_RATE_REFRESH_INTERVAL_MS
       : now;
     const failedAt = failedAttempts.get(`${mainCurrencyCode}.${code}`);
     const retryDueAt =
@@ -296,4 +285,50 @@ export function getNextAutomaticRateRefreshAt(
     const dueAt = Math.max(now, cacheDueAt, retryDueAt);
     return nextAt === null || dueAt < nextAt ? dueAt : nextAt;
   }, null);
+}
+
+function getAutomaticRateSourceCandidates(
+  prefs: Partial<Record<string, string>>,
+  mainCurrencyCode: string,
+): string[] {
+  const sources = new Set<string>();
+
+  for (const [key, mode] of Object.entries(prefs)) {
+    const match = /^rateMode\.([A-Z]{3}|USDT)$/.exec(key);
+    if (!match || mode !== 'auto') {
+      continue;
+    }
+
+    const code = match[1];
+    if (code !== mainCurrencyCode) {
+      if (isAutomaticRateSourceSupported(code, mainCurrencyCode)) {
+        sources.add(code);
+      }
+      continue;
+    }
+
+    for (const cacheKey of Object.keys(prefs)) {
+      const cacheMatch = /^autoRate\.([A-Z]{3}|USDT)\.([A-Z]{3}|USDT)$/.exec(
+        cacheKey,
+      );
+      if (!cacheMatch) {
+        continue;
+      }
+
+      const sourceCode =
+        cacheMatch[1] === mainCurrencyCode
+          ? cacheMatch[2]
+          : cacheMatch[2] === mainCurrencyCode
+            ? cacheMatch[1]
+            : null;
+      if (
+        sourceCode &&
+        isAutomaticRateSourceSupported(sourceCode, mainCurrencyCode)
+      ) {
+        sources.add(sourceCode);
+      }
+    }
+  }
+
+  return [...sources].sort((a, b) => a.localeCompare(b, 'en'));
 }
