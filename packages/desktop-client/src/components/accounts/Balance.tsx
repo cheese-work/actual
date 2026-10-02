@@ -24,6 +24,8 @@ import { useSelectedItems } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
 import type { Binding } from '#spreadsheet';
 
+import { ApproxMain } from './ApproxMain';
+
 type DetailedBalanceProps = {
   name: string;
   balance: number;
@@ -245,20 +247,23 @@ export function Balances({
           type="financial"
         >
           {props => (
-            <CellValueText
-              {...props}
-              currency={accountCurrency}
-              style={{
-                fontSize: 22,
-                fontWeight: 400,
-                color:
-                  props.value < 0
-                    ? theme.numberNegative
-                    : props.value > 0
-                      ? theme.numberPositive
-                      : theme.pageTextSubdued,
-              }}
-            />
+            <>
+              <CellValueText
+                {...props}
+                currency={accountCurrency}
+                style={{
+                  fontSize: 22,
+                  fontWeight: 400,
+                  color:
+                    props.value < 0
+                      ? theme.numberNegative
+                      : props.value > 0
+                        ? theme.numberPositive
+                        : theme.pageTextSubdued,
+                }}
+              />
+              <ApproxMain value={props.value} currency={account?.currency} />
+            </>
           )}
         </CellValue>
 

@@ -199,6 +199,7 @@ export function AccountRow({
               <SidebarBalance
                 binding={bindings.accountBalance(account.id)}
                 currency={accountCurrency}
+                approxCurrency={account.currency ?? null}
                 style={{
                   fontSize: 12,
                   color: 'inherit',
