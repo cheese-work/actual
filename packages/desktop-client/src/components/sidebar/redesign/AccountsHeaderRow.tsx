@@ -9,6 +9,7 @@ import { SvgSearchAlternate } from '@actual-app/components/icons/v2';
 import { theme } from '@actual-app/components/theme';
 import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
+import type { AccountEntity } from '@actual-app/core/types/models';
 
 import { Link } from '#components/common/Link';
 import { replaceModal } from '#modals/modalsSlice';
@@ -19,6 +20,8 @@ import { SidebarBalance } from './SidebarBalance';
 import { SidebarIconButton } from './SidebarIconButton';
 
 type AccountsHeaderRowProps = {
+  aggregateAccounts: readonly AccountEntity[] | null;
+  aggregateBalances: Record<string, number | null>;
   allOpen: boolean;
   onToggleAll: () => void;
   isToggleAllDisabled: boolean;
@@ -27,6 +30,8 @@ type AccountsHeaderRowProps = {
 };
 
 export function AccountsHeaderRow({
+  aggregateAccounts,
+  aggregateBalances,
   allOpen,
   onToggleAll,
   isToggleAllDisabled,
@@ -93,6 +98,8 @@ export function AccountsHeaderRow({
           binding={bindings.allAccountBalance()}
           testId="sidebar-all-accounts-balance"
           style={{ fontSize: 12, fontWeight: 600 }}
+          aggregateAccounts={aggregateAccounts}
+          aggregateBalances={aggregateBalances}
         />
       </Link>
     </View>

@@ -100,6 +100,7 @@ describe('filterSidebarTree', () => {
     ),
     offBudget: buildAccountSide([makeAccount('House')], groups),
     closed: [makeAccount('Old Checking', { closed: 1 })],
+    accountsLoaded: true,
   };
 
   it('returns the tree unchanged for an empty query', () => {

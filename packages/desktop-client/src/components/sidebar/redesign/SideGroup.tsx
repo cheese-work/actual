@@ -23,6 +23,8 @@ type SideGroupProps = {
   side: 'on' | 'off';
   showSyncDot: boolean;
   sideData: SidebarAccountSide;
+  fullSideData: SidebarAccountSide;
+  aggregateBalances: Record<string, number | null>;
   totalBinding: Binding<
     'account',
     'onbudget-accounts-balance' | 'offbudget-accounts-balance'
@@ -40,6 +42,8 @@ export function SideGroup({
   side,
   showSyncDot,
   sideData,
+  fullSideData,
+  aggregateBalances,
   totalBinding,
   balanceTestId,
   isOpen,
@@ -108,6 +112,10 @@ export function SideGroup({
             binding={totalBinding}
             testId={balanceTestId}
             style={{ fontSize: 12, fontWeight: 600, color: 'inherit' }}
+            aggregateAccounts={fullSideData.buckets.flatMap(
+              bucket => bucket.accounts,
+            )}
+            aggregateBalances={aggregateBalances}
           />
         </Link>
       </View>
@@ -116,6 +124,8 @@ export function SideGroup({
           label={label}
           side={side}
           buckets={sideData.buckets}
+          balanceBuckets={fullSideData.buckets}
+          aggregateBalances={aggregateBalances}
           showSyncDot={showSyncDot}
           isDragDisabled={isDragDisabled}
           isBucketOpen={isBucketOpen}

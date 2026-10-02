@@ -31,7 +31,7 @@ export type DisplayRoundingAdjustment = {
 
 export type CurrencyAggregationResult =
   | { status: 'loading' }
-  | { status: 'unavailable' }
+  | { status: 'unavailable'; unavailableCurrency?: string }
   | {
       status: 'complete';
       amount: IntegerAmount;
@@ -200,7 +200,10 @@ export function aggregateAccountAmountsInMainCurrency(
         throw error;
       }
 
-      if (converted === null || !isSafeAmount(converted)) {
+      if (converted === null) {
+        return { status: 'unavailable', unavailableCurrency: accountCurrency };
+      }
+      if (!isSafeAmount(converted)) {
         return { status: 'unavailable' };
       }
       total += BigInt(converted);
