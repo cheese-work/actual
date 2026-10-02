@@ -1,6 +1,6 @@
 import { AUTOMATIC_RATE_REFRESH_INTERVAL_MS } from '@actual-app/core/shared/automatic-rates';
 import { act, render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AutomaticRatesUpdater } from './AutomaticRatesUpdater';
 
@@ -63,6 +63,11 @@ describe('AutomaticRatesUpdater', () => {
     mocks.onVisible = null;
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
   it('runs the latest refresh after currency and mode change in flight', async () => {
     const firstRequest =
       deferred<
@@ -101,6 +106,60 @@ describe('AutomaticRatesUpdater', () => {
     expect(mocks.save).not.toHaveBeenCalledWith({
       'autoRate.USD.EUR': expect.any(String),
     });
+  });
+
+  it('keeps an old budget finalizer from replacing the new budget retry timer', async () => {
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(window, 'setTimeout');
+    const oldBudgetRequest =
+      deferred<
+        Array<{ from: string; to: string; rate: string; fetchedAt: number }>
+      >();
+    mocks.fetchAutomaticRates
+      .mockReturnValueOnce(oldBudgetRequest.promise)
+      .mockRejectedValueOnce(new Error('offline'));
+    const { rerender } = render(
+      <AutomaticRatesUpdater budgetId="old-budget" />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    mocks.prefs = {
+      defaultCurrencyCode: 'GBP',
+      'rateMode.JPY': 'auto',
+    };
+    rerender(<AutomaticRatesUpdater budgetId="new-budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy.mock.calls.at(-1)?.[1]).toBe(15 * 60 * 1000);
+    timeoutSpy.mockClear();
+
+    await act(async () => {
+      oldBudgetRequest.resolve([
+        { from: 'USD', to: 'EUR', rate: '0.9', fetchedAt: Date.now() },
+      ]);
+      await oldBudgetRequest.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(timeoutSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000 - 1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(3);
   });
 
   it('backs off failed background attempts while allowing retry after cooldown', async () => {
@@ -152,6 +211,38 @@ describe('AutomaticRatesUpdater', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refetch a stale direct pair when the inverse pair is fresher', async () => {
+    vi.useFakeTimers();
+    const fetchedAt = Date.now() - 60000;
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.USD': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: fetchedAt - AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.1', fetchedAt }),
+    };
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).not.toHaveBeenCalled();
+
+    const untilExpiry = AUTOMATIC_RATE_REFRESH_INTERVAL_MS - 60000;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(untilExpiry - 1);
+    });
+    expect(mocks.fetchAutomaticRates).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
   });
 
   it('does not save or schedule a refresh after unmount', async () => {

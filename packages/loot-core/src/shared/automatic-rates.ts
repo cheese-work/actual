@@ -8,11 +8,21 @@ export const AUTOMATIC_RATE_REQUEST_TIMEOUT_MS = 15 * 1000;
 const CURRENCY_CODES = new Set(
   currencies.map(currency => currency.code).filter(Boolean),
 );
+const FRANKFURTER_CURRENCY_CODES = new Set(
+  'AED ARS AUD BRL BYN CAD CHF CLP CNY COP CRC CZK DKK DOP EGP EUR GBP GTQ HKD HUF IDR ILS INR IRR JMD JPY KRW LKR MDL MKD MXN MYR PEN PHP PKR PLN QAR RON RSD RUB SAR SEK SGD THB TRY TWD UAH USD UYU UZS VND'.split(
+    ' ',
+  ),
+);
 const COINGECKO_IDS: Record<string, string> = {
   BTC: 'bitcoin',
   ETH: 'ethereum',
   USDT: 'tether',
 };
+const COINGECKO_VS_CURRENCIES = new Set(
+  'AED ARS AUD BRL CAD CHF CLP CNY CZK DKK EUR GBP HKD HUF IDR ILS INR JPY KRW LKR MXN MYR PHP PKR PLN RUB SAR SEK SGD THB TRY TWD UAH USD VND'.split(
+    ' ',
+  ),
+);
 
 type FetchOptions = {
   fetchImpl?: typeof fetch;
@@ -23,10 +33,20 @@ export function isAutomaticRateSourceSupported(
   sourceCode: string,
   mainCurrencyCode: string,
 ): boolean {
+  if (
+    sourceCode === mainCurrencyCode ||
+    !CURRENCY_CODES.has(mainCurrencyCode)
+  ) {
+    return false;
+  }
+
+  if (COINGECKO_IDS[sourceCode] !== undefined) {
+    return COINGECKO_VS_CURRENCIES.has(mainCurrencyCode);
+  }
+
   return (
-    sourceCode !== mainCurrencyCode &&
-    CURRENCY_CODES.has(mainCurrencyCode) &&
-    (CURRENCY_CODES.has(sourceCode) || COINGECKO_IDS[sourceCode] !== undefined)
+    FRANKFURTER_CURRENCY_CODES.has(sourceCode) &&
+    FRANKFURTER_CURRENCY_CODES.has(mainCurrencyCode)
   );
 }
 
@@ -159,8 +179,16 @@ export async function fetchAutomaticRates(
   const codes = [...new Set(sourceCodes)].filter(
     code => code !== mainCurrencyCode,
   );
-  const fiatCodes = codes.filter(code => CURRENCY_CODES.has(code));
-  const cryptoCodes = codes.filter(code => COINGECKO_IDS[code]);
+  const fiatCodes = codes.filter(
+    code =>
+      FRANKFURTER_CURRENCY_CODES.has(code) &&
+      FRANKFURTER_CURRENCY_CODES.has(mainCurrencyCode),
+  );
+  const cryptoCodes = codes.filter(
+    code =>
+      COINGECKO_IDS[code] !== undefined &&
+      COINGECKO_VS_CURRENCIES.has(mainCurrencyCode),
+  );
   if (fiatCodes.length === 0 && cryptoCodes.length === 0) {
     throw new Error('No supported automatic exchange rate source');
   }

@@ -167,6 +167,26 @@ describe('automatic rates', () => {
       fetchedAt: 1790870400000,
     });
   });
+
+  it('uses the fresher inverse cache after the Main currency flips', () => {
+    const fetchedAt = 1790870400000;
+    const prefs = {
+      'rateMode.USD': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: fetchedAt - 86400000,
+      }),
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.1', fetchedAt }),
+    };
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR')).toEqual({
+      from: 'EUR',
+      to: 'USD',
+      rate: '1.1',
+      fetchedAt,
+    });
+    expect(convert(11000, 'USD', 'EUR', prefs)).toBe(10000);
+  });
 });
 
 describe('isValidRate', () => {

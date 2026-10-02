@@ -64,6 +64,34 @@ describe('fetchAutomaticRates', () => {
     expect(fetchImpl.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it('skips unsupported CoinGecko targets in a mixed source batch', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(response([{ base: 'BYN', quote: 'EUR', rate: 3.5 }]));
+
+    await expect(
+      fetchAutomaticRates(['EUR', 'BTC', 'ABC'], 'BYN', {
+        fetchImpl,
+        now,
+      }),
+    ).resolves.toEqual([
+      { from: 'BYN', to: 'EUR', rate: '3.5', fetchedAt: now },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(String(fetchImpl.mock.calls[0][0])).toContain(
+      'api.frankfurter.dev/v2/rates?base=BYN&quotes=EUR',
+    );
+  });
+
+  it('does not request a provider for an unsupported-only source batch', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(
+      fetchAutomaticRates(['BTC'], 'BYN', { fetchImpl, now }),
+    ).rejects.toThrow(/no supported automatic/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects an unsuccessful provider response', async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
@@ -102,6 +130,8 @@ describe('isAutomaticRateSourceSupported', () => {
     expect(isAutomaticRateSourceSupported('EUR', 'USD')).toBe(true);
     expect(isAutomaticRateSourceSupported('BTC', 'USD')).toBe(true);
     expect(isAutomaticRateSourceSupported('USDT', 'USD')).toBe(true);
+    expect(isAutomaticRateSourceSupported('EUR', 'BYN')).toBe(true);
+    expect(isAutomaticRateSourceSupported('BTC', 'BYN')).toBe(false);
     expect(isAutomaticRateSourceSupported('X-BANANA', 'USD')).toBe(false);
     expect(isAutomaticRateSourceSupported('ABC', 'USD')).toBe(false);
     expect(isAutomaticRateSourceSupported('EUR', 'X-BANANA')).toBe(false);
@@ -186,6 +216,23 @@ describe('getDueAutomaticRateSources', () => {
         now,
       ),
     ).toEqual([]);
+  });
+
+  it('uses the newer inverse cache for due checks after a Main currency flip', () => {
+    const freshAt = now - 60000;
+    const prefs = {
+      'rateMode.USD': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: freshAt - AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.1', fetchedAt: freshAt }),
+    };
+
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBe(
+      freshAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+    );
   });
 });
 

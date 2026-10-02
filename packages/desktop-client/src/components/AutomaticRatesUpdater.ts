@@ -123,7 +123,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
       }
     } finally {
       inProgress.current.delete(budgetId);
-      if (mounted.current) {
+      if (mounted.current && budgetIdRef.current === budgetId) {
         const nextPrefs =
           prefsRef.current.defaultCurrencyCode === mainCurrencyCode
             ? prefsForNextRefresh

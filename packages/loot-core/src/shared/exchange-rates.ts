@@ -334,12 +334,12 @@ export function getAutomaticRate(
   }
 
   const direct = readAutomaticRate(prefs[automaticRateKey(from, to)]);
-  if (direct) {
-    return { from, to, ...direct };
+  const inverse = readAutomaticRate(prefs[automaticRateKey(to, from)]);
+  if (!inverse || (direct && direct.fetchedAt >= inverse.fetchedAt)) {
+    return direct ? { from, to, ...direct } : null;
   }
 
-  const inverse = readAutomaticRate(prefs[automaticRateKey(to, from)]);
-  return inverse ? { from: to, to: from, ...inverse } : null;
+  return { from: to, to: from, ...inverse };
 }
 
 export function setAutomaticRatePatch(rate: AutomaticRate): ExchangeRatePrefs {
