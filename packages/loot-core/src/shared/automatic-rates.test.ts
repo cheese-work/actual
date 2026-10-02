@@ -240,6 +240,68 @@ describe('getDueAutomaticRateSources', () => {
     );
   });
 
+  it('lets explicit manual mode override an automatic Main cache', () => {
+    const prefs = {
+      'rateMode.EUR': 'auto',
+      'rateMode.USD': 'manual',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+    };
+
+    expect(getAutomaticRate(prefs, 'USD', 'EUR', now)).toBeNull();
+    expect(getDueAutomaticRateSources(prefs, 'EUR', now)).toEqual([]);
+    expect(getNextAutomaticRateRefreshAt(prefs, 'EUR', now)).toBeNull();
+    expect(convert(10000, 'USD', 'EUR', prefs)).toBeNull();
+  });
+
+  it('backs off alternating-clock sync after a successful attempt', () => {
+    const slowClock = now;
+    const fastClock = now + AUTOMATIC_RATE_REFRESH_INTERVAL_MS + 60_000;
+    const fastPeerCache = {
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.8',
+        fetchedAt: fastClock,
+      }),
+    };
+    const slowPeerAttempts = new Map([['EUR.USD', slowClock]]);
+
+    expect(
+      getDueAutomaticRateSources(
+        fastPeerCache,
+        'EUR',
+        slowClock,
+        slowPeerAttempts,
+      ),
+    ).toEqual([]);
+    expect(
+      getNextAutomaticRateRefreshAt(
+        fastPeerCache,
+        'EUR',
+        slowClock,
+        slowPeerAttempts,
+      ),
+    ).toBe(slowClock + AUTOMATIC_RATE_RETRY_INTERVAL_MS);
+
+    const fastPeerAttempts = new Map([['EUR.USD', fastClock]]);
+    expect(
+      getDueAutomaticRateSources(
+        {
+          'rateMode.EUR': 'auto',
+          'autoRate.USD.EUR': JSON.stringify({
+            rate: '0.9',
+            fetchedAt: slowClock,
+          }),
+        },
+        'EUR',
+        fastClock,
+        fastPeerAttempts,
+      ),
+    ).toEqual([]);
+  });
+
   it('refreshes a cached auto currency after it becomes Main', async () => {
     const fetchedAt = now - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS;
     const prefs = {

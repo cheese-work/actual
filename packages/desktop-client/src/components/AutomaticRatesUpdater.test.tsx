@@ -1,4 +1,7 @@
-import { AUTOMATIC_RATE_REFRESH_INTERVAL_MS } from '@actual-app/core/shared/automatic-rates';
+import {
+  AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+  AUTOMATIC_RATE_RETRY_INTERVAL_MS,
+} from '@actual-app/core/shared/automatic-rates';
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -243,6 +246,91 @@ describe('AutomaticRatesUpdater', () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+  });
+
+  it('writes and schedules refreshed cached pairs when Main retains auto mode', async () => {
+    vi.useFakeTimers();
+    const fetchedAt = Date.now();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: fetchedAt - 2 * AUTOMATIC_RATE_REFRESH_INTERVAL_MS,
+      }),
+    };
+    mocks.fetchAutomaticRates.mockResolvedValue([
+      { from: 'EUR', to: 'USD', rate: '1.25', fetchedAt },
+    ]);
+    render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+    expect(mocks.save).toHaveBeenCalledWith({
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.25', fetchedAt }),
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+  });
+
+  it('backs off a successful refresh after a future timestamp sync', async () => {
+    vi.useFakeTimers();
+    const attemptedAt = Date.now();
+    const futureTimestamp =
+      attemptedAt + AUTOMATIC_RATE_REFRESH_INTERVAL_MS + 60_000;
+    mocks.prefs = {
+      defaultCurrencyCode: 'USD',
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: futureTimestamp,
+      }),
+    };
+    mocks.fetchAutomaticRates
+      .mockResolvedValueOnce([
+        { from: 'USD', to: 'EUR', rate: '0.91', fetchedAt: attemptedAt },
+      ])
+      .mockRejectedValueOnce(new Error('offline'));
+    const { rerender } = render(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    mocks.prefs = {
+      ...mocks.prefs,
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.8',
+        fetchedAt: futureTimestamp,
+      }),
+    };
+    rerender(<AutomaticRatesUpdater budgetId="budget" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTOMATIC_RATE_RETRY_INTERVAL_MS - 1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledTimes(2);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.prefs['autoRate.USD.EUR']).toContain(String(futureTimestamp));
   });
 
   it('does not save or schedule a refresh after unmount', async () => {

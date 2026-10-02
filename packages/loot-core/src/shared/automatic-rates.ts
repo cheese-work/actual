@@ -2,6 +2,7 @@ import { currencies } from './currencies';
 import {
   getAutomaticRate,
   getAutomaticRateFreshnessTimestamp,
+  isAutomaticRateEnabled,
   isValidRate,
   manualRateKey,
 } from './exchange-rates';
@@ -330,5 +331,7 @@ function getAutomaticRateSourceCandidates(
     }
   }
 
-  return [...sources].sort((a, b) => a.localeCompare(b, 'en'));
+  return [...sources]
+    .filter(code => isAutomaticRateEnabled(prefs, code, mainCurrencyCode))
+    .sort((a, b) => a.localeCompare(b, 'en'));
 }

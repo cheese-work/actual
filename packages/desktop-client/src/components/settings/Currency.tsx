@@ -19,7 +19,7 @@ import {
   getAutomaticRate,
   getCustomUnits,
   getManualRates,
-  getRateMode,
+  isAutomaticRateEnabled,
   parseRateInput,
   rateModeKey,
   removeCustomUnitPatch,
@@ -381,7 +381,7 @@ export function CurrencySettings() {
       if (
         !mounted.current ||
         selectedCurrencyCodeRef.current !== mainCurrencyCode ||
-        getRateMode(prefsRef.current, code) !== 'auto'
+        !isAutomaticRateEnabled(prefsRef.current, code, mainCurrencyCode)
       ) {
         return;
       }
@@ -390,7 +390,7 @@ export function CurrencySettings() {
       if (
         mounted.current &&
         selectedCurrencyCodeRef.current === mainCurrencyCode &&
-        getRateMode(prefsRef.current, code) === 'auto'
+        isAutomaticRateEnabled(prefsRef.current, code, mainCurrencyCode)
       ) {
         setRefreshErrorCode(code);
       }
@@ -525,7 +525,13 @@ export function CurrencySettings() {
                 selectedCurrencyCode,
               );
               const rateMode = canUseAutomaticRates
-                ? getRateMode(syncedPrefs, unit.code)
+                ? isAutomaticRateEnabled(
+                    syncedPrefs,
+                    unit.code,
+                    selectedCurrencyCode,
+                  )
+                  ? 'auto'
+                  : 'manual'
                 : 'manual';
               const automaticRate = getAutomaticRate(
                 syncedPrefs,

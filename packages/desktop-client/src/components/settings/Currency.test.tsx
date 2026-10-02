@@ -158,6 +158,55 @@ describe('CurrencySettings', () => {
     expect(screen.getByText('1 EUR = 1.11111 USD')).toBeInTheDocument();
   });
 
+  it('shows and refreshes the effective automatic mode after a Main flip', async () => {
+    const fetchedAt = Date.now();
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      numberFormat: 'comma-dot',
+      'rateMode.EUR': 'auto',
+      'autoRate.USD.EUR': JSON.stringify({ rate: '0.9', fetchedAt }),
+    };
+    mocks.fetchAutomaticRates.mockResolvedValue([
+      { from: 'EUR', to: 'USD', rate: '1.25', fetchedAt },
+    ]);
+    const user = userEvent.setup();
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(screen.getByLabelText('USD rate mode')).toHaveTextContent(
+      'Automatic',
+    );
+    expect(screen.getByText('1 USD = 0.9 EUR')).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Refresh USD rate now' }),
+    );
+
+    expect(mocks.fetchAutomaticRates).toHaveBeenCalledWith(['USD'], 'EUR');
+    expect(mocks.save).toHaveBeenCalledWith({
+      'autoRate.EUR.USD': JSON.stringify({ rate: '1.25', fetchedAt }),
+    });
+  });
+
+  it('keeps an explicit manual mode without a rate out of automatic UI', () => {
+    mocks.prefs = {
+      defaultCurrencyCode: 'EUR',
+      numberFormat: 'comma-dot',
+      'rateMode.EUR': 'auto',
+      'rateMode.USD': 'manual',
+      'autoRate.USD.EUR': JSON.stringify({
+        rate: '0.9',
+        fetchedAt: Date.now(),
+      }),
+    };
+    render(<CurrencySettings />, { wrapper: TestProviders });
+
+    expect(screen.getByLabelText('USD rate mode')).toHaveTextContent('Manual');
+    expect(
+      screen.queryByRole('button', { name: 'Refresh USD rate now' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('1 USD = 0.9 EUR')).not.toBeInTheDocument();
+  });
+
   it('saves an on-demand automatic rate in the synced cache', async () => {
     const fetchedAt = Date.now();
     mocks.prefs = { ...mocks.prefs, 'rateMode.EUR': 'auto' };

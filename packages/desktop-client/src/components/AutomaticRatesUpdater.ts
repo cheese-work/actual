@@ -6,6 +6,7 @@ import {
   getNextAutomaticRateRefreshAt,
 } from '@actual-app/core/shared/automatic-rates';
 import {
+  isAutomaticRateEnabled,
   manualRateKey,
   setAutomaticRatePatch,
 } from '@actual-app/core/shared/exchange-rates';
@@ -19,7 +20,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
   const budgetIdRef = useRef(budgetId);
   const mounted = useRef(false);
   const inProgress = useRef(new Set<string>());
-  const failedAttemptsByBudget = useRef(new Map<string, Map<string, number>>());
+  const lastAttemptsByBudget = useRef(new Map<string, Map<string, number>>());
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const refreshTimer = useRef<number | null>(null);
   prefsRef.current = prefs;
@@ -51,16 +52,16 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
       return;
     }
 
-    let failedAttempts = failedAttemptsByBudget.current.get(budgetId);
-    if (!failedAttempts) {
-      failedAttempts = new Map();
-      failedAttemptsByBudget.current.set(budgetId, failedAttempts);
+    let lastAttempts = lastAttemptsByBudget.current.get(budgetId);
+    if (!lastAttempts) {
+      lastAttempts = new Map();
+      lastAttemptsByBudget.current.set(budgetId, lastAttempts);
     }
     const sourceCodes = getDueAutomaticRateSources(
       currentPrefs,
       mainCurrencyCode,
       Date.now(),
-      failedAttempts,
+      lastAttempts,
     );
     if (inProgress.current.has(budgetId)) {
       return;
@@ -71,7 +72,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
           currentPrefs,
           mainCurrencyCode,
           Date.now(),
-          failedAttempts,
+          lastAttempts,
         ),
       );
       return;
@@ -81,26 +82,16 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
     let prefsForNextRefresh = currentPrefs;
     try {
       const rates = await fetchAutomaticRates(sourceCodes, mainCurrencyCode);
-      const receivedCodes = new Set(
-        rates.map(rate =>
-          rate.from === mainCurrencyCode ? rate.to : rate.from,
-        ),
-      );
       const attemptedAt = Date.now();
       for (const code of sourceCodes) {
-        const failureKey = `${mainCurrencyCode}.${code}`;
-        if (receivedCodes.has(code)) {
-          failedAttempts.delete(failureKey);
-        } else {
-          failedAttempts.set(failureKey, attemptedAt);
-        }
+        lastAttempts.set(`${mainCurrencyCode}.${code}`, attemptedAt);
       }
 
       const currentRates = rates.filter(rate => {
         const sourceCode = rate.from === mainCurrencyCode ? rate.to : rate.from;
         return (
           sourceCodes.includes(sourceCode) &&
-          prefsRef.current[`rateMode.${sourceCode}`] === 'auto'
+          isAutomaticRateEnabled(prefsRef.current, sourceCode, mainCurrencyCode)
         );
       });
       if (
@@ -119,7 +110,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
     } catch {
       const attemptedAt = Date.now();
       for (const code of sourceCodes) {
-        failedAttempts.set(`${mainCurrencyCode}.${code}`, attemptedAt);
+        lastAttempts.set(`${mainCurrencyCode}.${code}`, attemptedAt);
       }
     } finally {
       inProgress.current.delete(budgetId);
@@ -135,7 +126,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
                 nextPrefs,
                 nextMainCurrencyCode,
                 Date.now(),
-                failedAttempts,
+                lastAttempts,
               )
             : null,
         );
@@ -145,17 +136,18 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
 
   refreshRef.current = refresh;
 
-  const autoModeSignature = Object.entries(prefs)
-    .filter(([key, mode]) => key.startsWith('rateMode.') && mode === 'auto')
-    .map(([key]) => key.slice('rateMode.'.length))
-    .sort()
-    .map(code =>
-      [
-        `rateMode.${code}=${prefs[`rateMode.${code}`]}`,
-        `${manualRateKey(code, prefs.defaultCurrencyCode ?? '')}=${prefs[manualRateKey(code, prefs.defaultCurrencyCode ?? '')] ?? ''}`,
-        `${manualRateKey(prefs.defaultCurrencyCode ?? '', code)}=${prefs[manualRateKey(prefs.defaultCurrencyCode ?? '', code)] ?? ''}`,
-      ].join('|'),
-    )
+  const rateModeSignature = Object.entries(prefs)
+    .filter(([key]) => key.startsWith('rateMode.'))
+    .sort(([left], [right]) => left.localeCompare(right, 'en'))
+    .map(([key, mode]) => {
+      const code = key.slice('rateMode.'.length);
+      const mainCurrencyCode = prefs.defaultCurrencyCode ?? '';
+      return [
+        `${key}=${mode}`,
+        `${manualRateKey(code, mainCurrencyCode)}=${prefs[manualRateKey(code, mainCurrencyCode)] ?? ''}`,
+        `${manualRateKey(mainCurrencyCode, code)}=${prefs[manualRateKey(mainCurrencyCode, code)] ?? ''}`,
+      ].join('|');
+    })
     .join('|');
   const automaticRateSignature = Object.entries(prefs)
     .filter(([key]) => key.startsWith('autoRate.'))
@@ -180,7 +172,7 @@ export function AutomaticRatesUpdater({ budgetId }: { budgetId: string }) {
   useEffect(() => {
     void refresh();
   }, [
-    autoModeSignature,
+    rateModeSignature,
     automaticRateSignature,
     prefs.defaultCurrencyCode,
     refresh,

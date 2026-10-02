@@ -296,6 +296,20 @@ export function getRateMode(prefs: Prefs, code: string): 'manual' | 'auto' {
   return prefs[rateModeKey(code)] === 'auto' ? 'auto' : 'manual';
 }
 
+export function isAutomaticRateEnabled(
+  prefs: Prefs,
+  from: string,
+  to: string,
+): boolean {
+  const fromMode = prefs[rateModeKey(from)];
+  const toMode = prefs[rateModeKey(to)];
+  return (
+    (fromMode === 'auto' || toMode === 'auto') &&
+    (fromMode === undefined || fromMode === 'auto') &&
+    (toMode === undefined || toMode === 'auto')
+  );
+}
+
 function readAutomaticRate(value: string | undefined) {
   if (!value) {
     return null;
@@ -327,10 +341,7 @@ export function getAutomaticRate(
   to: string,
   now = Date.now(),
 ): AutomaticRate | null {
-  if (
-    getRateMode(prefs, from) !== 'auto' &&
-    getRateMode(prefs, to) !== 'auto'
-  ) {
+  if (!isAutomaticRateEnabled(prefs, from, to)) {
     return null;
   }
 
