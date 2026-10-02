@@ -66,6 +66,8 @@ export function ClosedSection({
           label={t('Closed accounts')}
           side="closed"
           buckets={[{ group: null, accounts, failedCount: 0 }]}
+          balanceBuckets={[]}
+          aggregateBalances={{}}
           showSyncDot={false}
           isDragDisabled={isDragDisabled}
         />

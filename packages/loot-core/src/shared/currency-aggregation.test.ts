@@ -262,7 +262,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         accounts,
         prefs,
       ),
-    ).toEqual({ status: 'unavailable' });
+    ).toEqual({ status: 'unavailable', unavailableCurrency: 'USD' });
     expect(
       aggregateAccountAmountsInMainCurrency(
         [{ accountId: 'missing', amount: 100 }],

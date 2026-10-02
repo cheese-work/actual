@@ -42,6 +42,8 @@ type AccountGroupHeaderProps = {
   group: AccountGroupEntity;
   side: 'on' | 'off';
   accounts: AccountEntity[];
+  balanceAccounts: readonly AccountEntity[];
+  aggregateBalances: Record<string, number | null>;
   failedCount: number;
   showSyncDot: boolean;
   isDropZoneActive: boolean;
@@ -51,6 +53,8 @@ export function AccountGroupHeader({
   group,
   side,
   accounts,
+  balanceAccounts,
+  aggregateBalances,
   failedCount,
   showSyncDot,
   isDropZoneActive,
@@ -177,6 +181,9 @@ export function AccountGroupHeader({
                     side === 'off',
                   )}
                   style={{ fontSize: 11, color: groupLabelStyle.color }}
+                  testId={`sidebar-account-group-${group.id}-balance`}
+                  aggregateAccounts={balanceAccounts}
+                  aggregateBalances={aggregateBalances}
                 />
               </>
             )}

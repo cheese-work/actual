@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
 
+import { useAccountBalances } from '#hooks/useAccountBalances';
 import * as bindings from '#spreadsheet/bindings';
 
 import { AccountSearchField } from './AccountSearchField';
@@ -32,6 +33,14 @@ export function AccountsSection() {
   };
 
   const visibleTree = filterSidebarTree(tree, trimmedQuery);
+  const trackedAccounts = [
+    ...tree.onBudget.buckets.flatMap(bucket => bucket.accounts),
+    ...tree.offBudget.buckets.flatMap(bucket => bucket.accounts),
+  ];
+  const accountBalances = useAccountBalances(
+    trackedAccounts.map(account => account.id),
+  );
+  const allAccounts = tree.accountsLoaded ? trackedAccounts : null;
 
   const showSyncDot = [
     ...tree.onBudget.buckets.map(b => b.accounts).flat(),
@@ -54,6 +63,8 @@ export function AccountsSection() {
           isToggleAllDisabled={isSearching}
           isSearchOpen={isSearchOpen}
           onToggleSearch={onToggleSearch}
+          aggregateAccounts={allAccounts}
+          aggregateBalances={accountBalances}
         />
         {isSearchOpen && (
           <AccountSearchField
@@ -69,6 +80,8 @@ export function AccountsSection() {
             isDragDisabled={isSearching}
             showSyncDot={showSyncDot}
             sideData={visibleTree.onBudget}
+            fullSideData={tree.onBudget}
+            aggregateBalances={accountBalances}
             totalBinding={bindings.onBudgetAccountBalance()}
             balanceTestId="sidebar-on-budget-balance"
             isOpen={collapse.isOpen('onbudget')}
@@ -84,6 +97,8 @@ export function AccountsSection() {
             isDragDisabled={isSearching}
             showSyncDot={showSyncDot}
             sideData={visibleTree.offBudget}
+            fullSideData={tree.offBudget}
+            aggregateBalances={accountBalances}
             totalBinding={bindings.offBudgetAccountBalance()}
             balanceTestId="sidebar-off-budget-balance"
             isOpen={collapse.isOpen('offbudget')}
