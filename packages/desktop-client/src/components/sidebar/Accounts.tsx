@@ -7,6 +7,7 @@ import type { AccountEntity } from '@actual-app/core/types/models';
 
 import { useMoveAccountMutation } from '#accounts';
 import { isAccountFailedSync } from '#accounts/syncStatus';
+import { useAccountBalances } from '#hooks/useAccountBalances';
 import { useAccounts } from '#hooks/useAccounts';
 import { useClosedAccounts } from '#hooks/useClosedAccounts';
 import { useLocalPref } from '#hooks/useLocalPref';
@@ -26,8 +27,18 @@ export function Accounts() {
   const [isDragging, setIsDragging] = useState(false);
   const { data: accounts = [] } = useAccounts();
   const updatedAccounts = useUpdatedAccounts();
-  const { data: offbudgetAccounts = [] } = useOffBudgetAccounts();
-  const { data: onBudgetAccounts = [] } = useOnBudgetAccounts();
+  const offBudgetAccountsQuery = useOffBudgetAccounts();
+  const onBudgetAccountsQuery = useOnBudgetAccounts();
+  const offbudgetAccounts = offBudgetAccountsQuery.data ?? [];
+  const onBudgetAccounts = onBudgetAccountsQuery.data ?? [];
+  const aggregateAccounts =
+    offBudgetAccountsQuery.data === undefined ||
+    onBudgetAccountsQuery.data === undefined
+      ? null
+      : [...onBudgetAccountsQuery.data, ...offBudgetAccountsQuery.data];
+  const accountBalances = useAccountBalances(
+    [...onBudgetAccounts, ...offbudgetAccounts].map(account => account.id),
+  );
   const { data: closedAccounts = [] } = useClosedAccounts();
   const syncingAccountIds = useSelector(state => state.account.accountsSyncing);
 
@@ -97,6 +108,8 @@ export function Accounts() {
           style={{ fontWeight, marginTop: 15 }}
           isExactPathMatch
           balanceTestId="sidebar-all-accounts-balance"
+          aggregateAccounts={aggregateAccounts}
+          aggregateBalances={accountBalances}
         />
 
         {onBudgetAccounts.length > 0 && (
@@ -111,6 +124,8 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-on-budget-balance"
+            aggregateAccounts={onBudgetAccountsQuery.data ?? null}
+            aggregateBalances={accountBalances}
           />
         )}
 
@@ -143,6 +158,8 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-off-budget-balance"
+            aggregateAccounts={offBudgetAccountsQuery.data ?? null}
+            aggregateBalances={accountBalances}
           />
         )}
 

@@ -40,6 +40,8 @@ import { useDispatch, useSelector } from '#redux';
 import type { Binding, SheetFields } from '#spreadsheet';
 import { isTouchDevice } from '#util/isTouchDevice';
 
+import { AccountCurrencyBalance } from './AccountCurrencyBalance';
+
 export const accountNameStyle: CSSProperties = {
   marginTop: -2,
   marginBottom: 2,
@@ -52,6 +54,28 @@ export const accountNameStyle: CSSProperties = {
   ':hover': { backgroundColor: theme.sidebarItemBackgroundHover },
   ...styles.smallText,
 };
+
+type AccountBalanceProps<FieldName extends SheetFields<'account'>> = {
+  query: Binding<'account', FieldName>;
+  account?: AccountEntity;
+};
+
+function AccountBalance<FieldName extends SheetFields<'account'>>({
+  query,
+  account,
+}: AccountBalanceProps<FieldName>) {
+  const accountCurrency = useEffectiveAccountCurrency(account?.currency);
+  const balance = useSheetValue(query);
+
+  return (
+    <View style={{ alignItems: 'flex-end' }}>
+      <CellValue binding={query} type="financial" currency={accountCurrency} />
+      {typeof balance === 'number' && (
+        <ApproxMain value={balance} currency={account?.currency} />
+      )}
+    </View>
+  );
+}
 
 type AccountProps<FieldName extends SheetFields<'account'>> = {
   name: string;
@@ -69,6 +93,8 @@ type AccountProps<FieldName extends SheetFields<'account'>> = {
   titleAccount?: boolean;
   isExactPathMatch?: boolean;
   balanceTestId?: string;
+  aggregateAccounts?: readonly AccountEntity[] | null;
+  aggregateBalances?: Record<string, number | null>;
 };
 
 export function Account<FieldName extends SheetFields<'account'>>({
@@ -87,6 +113,8 @@ export function Account<FieldName extends SheetFields<'account'>>({
   titleAccount,
   isExactPathMatch,
   balanceTestId,
+  aggregateAccounts,
+  aggregateBalances,
 }: AccountProps<FieldName>) {
   const isTestEnv = useIsTestEnv();
   const { t } = useTranslation();
@@ -127,16 +155,17 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const reopenAccount = useReopenAccountMutation();
   const updateAccount = useUpdateAccountMutation();
 
-  const accountCurrency = useEffectiveAccountCurrency(account?.currency);
-  const balance = useSheetValue(query);
-  const balanceCell = (
-    <View style={{ alignItems: 'flex-end' }}>
-      <CellValue binding={query} type="financial" currency={accountCurrency} />
-      {typeof balance === 'number' && (
-        <ApproxMain value={balance} currency={account?.currency} />
-      )}
-    </View>
-  );
+  const balanceCell =
+    aggregateAccounts === undefined ? (
+      <AccountBalance query={query} account={account} />
+    ) : (
+      <View style={{ alignItems: 'flex-end' }}>
+        <AccountCurrencyBalance
+          accounts={aggregateAccounts}
+          balances={aggregateBalances ?? {}}
+        />
+      </View>
+    );
 
   const isContextMenuOpen = useSelector(state =>
     state.contextMenu.items.some(
