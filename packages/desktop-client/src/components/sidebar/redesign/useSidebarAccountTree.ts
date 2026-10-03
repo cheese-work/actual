@@ -25,6 +25,7 @@ export type SidebarAccountTree = {
   onBudget: SidebarAccountSide;
   offBudget: SidebarAccountSide;
   closed: AccountEntity[];
+  accountsLoaded: boolean;
 };
 
 export function getEffectiveGroupId(
@@ -104,18 +105,26 @@ export function filterSidebarTree(
     closed: tree.closed.filter(account =>
       account.name.toLowerCase().includes(query),
     ),
+    accountsLoaded: tree.accountsLoaded,
   };
 }
 
 export function useSidebarAccountTree(): SidebarAccountTree {
   const { data: groups = [] } = useAccountGroups();
-  const { data: onBudgetAccounts = [] } = useOnBudgetAccounts();
-  const { data: offBudgetAccounts = [] } = useOffBudgetAccounts();
+  const onBudgetAccountsQuery = useOnBudgetAccounts();
+  const offBudgetAccountsQuery = useOffBudgetAccounts();
+  const onBudgetAccounts = onBudgetAccountsQuery.data ?? [];
+  const offBudgetAccounts = offBudgetAccountsQuery.data ?? [];
   const { data: closedAccounts = [] } = useClosedAccounts();
 
   return {
     onBudget: buildAccountSide(onBudgetAccounts, groups),
     offBudget: buildAccountSide(offBudgetAccounts, groups),
     closed: closedAccounts,
+    accountsLoaded:
+      onBudgetAccountsQuery.data !== undefined &&
+      !onBudgetAccountsQuery.isPlaceholderData &&
+      offBudgetAccountsQuery.data !== undefined &&
+      !offBudgetAccountsQuery.isPlaceholderData,
   };
 }

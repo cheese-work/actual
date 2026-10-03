@@ -1,14 +1,26 @@
+import { createElement } from 'react';
+
 import { generateAccount } from '@actual-app/core/mocks';
 import type {
   AccountEntity,
   AccountGroupEntity,
 } from '@actual-app/core/types/models';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+
+import { useOffBudgetAccounts } from '#hooks/useOffBudgetAccounts';
+import { useOnBudgetAccounts } from '#hooks/useOnBudgetAccounts';
+import {
+  configureTestAppStore,
+  createTestQueryClient,
+  TestProviders,
+} from '#mocks';
 
 import {
   buildAccountSide,
   filterSidebarTree,
   getEffectiveGroupId,
+  useSidebarAccountTree,
 } from './useSidebarAccountTree';
 import type { SidebarAccountTree } from './useSidebarAccountTree';
 
@@ -100,6 +112,7 @@ describe('filterSidebarTree', () => {
     ),
     offBudget: buildAccountSide([makeAccount('House')], groups),
     closed: [makeAccount('Old Checking', { closed: 1 })],
+    accountsLoaded: true,
   };
 
   it('returns the tree unchanged for an empty query', () => {
@@ -146,5 +159,44 @@ describe('filterSidebarTree', () => {
     expect(filterSidebarTree(tree, 'checking prem').onBudget.buckets).toEqual(
       [],
     );
+  });
+});
+
+describe('useSidebarAccountTree query readiness', () => {
+  it('waits for placeholder accounts to resolve before treating an empty list as loaded', async () => {
+    const queryClient = createTestQueryClient();
+    const store = configureTestAppStore({ queryClient });
+
+    const { result, unmount } = renderHook(
+      () => ({
+        tree: useSidebarAccountTree(),
+        onBudgetQuery: useOnBudgetAccounts(),
+        offBudgetQuery: useOffBudgetAccounts(),
+      }),
+      {
+        wrapper: ({ children }) =>
+          createElement(TestProviders, { store, queryClient, children }),
+      },
+    );
+
+    expect(result.current.tree.onBudget.accountCount).toBe(0);
+    expect(result.current.tree.accountsLoaded).toBe(false);
+    expect(result.current.onBudgetQuery.isPlaceholderData).toBe(true);
+    expect(result.current.offBudgetQuery.isPlaceholderData).toBe(true);
+    expect(queryClient.getQueryState(['accounts', 'lists'])).toMatchObject({
+      status: 'pending',
+      fetchStatus: 'fetching',
+      data: undefined,
+    });
+
+    await act(async () => {
+      queryClient.setQueryData(['accounts', 'lists'], []);
+    });
+    await waitFor(() => expect(result.current.tree.accountsLoaded).toBe(true));
+    expect(result.current.onBudgetQuery.isPlaceholderData).toBe(false);
+    expect(result.current.tree.onBudget.accountCount).toBe(0);
+
+    unmount();
+    queryClient.clear();
   });
 });

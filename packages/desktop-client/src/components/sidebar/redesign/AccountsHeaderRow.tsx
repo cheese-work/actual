@@ -11,6 +11,7 @@ import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
 
 import { Link } from '#components/common/Link';
+import type { AccountCurrencyAggregation } from '#components/sidebar/AccountCurrencyBalance';
 import { replaceModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
 import * as bindings from '#spreadsheet/bindings';
@@ -19,6 +20,7 @@ import { SidebarBalance } from './SidebarBalance';
 import { SidebarIconButton } from './SidebarIconButton';
 
 type AccountsHeaderRowProps = {
+  aggregation: AccountCurrencyAggregation;
   allOpen: boolean;
   onToggleAll: () => void;
   isToggleAllDisabled: boolean;
@@ -27,6 +29,7 @@ type AccountsHeaderRowProps = {
 };
 
 export function AccountsHeaderRow({
+  aggregation,
   allOpen,
   onToggleAll,
   isToggleAllDisabled,
@@ -93,6 +96,7 @@ export function AccountsHeaderRow({
           binding={bindings.allAccountBalance()}
           testId="sidebar-all-accounts-balance"
           style={{ fontSize: 12, fontWeight: 600 }}
+          aggregation={aggregation}
         />
       </Link>
     </View>

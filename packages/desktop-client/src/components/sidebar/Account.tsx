@@ -21,24 +21,27 @@ import type { AccountEntity } from '@actual-app/core/types/models';
 import { css, cx } from '@emotion/css';
 
 import { useReopenAccountMutation, useUpdateAccountMutation } from '#accounts';
-import { ApproxMain } from '#components/accounts/ApproxMain';
 import { BalanceHistoryGraph } from '#components/accounts/BalanceHistoryGraph';
 import { Link } from '#components/common/Link';
 import { Notes } from '#components/Notes';
 import { DropHighlight, useDraggable, useDroppable } from '#components/sort';
 import type { OnDragChangeCallback, OnDropCallback } from '#components/sort';
-import { CellValue } from '#components/spreadsheet/CellValue';
 import { useContextMenu } from '#hooks/useContextMenu';
 import { useDragRef } from '#hooks/useDragRef';
 import { useEffectiveAccountCurrency } from '#hooks/useEffectiveAccountCurrency';
 import { useIsTestEnv } from '#hooks/useIsTestEnv';
 import { useNotes } from '#hooks/useNotes';
-import { useSheetValue } from '#hooks/useSheetValue';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { openAccountCloseModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 import type { Binding, SheetFields } from '#spreadsheet';
 import { isTouchDevice } from '#util/isTouchDevice';
+
+import {
+  AccountCurrencyBalance,
+  SidebarAccountBalance,
+} from './AccountCurrencyBalance';
+import type { AccountCurrencyAggregation } from './AccountCurrencyBalance';
 
 export const accountNameStyle: CSSProperties = {
   marginTop: -2,
@@ -52,6 +55,25 @@ export const accountNameStyle: CSSProperties = {
   ':hover': { backgroundColor: theme.sidebarItemBackgroundHover },
   ...styles.smallText,
 };
+
+type AccountBalanceProps<FieldName extends SheetFields<'account'>> = {
+  query: Binding<'account', FieldName>;
+  account?: AccountEntity;
+};
+
+function AccountBalance<FieldName extends SheetFields<'account'>>({
+  query,
+  account,
+}: AccountBalanceProps<FieldName>) {
+  const accountCurrency = useEffectiveAccountCurrency(account?.currency);
+  return (
+    <SidebarAccountBalance
+      binding={query}
+      currency={accountCurrency}
+      approxCurrency={account?.currency}
+    />
+  );
+}
 
 type AccountProps<FieldName extends SheetFields<'account'>> = {
   name: string;
@@ -69,6 +91,7 @@ type AccountProps<FieldName extends SheetFields<'account'>> = {
   titleAccount?: boolean;
   isExactPathMatch?: boolean;
   balanceTestId?: string;
+  currencyAggregation?: AccountCurrencyAggregation;
 };
 
 export function Account<FieldName extends SheetFields<'account'>>({
@@ -87,6 +110,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
   titleAccount,
   isExactPathMatch,
   balanceTestId,
+  currencyAggregation,
 }: AccountProps<FieldName>) {
   const isTestEnv = useIsTestEnv();
   const { t } = useTranslation();
@@ -127,16 +151,15 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const reopenAccount = useReopenAccountMutation();
   const updateAccount = useUpdateAccountMutation();
 
-  const accountCurrency = useEffectiveAccountCurrency(account?.currency);
-  const balance = useSheetValue(query);
-  const balanceCell = (
-    <View style={{ alignItems: 'flex-end' }}>
-      <CellValue binding={query} type="financial" currency={accountCurrency} />
-      {typeof balance === 'number' && (
-        <ApproxMain value={balance} currency={account?.currency} />
-      )}
-    </View>
-  );
+  const balanceCell =
+    currencyAggregation === undefined ? (
+      <AccountBalance query={query} account={account} />
+    ) : (
+      <AccountCurrencyBalance
+        aggregation={currencyAggregation}
+        testId={balanceTestId}
+      />
+    );
 
   const isContextMenuOpen = useSelector(state =>
     state.contextMenu.items.some(
@@ -270,7 +293,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
                 )
               }
               right={
-                balanceTestId ? (
+                currencyAggregation === undefined && balanceTestId ? (
                   <View data-testid={balanceTestId}>{balanceCell}</View>
                 ) : (
                   balanceCell
