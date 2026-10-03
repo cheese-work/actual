@@ -132,5 +132,7 @@
   "OpenID is required to enable multi-user mode.": "Cần có OpenID để bật chế độ nhiều người dùng.",
   "Disable OpenID": "Tắt OpenID",
   "Disabling OpenID will deactivate multi-user mode.": "Việc tắt OpenID sẽ vô hiệu hóa chế độ nhiều người dùng.",
-  "<0>Authentication method</0> modifies how users log in to the system.": "<0>Phương thức xác thực</0> thay đổi cách người dùng đăng nhập vào hệ thống."
+  "<0>Authentication method</0> modifies how users log in to the system.": "<0>Phương thức xác thực</0> thay đổi cách người dùng đăng nhập vào hệ thống.",
+  "Advanced Settings": "Cài đặt nâng cao",
+  "Show advanced settings": "Hiển thị cài đặt nâng cao"
 }
