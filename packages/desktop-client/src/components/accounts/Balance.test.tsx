@@ -160,6 +160,53 @@ describe('SelectedBalance – normal transactions', () => {
     expect(selectedBalance?.textContent).toMatch(/Selected balance:\s*100/u);
     expect(selectedBalance?.textContent).not.toContain('10,160,100');
   });
+
+  test('marks selected totals approximate only when foreign accounts contribute amounts', () => {
+    const usd = {
+      ...generateAccount('USD savings'),
+      currency: 'USD',
+    } satisfies AccountEntity;
+    const vnd = {
+      ...generateAccount('VND cash'),
+      currency: 'VND',
+    } satisfies AccountEntity;
+    const selectedVndAmount = [{ account: vnd.id, amount: 10_000 }];
+    vi.mocked(useSheetValue)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(selectedVndAmount as never);
+    const { rerender } = render(
+      <TestProviders>
+        <SelectedBalance
+          selectedItems={new Set(['tx-vnd'])}
+          accounts={[usd, vnd]}
+        />
+      </TestProviders>,
+    );
+
+    const selectedBalance = screen.getByText('Selected balance:').parentElement;
+    expect(selectedBalance?.textContent).toMatch(
+      /Selected balance:\s*100\s*₫/u,
+    );
+    expect(selectedBalance?.textContent).not.toContain('~');
+
+    vi.mocked(useSheetValue)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce([
+        ...selectedVndAmount,
+        { account: usd.id, amount: 1_000 },
+      ] as never);
+
+    rerender(
+      <TestProviders>
+        <SelectedBalance
+          selectedItems={new Set(['tx-vnd'])}
+          accounts={[usd, vnd]}
+        />
+      </TestProviders>,
+    );
+
+    expect(selectedBalance?.textContent).toContain('~');
+  });
 });
 
 describe('SelectedBalance – preview (scheduled) transactions', () => {

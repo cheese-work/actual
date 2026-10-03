@@ -115,10 +115,17 @@ function AggregateDetailedBalance({
   }
 
   const mainCurrency = prefs.defaultCurrencyCode;
-  const isApproximate = accounts.some(
-    account =>
-      getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency,
+  const accountsById = new Map(
+    accounts.map(account => [account.id, account] as const),
   );
+  const isApproximate =
+    amounts?.some(({ accountId }) => {
+      const account = accountsById.get(accountId);
+      return (
+        account !== undefined &&
+        getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency
+      );
+    }) ?? false;
 
   return (
     <DetailedBalance
