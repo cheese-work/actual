@@ -68,6 +68,7 @@ export function ClosedSection({
           buckets={[{ group: null, accounts, failedCount: 0 }]}
           balanceBuckets={[]}
           aggregateBalances={{}}
+          isSearching={false}
           showSyncDot={false}
           isDragDisabled={isDragDisabled}
         />

@@ -44,6 +44,7 @@ type AccountGroupHeaderProps = {
   accounts: AccountEntity[];
   balanceAccounts: readonly AccountEntity[];
   aggregateBalances: Record<string, number | null>;
+  showDisplayAdjustment: boolean;
   failedCount: number;
   showSyncDot: boolean;
   isDropZoneActive: boolean;
@@ -55,6 +56,7 @@ export function AccountGroupHeader({
   accounts,
   balanceAccounts,
   aggregateBalances,
+  showDisplayAdjustment,
   failedCount,
   showSyncDot,
   isDropZoneActive,
@@ -184,6 +186,11 @@ export function AccountGroupHeader({
                   testId={`sidebar-account-group-${group.id}-balance`}
                   aggregateAccounts={balanceAccounts}
                   aggregateBalances={aggregateBalances}
+                  immediateChildAccountGroups={
+                    showDisplayAdjustment
+                      ? balanceAccounts.map(account => [account.id])
+                      : null
+                  }
                 />
               </>
             )}

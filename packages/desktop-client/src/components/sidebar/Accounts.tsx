@@ -112,6 +112,14 @@ export function Accounts() {
           balanceTestId="sidebar-all-accounts-balance"
           aggregateAccounts={aggregateAccounts}
           aggregateBalances={accountBalances}
+          immediateChildAccountGroups={[
+            ...(onBudgetAccounts.length > 0
+              ? [onBudgetAccounts.map(account => account.id)]
+              : []),
+            ...(offbudgetAccounts.length > 0
+              ? [offbudgetAccounts.map(account => account.id)]
+              : []),
+          ]}
         />
 
         {onBudgetAccounts.length > 0 && (
@@ -132,6 +140,9 @@ export function Accounts() {
                 : (onBudgetAccountsQuery.data ?? null)
             }
             aggregateBalances={accountBalances}
+            immediateChildAccountGroups={onBudgetAccounts.map(account => [
+              account.id,
+            ])}
           />
         )}
 
@@ -170,6 +181,9 @@ export function Accounts() {
                 : (offBudgetAccountsQuery.data ?? null)
             }
             aggregateBalances={accountBalances}
+            immediateChildAccountGroups={offbudgetAccounts.map(account => [
+              account.id,
+            ])}
           />
         )}
 

@@ -1,10 +1,14 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
+import { View } from '@actual-app/components/view';
 import { aggregateAccountAmountsInMainCurrency } from '@actual-app/core/shared/currency-aggregation';
-import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
+import {
+  getDisplayDecimalPlaces,
+  getEffectiveAccountCurrency,
+} from '@actual-app/core/shared/currency-setup';
 import type { AccountEntity } from '@actual-app/core/types/models';
 
 import { CellValueText } from '#components/spreadsheet/CellValue';
@@ -16,6 +20,7 @@ type AccountCurrencyBalanceProps = {
   balances: Record<string, number | null>;
   style?: CSSProperties;
   testId?: string;
+  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
 };
 
 export function AccountCurrencyBalance({
@@ -23,6 +28,7 @@ export function AccountCurrencyBalance({
   balances,
   style,
   testId,
+  immediateChildAccountGroups,
 }: AccountCurrencyBalanceProps) {
   const { t } = useTranslation();
   const format = useFormat();
@@ -39,6 +45,14 @@ export function AccountCurrencyBalance({
     amounts,
     accounts ?? [],
     prefs,
+    immediateChildAccountGroups != null && prefs.defaultCurrencyCode
+      ? {
+          displayDecimalPlaces: format.numberFormat.hideFraction
+            ? 0
+            : getDisplayDecimalPlaces(prefs.defaultCurrencyCode),
+          immediateChildAccountGroups,
+        }
+      : undefined,
   );
   const mainCurrency = prefs.defaultCurrencyCode;
 
@@ -75,15 +89,42 @@ export function AccountCurrencyBalance({
         getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency,
     ) ?? false;
 
+  const balanceTestId = testId ?? 'sidebar-account-currency-balance';
+
   return (
-    <CellValueText<'account', 'balance'>
-      name={testId ?? 'sidebar-account-currency-balance'}
-      value={result.amount}
-      type="financial"
-      style={{ textAlign: 'right', ...style }}
-      formatter={amount =>
-        `${isApproximate ? '~ ' : ''}${format.forCurrency(amount, mainCurrency)}`
-      }
-    />
+    <View style={{ alignItems: 'flex-end' }}>
+      <CellValueText<'account', 'balance'>
+        name={balanceTestId}
+        value={result.amount}
+        type="financial"
+        style={{ textAlign: 'right', ...style }}
+        formatter={amount =>
+          `${isApproximate ? '~ ' : ''}${format.forCurrency(amount, mainCurrency)}`
+        }
+      />
+      {result.presentationAdjustment && (
+        <View
+          data-testid={`${balanceTestId}-adjustment`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+        >
+          <Text style={{ fontSize: 10 }}>
+            <Trans>Rounding adjustment</Trans>
+          </Text>
+          <CellValueText<'account', 'balance'>
+            name={`${balanceTestId}-adjustment-value`}
+            value={result.presentationAdjustment.amount}
+            type="financial-with-sign"
+            style={{ fontSize: 10, textAlign: 'right' }}
+            formatter={amount =>
+              `${isApproximate ? '~ ' : ''}${format.forCurrency(
+                amount,
+                mainCurrency,
+                'financial-with-sign',
+              )}`
+            }
+          />
+        </View>
+      )}
+    </View>
   );
 }
