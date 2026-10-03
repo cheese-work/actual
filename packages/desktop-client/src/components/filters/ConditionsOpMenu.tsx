@@ -1,4 +1,5 @@
 import React from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -16,18 +17,19 @@ export function ConditionsOpMenu({
   onChange: (value: 'and' | 'or') => void;
   conditions: RuleConditionEntity[];
 }) {
+  const { t } = useTranslation();
   return conditions.length > 1 ? (
     <Text style={{ color: theme.pageText, marginTop: 11, marginRight: 5 }}>
       <FieldSelect
         style={{ display: 'inline-flex' }}
         fields={[
-          ['and', 'all'],
-          ['or', 'any'],
+          ['and', t('all')],
+          ['or', t('any')],
         ]}
         value={conditionsOp}
         onChange={onChange}
       />
-      of:
+      <Trans>of:</Trans>
     </Text>
   ) : (
     <View />

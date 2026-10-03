@@ -1020,7 +1020,10 @@ export function ImportTransactionsModal({
               }}
             >
               <Text style={{ maxWidth: 450, marginBottom: 15 }}>
-                <strong>Error:</strong> {error.message}
+                <strong>
+                  <Trans>Error:</Trans>
+                </strong>{' '}
+                {error.message}
               </Text>
               {error.parsed && (
                 <Button onPress={() => onNewFile()}>

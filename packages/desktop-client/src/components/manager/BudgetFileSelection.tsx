@@ -770,7 +770,7 @@ function UserAccessForFile({ fileId, currentUserId }: UserAccessForFileProps) {
                       color: theme.pageTextLight,
                     }}
                   >
-                    File shared with:
+                    <Trans>File shared with:</Trans>
                   </Text>
                   <View
                     style={{

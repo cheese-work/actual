@@ -1,7 +1,7 @@
 // @ts-strict-ignore
 import React, { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -143,7 +143,11 @@ export function Value<T>({
 
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return <ValueText style={valueStyle}>(empty)</ValueText>;
+      return (
+        <ValueText style={valueStyle}>
+          <Trans>(empty)</Trans>
+        </ValueText>
+      );
     } else if (value.length === 1) {
       return (
         <Text>

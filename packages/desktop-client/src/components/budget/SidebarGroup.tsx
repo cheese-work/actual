@@ -1,7 +1,7 @@
 // @ts-strict-ignore
 import React, { useRef } from 'react';
 import type { CSSProperties, RefCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
 import { SvgAdd, SvgExpandArrow } from '@actual-app/components/icons/v0';
@@ -147,7 +147,11 @@ export function SidebarGroup({
           minWidth: 0,
         }}
       >
-        {dragPreview && <Text style={{ fontWeight: 500 }}>Group: </Text>}
+        {dragPreview && (
+          <Text style={{ fontWeight: 500 }}>
+            <Trans>Group:</Trans>{' '}
+          </Text>
+        )}
         {group.name}
       </div>
       {!dragPreview && (
