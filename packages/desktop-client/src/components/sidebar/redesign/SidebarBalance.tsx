@@ -17,6 +17,7 @@ type SidebarBalanceProps<FieldName extends SheetFields<'account'>> = {
   approxCurrency?: string | null;
   aggregateAccounts?: readonly AccountEntity[] | null;
   aggregateBalances?: Record<string, number | null>;
+  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
 };
 
 export function SidebarBalance<FieldName extends SheetFields<'account'>>({
@@ -27,12 +28,14 @@ export function SidebarBalance<FieldName extends SheetFields<'account'>>({
   approxCurrency,
   aggregateAccounts,
   aggregateBalances,
+  immediateChildAccountGroups,
 }: SidebarBalanceProps<FieldName>) {
   if (aggregateAccounts !== undefined) {
     return (
       <AccountCurrencyBalance
         accounts={aggregateAccounts}
         balances={aggregateBalances ?? {}}
+        immediateChildAccountGroups={immediateChildAccountGroups}
         style={style}
         testId={testId}
       />

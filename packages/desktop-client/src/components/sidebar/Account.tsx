@@ -95,6 +95,7 @@ type AccountProps<FieldName extends SheetFields<'account'>> = {
   balanceTestId?: string;
   aggregateAccounts?: readonly AccountEntity[] | null;
   aggregateBalances?: Record<string, number | null>;
+  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
 };
 
 export function Account<FieldName extends SheetFields<'account'>>({
@@ -115,6 +116,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
   balanceTestId,
   aggregateAccounts,
   aggregateBalances,
+  immediateChildAccountGroups,
 }: AccountProps<FieldName>) {
   const isTestEnv = useIsTestEnv();
   const { t } = useTranslation();
@@ -163,6 +165,8 @@ export function Account<FieldName extends SheetFields<'account'>>({
         <AccountCurrencyBalance
           accounts={aggregateAccounts}
           balances={aggregateBalances ?? {}}
+          testId={balanceTestId}
+          immediateChildAccountGroups={immediateChildAccountGroups}
         />
       </View>
     );
@@ -299,7 +303,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
                 )
               }
               right={
-                balanceTestId ? (
+                aggregateAccounts === undefined && balanceTestId ? (
                   <View data-testid={balanceTestId}>{balanceCell}</View>
                 ) : (
                   balanceCell

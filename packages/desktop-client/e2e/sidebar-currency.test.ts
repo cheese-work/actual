@@ -7,6 +7,7 @@ import { ConfigurationPage } from './page-models/configuration-page';
 type TestWindow = Window & {
   __accountsRequestHeld: boolean;
   __releaseAccountsRequests: () => void;
+  $send: (method: string, args?: Record<string, unknown>) => Promise<unknown>;
   __TANSTACK_QUERY_CLIENT__: {
     getQueryState: (queryKey: string[]) =>
       | {
@@ -150,6 +151,86 @@ test.describe('sidebar aggregate query readiness', () => {
           page.getByTestId('sidebar-all-accounts-balance'),
         ).toContainText('0.00');
       }
+    } finally {
+      await page.close();
+    }
+  });
+});
+
+test.describe('sidebar display rounding adjustments', () => {
+  test('shows the adjustment at the matching subtotal in both layouts', async ({
+    browser,
+  }) => {
+    const page = await browser.newPage();
+    const configurationPage = new ConfigurationPage(page);
+
+    try {
+      await page.goto('/');
+      await configurationPage.startFresh();
+      await saveSyncedPrefs(page, {
+        defaultCurrencyCode: 'VND',
+        currencySetupFinalized: 'true',
+        'manualRate.USD.VND': '40',
+      });
+
+      const groupId = await page.evaluate(async () => {
+        const send = (window as TestWindow).$send;
+        const leftId = (await send('account-create', {
+          name: 'USD residual left',
+          balance: 0.01,
+          offBudget: true,
+          currency: 'USD',
+        })) as string;
+        const rightId = (await send('account-create', {
+          name: 'USD residual right',
+          balance: 0.01,
+          offBudget: true,
+          currency: 'USD',
+        })) as string;
+        const id = (await send('account-group-create', {
+          name: 'USD residual group',
+        })) as string;
+        await send('account-move', {
+          id: leftId,
+          targetId: null,
+          accountGroupId: id,
+        });
+        await send('account-move', {
+          id: rightId,
+          targetId: leftId,
+          accountGroupId: id,
+        });
+        return id;
+      });
+      await page.reload();
+
+      await saveSyncedPrefs(page, { 'flags.newSidebarUI': 'false' });
+      const legacyAdjustment = page.getByTestId(
+        'sidebar-off-budget-balance-adjustment',
+      );
+      const legacyAdjustmentValue = page.getByTestId(
+        'sidebar-off-budget-balance-adjustment-value',
+      );
+      await expect(legacyAdjustment).toContainText('Rounding adjustment');
+      await expect(legacyAdjustmentValue).toContainText('+');
+      await expect(legacyAdjustmentValue).toContainText('1');
+      await expect(
+        page.getByTestId('sidebar-account-group-' + groupId + '-balance'),
+      ).toHaveCount(0);
+
+      await saveSyncedPrefs(page, { 'flags.newSidebarUI': 'true' });
+      const groupAdjustment = page.getByTestId(
+        `sidebar-account-group-${groupId}-balance-adjustment`,
+      );
+      const groupAdjustmentValue = page.getByTestId(
+        `sidebar-account-group-${groupId}-balance-adjustment-value`,
+      );
+      await expect(groupAdjustment).toContainText('Rounding adjustment');
+      await expect(groupAdjustmentValue).toContainText('+');
+      await expect(groupAdjustmentValue).toContainText('1');
+      await expect(
+        page.getByTestId('sidebar-off-budget-balance-adjustment'),
+      ).toHaveCount(0);
     } finally {
       await page.close();
     }

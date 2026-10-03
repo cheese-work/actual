@@ -65,6 +65,35 @@ describe('AccountCurrencyBalance', () => {
     );
   });
 
+  it('renders the signed display adjustment after its immediate children', () => {
+    const left = makeAccount('USD left', 'USD');
+    const right = makeAccount('USD right', 'USD');
+    mocks.prefs = { ...mocks.prefs, 'manualRate.USD.VND': '40' };
+    mocks.balances = { [left.id]: 1, [right.id]: 1 };
+
+    render(
+      <TestProviders>
+        <AccountCurrencyBalance
+          accounts={[left, right]}
+          balances={mocks.balances}
+          immediateChildAccountGroups={[[left.id], [right.id]]}
+          testId="group-balance"
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('group-balance')).toHaveTextContent('~');
+    expect(screen.getByTestId('group-balance-adjustment')).toHaveTextContent(
+      'Rounding adjustment',
+    );
+    expect(screen.getByTestId('group-balance-adjustment')).toHaveTextContent(
+      '+1',
+    );
+    expect(screen.getByTestId('group-balance-adjustment')).toHaveTextContent(
+      '₫',
+    );
+  });
+
   it('keeps Main-only totals exact and treats a loaded empty list as zero', () => {
     const vnd = makeAccount('VND cash', 'VND');
     mocks.balances = { [vnd.id]: 10_000 };
