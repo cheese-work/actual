@@ -1,10 +1,28 @@
 import { afterEach, vi } from 'vitest';
 
-import { aggregateAccountAmountsInMainCurrency } from './currency-aggregation';
+import {
+  aggregateAccountAmountsInMainCurrency,
+  getPresentationAdjustment,
+  roundToDisplayPrecision,
+} from './currency-aggregation';
 import type { CurrencyAccount } from './currency-aggregation';
 import { automaticRateKey, manualRateKey } from './exchange-rates';
 import { MAX_SAFE_NUMBER } from './util';
 
+describe('display rounding adjustment', () => {
+  it('places the rounding residual after displayed children', () => {
+    const total = roundToDisplayPrecision(98, 0);
+    expect(total).toBe(100);
+    expect(
+      total === null ? null : getPresentationAdjustment(total, 0, [49, 49]),
+    ).toEqual({
+      label: 'Rounding adjustment',
+      amount: 100,
+      displayOnly: true,
+      placement: 'last-child',
+    });
+  });
+});
 const accounts = [
   { id: 'vnd', currency: null },
   { id: 'usd', currency: 'USD' },

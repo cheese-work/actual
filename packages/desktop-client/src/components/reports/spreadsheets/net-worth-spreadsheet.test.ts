@@ -3,6 +3,7 @@ import {
   initServer,
 } from '@actual-app/core/platform/client/connection';
 import type { AccountEntity } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import { enUS } from 'date-fns/locale';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,10 +33,15 @@ const accounts = [
   createAccount('savings', 'Savings'),
 ] satisfies AccountEntity[];
 
-function createAccount(id: string, name: string): AccountEntity {
+function createAccount(
+  id: string,
+  name: string,
+  currency: string | null = null,
+): AccountEntity {
   return {
     id,
     name,
+    currency,
     offbudget: 0,
     closed: 0,
     sort_order: 0,
@@ -57,10 +63,11 @@ function createAccount(id: string, name: string): AccountEntity {
   };
 }
 
-async function runReport({
+async function runReportResult({
   accounts,
   accountQueryResults,
   linkedTransfers = [],
+  prefs = { defaultCurrencyCode: 'USD' },
   start = '2026-07',
   end = '2026-08',
   interval = 'Monthly',
@@ -69,6 +76,7 @@ async function runReport({
   accounts: AccountEntity[];
   accountQueryResults: AccountQueryResult[];
   linkedTransfers?: LinkedTransfer[];
+  prefs?: Readonly<SyncedPrefs>;
   start?: string;
   end?: string;
   interval?: string;
@@ -121,6 +129,8 @@ async function runReport({
     interval,
     '0',
     value => String(value),
+    undefined,
+    prefs,
   );
 
   // The net worth factory does not use its spreadsheet dependency.
@@ -130,6 +140,16 @@ async function runReport({
 
   if (!report) {
     throw new Error('Spreadsheet did not produce report data');
+  }
+  return report;
+}
+
+async function runReport(
+  input: Parameters<typeof runReportResult>[0],
+): Promise<Extract<SpreadsheetData, { status: 'complete' }>> {
+  const report = await runReportResult(input);
+  if (report.status !== 'complete') {
+    throw new Error('Net worth report was unavailable');
   }
   return report;
 }
@@ -193,6 +213,154 @@ describe('net worth transfers', () => {
     expect(report.graphData.data.map(point => point.y)).toEqual([
       100_000, 100_000,
     ]);
+  });
+
+  it('converts opening and interval balances before calculating totals', async () => {
+    const report = await runReport({
+      accounts: [
+        createAccount('usd', 'US dollars', 'USD'),
+        createAccount('vnd', 'Vietnamese dong', 'VND'),
+      ],
+      accountQueryResults: [
+        100_000,
+        [{ date: '2026-07', amount: -20_000 }],
+        -50_000_000,
+        [{ date: '2026-07', amount: 25_000_000 }],
+      ],
+      prefs: {
+        defaultCurrencyCode: 'EUR',
+        'manualRate.USD.EUR': '0.8',
+        'manualRate.VND.EUR': '0.00004',
+      },
+    });
+
+    expect(report.graphData.data.map(point => point.y)).toEqual([
+      63_000, 63_000,
+    ]);
+    expect(report.graphData.data[0]).toMatchObject({
+      assets: '64000',
+      debt: '-1000',
+      usd: 64_000,
+      vnd: -1_000,
+    });
+    expect(report.netWorth).toBe(63_000);
+    expect(report.graphData.data[0].change).toBe('-15000');
+    expect(report.totalChange).toBe(0);
+  });
+
+  it('does not align transfers across different account currencies', async () => {
+    const report = await runReport({
+      accounts: [
+        createAccount('checking', 'Checking', 'USD'),
+        createAccount('savings', 'Savings', 'EUR'),
+      ],
+      accountQueryResults: [
+        100_000,
+        [{ date: '2026-07', amount: -10_000 }],
+        0,
+        [{ date: '2026-08', amount: 10_000 }],
+      ],
+      linkedTransfers: [
+        {
+          id: 'checking-transfer',
+          account: 'checking',
+          amount: -10_000,
+          date: '2026-07-31',
+          transfer_id: 'savings-transfer',
+        },
+        {
+          id: 'savings-transfer',
+          account: 'savings',
+          amount: 10_000,
+          date: '2026-08-01',
+          transfer_id: 'checking-transfer',
+        },
+      ],
+      prefs: {
+        defaultCurrencyCode: 'USD',
+        'manualRate.EUR.USD': '1',
+      },
+    });
+
+    expect(report.graphData.data.map(point => point.y)).toEqual([
+      90_000, 100_000,
+    ]);
+  });
+
+  it('uses one cached-rate valuation time for every account and interval leaf', async () => {
+    const now = 1_800_000_000_000;
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    await runReport({
+      accounts: [
+        createAccount('checking', 'Checking', 'USD'),
+        createAccount('savings', 'Savings', 'USD'),
+      ],
+      accountQueryResults: [
+        100_000,
+        [{ date: '2026-07', amount: -10_000 }],
+        20_000,
+        [{ date: '2026-08', amount: 10_000 }],
+      ],
+      prefs: {
+        defaultCurrencyCode: 'EUR',
+        'rateMode.USD': 'auto',
+        'autoRate.USD.EUR': JSON.stringify({ rate: '0.8', fetchedAt: now }),
+      },
+    });
+
+    expect(dateNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps unavailable distinct from a completed empty report', async () => {
+    const missingMain = await runReportResult({
+      accounts: [],
+      accountQueryResults: [],
+      prefs: {},
+    });
+    expect(missingMain).toEqual({ status: 'unavailable' });
+
+    const empty = await runReport({
+      accounts: [],
+      accountQueryResults: [],
+      prefs: { defaultCurrencyCode: 'USD' },
+    });
+    expect(empty.netWorth).toBe(0);
+    expect(empty.graphData.data.map(point => point.y)).toEqual([0, 0]);
+  });
+
+  it('does not treat placeholder accounts as a completed empty report', async () => {
+    let report: SpreadsheetData | undefined;
+    const spreadsheet = createSpreadsheet(
+      '2026-07',
+      '2026-08',
+      [],
+      [],
+      'and',
+      enUS,
+      'Monthly',
+      '0',
+      value => String(value),
+      undefined,
+      { defaultCurrencyCode: 'USD' },
+      false,
+    );
+
+    await spreadsheet(undefined as never, data => {
+      report = data;
+    });
+
+    expect(report).toBeUndefined();
+  });
+
+  it('suppresses all report values when an included account lacks a rate', async () => {
+    const report = await runReportResult({
+      accounts: [createAccount('foreign', 'Foreign', 'VND')],
+      accountQueryResults: [0, []],
+      prefs: { defaultCurrencyCode: 'USD' },
+    });
+
+    expect(report).toEqual({ status: 'unavailable' });
   });
 
   it('preserves a real expense as a net worth loss', async () => {

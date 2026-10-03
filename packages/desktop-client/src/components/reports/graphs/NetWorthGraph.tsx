@@ -6,6 +6,12 @@ import { AlignedText } from '@actual-app/components/aligned-text';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
 import type { CSSProperties } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
+import {
+  getPresentationAdjustment,
+  roundToDisplayPrecision,
+} from '@actual-app/core/shared/currency-aggregation';
+import { getDisplayDecimalPlaces } from '@actual-app/core/shared/currency-setup';
+import { getCustomUnits } from '@actual-app/core/shared/exchange-rates';
 import { css } from '@emotion/css';
 import { getDay, parse } from 'date-fns';
 import {
@@ -30,6 +36,7 @@ import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
 import type { UseFormatResult } from '#hooks/useFormat';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 import { computePadding } from './util/computePadding';
 
@@ -104,6 +111,8 @@ type StackedTooltipProps = TooltipContentProps & {
   accounts: Array<{ id: string; name: string }>;
   hoveredAccountId: string | null;
   format: UseFormatResult;
+  currencyCode: string;
+  displayDecimalPlaces: number;
 };
 
 function StackedTooltip({
@@ -113,13 +122,20 @@ function StackedTooltip({
   accounts,
   hoveredAccountId,
   format,
+  currencyCode,
+  displayDecimalPlaces,
 }: StackedTooltipProps) {
   if (active && payload && payload.length) {
-    // Calculate total from payload (visible accounts)
-    const total = payload.reduce(
-      (acc: number, p) => acc + (Number(p.value) || 0),
-      0,
-    );
+    const total = Number(payload[0].payload.y);
+    const roundedTotal = roundToDisplayPrecision(total, displayDecimalPlaces);
+    const presentationAdjustment =
+      roundedTotal === null
+        ? undefined
+        : getPresentationAdjustment(
+            roundedTotal,
+            displayDecimalPlaces,
+            payload.map(entry => Number(entry.value)),
+          );
     const sortedPayload = [...payload].sort((a, b) => {
       const indexA = sortedAccounts.findIndex(acc => acc.id === a.dataKey);
       const indexB = sortedAccounts.findIndex(acc => acc.id === b.dataKey);
@@ -187,7 +203,7 @@ function StackedTooltip({
                   <td style={{ textAlign: 'right' }}>
                     <span style={{ color: theme.pageText }}>
                       <FinancialText>
-                        {format(value, 'financial')}
+                        {format.forCurrency(value, currencyCode, 'financial')}
                       </FinancialText>
                     </span>
                   </td>
@@ -201,6 +217,23 @@ function StackedTooltip({
                 </tr>
               );
             })}
+            {presentationAdjustment && (
+              <tr>
+                <td style={{ textAlign: 'left', paddingLeft: 15 }}>
+                  <Trans>{presentationAdjustment.label}</Trans>
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <FinancialText>
+                    {format.forCurrency(
+                      presentationAdjustment.amount,
+                      currencyCode,
+                      'financial',
+                    )}
+                  </FinancialText>
+                </td>
+                {showPercentage && <td />}
+              </tr>
+            )}
             <tr
               style={{
                 fontWeight: 'bold',
@@ -211,7 +244,9 @@ function StackedTooltip({
                 <Trans>Total</Trans>
               </td>
               <td style={{ textAlign: 'right', paddingTop: 5 }}>
-                <FinancialText>{format(total, 'financial')}</FinancialText>
+                <FinancialText>
+                  {format.forCurrency(total, currencyCode, 'financial')}
+                </FinancialText>
               </td>
               {showPercentage && (
                 <td style={{ textAlign: 'right', paddingTop: 5 }}>100.0%</td>
@@ -252,6 +287,15 @@ export function NetWorthGraph({
   const privacyMode = usePrivacyMode();
   const id = useId();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const currencyCode = prefs.defaultCurrencyCode ?? '';
+  const mainCurrencyCustomUnit = getCustomUnits(prefs).find(
+    unit => unit.code === currencyCode,
+  );
+  const displayDecimalPlaces = format.numberFormat.hideFraction
+    ? 0
+    : (mainCurrencyCustomUnit?.decimals ??
+      (currencyCode ? getDisplayDecimalPlaces(currencyCode) : 0));
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const animationProps = useRechartsAnimation({ animationDuration: 1000 });
   const [isTooltipActive, setIsTooltipActive] = useState(false);
@@ -267,7 +311,11 @@ export function NetWorthGraph({
   const tickFormatter = (tick: number) => {
     const res = privacyMode
       ? '...'
-      : `${format(Math.round(tick), 'financial-no-decimals')}`;
+      : format.forCurrency(
+          Math.round(tick),
+          currencyCode,
+          'financial-no-decimals',
+        );
 
     return res;
   };
@@ -416,6 +464,8 @@ export function NetWorthGraph({
                       accounts={accounts}
                       hoveredAccountId={hoveredAccountId}
                       format={format}
+                      currencyCode={currencyCode}
+                      displayDecimalPlaces={displayDecimalPlaces}
                     />
                   )}
                   isAnimationActive={false}
