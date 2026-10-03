@@ -27,6 +27,7 @@ import { useFormat } from '#hooks/useFormat';
 import { useSelectedItems } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
+import { withInlineTransactionSplits } from '#queries';
 import type { Binding } from '#spreadsheet';
 
 import { ApproxMain } from './ApproxMain';
@@ -405,13 +406,13 @@ function AggregateMoreBalances({
   const { t } = useTranslation();
   const cleared = useSheetValue<'balance', `account-amounts-${string}`>({
     name: `${balanceQuery.name}-cleared-amounts` as `account-amounts-${string}`,
-    query: balanceQuery.query
+    query: withInlineTransactionSplits(balanceQuery.query)
       .filter({ cleared: true })
       .select(['account', 'amount']),
   });
   const uncleared = useSheetValue<'balance', `account-amounts-${string}`>({
     name: `${balanceQuery.name}-uncleared-amounts` as `account-amounts-${string}`,
-    query: balanceQuery.query
+    query: withInlineTransactionSplits(balanceQuery.query)
       .filter({ cleared: false })
       .select(['account', 'amount']),
   });
@@ -454,7 +455,10 @@ function AggregateBalanceValue({
 }) {
   const accountAmounts = useSheetValue<'balance', `account-amounts-${string}`>({
     name: `${balanceQuery.name}-amounts` as `account-amounts-${string}`,
-    query: accountAmountsQuery.select(['account', 'amount']),
+    query: withInlineTransactionSplits(accountAmountsQuery).select([
+      'account',
+      'amount',
+    ]),
   });
 
   return (
@@ -497,7 +501,7 @@ export function Balances({
     >
       <Button
         ref={buttonRef}
-        data-testid="account-balance"
+        data-testid={!aggregateAccounts ? 'account-balance' : undefined}
         variant="bare"
         onPress={onToggleExtraBalances}
         style={{

@@ -1091,7 +1091,11 @@ class AccountInternal extends PureComponent<
 
     if (isMultiAccountView(this.props.accountId)) {
       const { data: amounts }: { data: { account: string; amount: number }[] } =
-        await aqlQuery(this.paged.query.select(['account', 'amount']));
+        await aqlQuery(
+          queries
+            .withInlineTransactionSplits(this.paged.query)
+            .select(['account', 'amount']),
+        );
       return amounts.map(({ account, amount }) => ({
         accountId: account,
         amount,
