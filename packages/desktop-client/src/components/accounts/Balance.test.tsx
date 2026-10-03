@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { generateAccount } from '@actual-app/core/mocks';
+import { q } from '@actual-app/core/shared/query';
 import type {
   AccountEntity,
   ScheduleEntity,
@@ -12,7 +13,7 @@ import { useSelectedItems } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { TestProviders } from '#mocks';
 
-import { SelectedBalance } from './Balance';
+import { Balances, SelectedBalance } from './Balance';
 
 vi.mock('#hooks/useSelected', () => ({
   useSelectedItems: vi.fn(),
@@ -233,5 +234,77 @@ describe('SelectedBalance – preview (scheduled) transactions', () => {
 
     expect(screen.getByText('Selected balance:')).toBeInTheDocument();
     expect(screen.getByText(/-50/)).toBeInTheDocument();
+  });
+});
+
+describe('Balances – aggregate account totals', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prefs.defaultCurrencyCode = '';
+    vi.mocked(useCachedSchedules).mockReturnValue(mockedSchedules([]));
+    vi.mocked(useSelectedItems).mockReturnValue(new Set());
+    vi.mocked(useSheetValue).mockReturnValue([] as never);
+  });
+
+  test('keeps inline split rows and one selector when Main is unavailable', () => {
+    const account = {
+      ...generateAccount('USD savings'),
+      currency: 'USD',
+    } satisfies AccountEntity;
+    const groupedQuery = q('transactions').options({ splits: 'grouped' });
+    const props = {
+      balanceQuery: {
+        name: 'balance-query-all' as const,
+        query: groupedQuery,
+      },
+      accountAmountsQuery: groupedQuery,
+      aggregateAccounts: [account],
+      showExtraBalances: true,
+      onToggleExtraBalances: vi.fn(),
+      isFiltered: false,
+    };
+
+    render(
+      <TestProviders>
+        <Balances {...props} />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('account-balance')).toHaveTextContent('N/A');
+    expect(screen.getAllByTestId('account-balance')).toHaveLength(1);
+    expect(
+      vi
+        .mocked(useSheetValue)
+        .mock.calls.map(([binding]) =>
+          typeof binding === 'string'
+            ? undefined
+            : binding.query?.state.tableOptions.splits,
+        ),
+    ).toEqual(['inline', 'inline', 'inline']);
+  });
+
+  test('shows loaded-empty aggregate amounts as zero with a valid Main currency', () => {
+    prefs.defaultCurrencyCode = 'VND';
+    const account = {
+      ...generateAccount('VND cash'),
+      currency: 'VND',
+    } satisfies AccountEntity;
+    const groupedQuery = q('transactions').options({ splits: 'grouped' });
+
+    render(
+      <TestProviders>
+        <Balances
+          balanceQuery={{ name: 'balance-query-all', query: groupedQuery }}
+          accountAmountsQuery={groupedQuery}
+          aggregateAccounts={[account]}
+          showExtraBalances={false}
+          onToggleExtraBalances={vi.fn()}
+          isFiltered={false}
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('account-balance')).toHaveTextContent('0');
+    expect(screen.getAllByTestId('account-balance')).toHaveLength(1);
   });
 });
