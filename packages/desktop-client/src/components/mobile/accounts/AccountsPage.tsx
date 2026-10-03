@@ -31,14 +31,16 @@ import { makeAmountFullStyle } from '#components/budget/util';
 import { MOBILE_NAV_HEIGHT } from '#components/mobile/MobileNavTabs';
 import { PullToRefresh } from '#components/mobile/PullToRefresh';
 import { MobilePageHeader, Page } from '#components/Page';
+import { AccountCurrencyBalance } from '#components/sidebar/AccountCurrencyBalance';
 import { CellValue, CellValueText } from '#components/spreadsheet/CellValue';
+import { useAccountBalances } from '#hooks/useAccountBalances';
 import { useAccounts } from '#hooks/useAccounts';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { replaceModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
-import type { Binding, SheetFields } from '#spreadsheet';
+import type { Binding } from '#spreadsheet';
 import * as bindings from '#spreadsheet/bindings';
 
 const ROW_HEIGHT = 60;
@@ -46,23 +48,25 @@ const ROW_HEIGHT = 60;
 // Virtual account id for the all-accounts transaction list (/accounts/all)
 export const ALL_ACCOUNTS_ID = 'all';
 
-type AccountHeaderProps<SheetFieldName extends SheetFields<'account'>> = {
+type AccountHeaderProps = {
   id: string;
   name: string;
-  amount: Binding<'account', SheetFieldName>;
+  accounts: AccountEntity[];
+  balances: Record<string, number | null>;
   style?: CSSProperties;
   showCheveronDown?: boolean;
   onPress?: () => void;
 };
 
-function AccountHeader<SheetFieldName extends SheetFields<'account'>>({
+function AccountHeader({
   id,
   name,
-  amount,
+  accounts,
+  balances,
   style = {},
   showCheveronDown = false,
   onPress,
-}: AccountHeaderProps<SheetFieldName>) {
+}: AccountHeaderProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -110,14 +114,13 @@ function AccountHeader<SheetFieldName extends SheetFields<'account'>>({
           height={styles.text.fontSize}
         />
       </View>
-      <CellValue binding={amount} type="financial">
-        {props => (
-          <CellValueText<'account', SheetFieldName>
-            {...props}
-            style={{ ...styles.text }}
-          />
-        )}
-      </CellValue>
+      <AccountCurrencyBalance
+        accounts={accounts}
+        balances={balances}
+        testId={`mobile-account-total-${id}`}
+        privacyOnMobile
+        style={{ ...styles.text, textAlign: 'right' }}
+      />
     </Button>
   );
 }
@@ -288,13 +291,10 @@ function EmptyMessage({ onAddAccount }: { onAddAccount: () => void }) {
 
 type AllAccountListProps = {
   accounts: AccountEntity[];
+  isLoading: boolean;
   getAccountBalance: (
     accountId: AccountEntity['id'],
   ) => Binding<'account', 'balance'>;
-  getAllAccountsBalance: () => Binding<'account', 'accounts-balance'>;
-  getOnBudgetBalance: () => Binding<'account', 'onbudget-accounts-balance'>;
-  getOffBudgetBalance: () => Binding<'account', 'offbudget-accounts-balance'>;
-  getClosedAccountsBalance: () => Binding<'account', 'closed-accounts-balance'>;
   onAddAccount: () => void;
   onOpenAccount: (account: AccountEntity) => void;
   onSync: () => Promise<void>;
@@ -302,11 +302,8 @@ type AllAccountListProps = {
 
 function AllAccountList({
   accounts,
+  isLoading,
   getAccountBalance,
-  getAllAccountsBalance,
-  getOnBudgetBalance,
-  getOffBudgetBalance,
-  getClosedAccountsBalance,
   onAddAccount,
   onOpenAccount,
   onSync,
@@ -319,6 +316,9 @@ function AllAccountList({
     account => account.offbudget === 1 && account.closed === 0,
   );
   const closedAccounts = accounts.filter(account => account.closed === 1);
+  const accountBalances = useAccountBalances(
+    accounts.map(account => account.id),
+  );
 
   const closedAccountsRef = useRef<HTMLDivElement | null>(null);
   const [showClosedAccounts, setShowClosedAccountsPref] = useLocalPref(
@@ -358,7 +358,15 @@ function AllAccountList({
       }
       padding={0}
     >
-      {accounts.length === 0 ? (
+      {isLoading ? (
+        <Text
+          role="status"
+          data-testid="mobile-accounts-loading"
+          style={{ padding: 24, textAlign: 'center' }}
+        >
+          {t('Loading...')}
+        </Text>
+      ) : accounts.length === 0 ? (
         <EmptyMessage onAddAccount={onAddAccount} />
       ) : (
         <PullToRefresh onRefresh={onSync}>
@@ -369,13 +377,15 @@ function AllAccountList({
             <AccountHeader
               id={ALL_ACCOUNTS_ID}
               name={t('All accounts')}
-              amount={getAllAccountsBalance()}
+              accounts={accounts.filter(account => account.closed === 0)}
+              balances={accountBalances}
             />
             {onBudgetAccounts.length > 0 && (
               <AccountHeader
                 id="onbudget"
                 name={t('On budget')}
-                amount={getOnBudgetBalance()}
+                accounts={onBudgetAccounts}
+                balances={accountBalances}
               />
             )}
             <AccountList
@@ -388,7 +398,8 @@ function AllAccountList({
               <AccountHeader
                 id="offbudget"
                 name={t('Off budget')}
-                amount={getOffBudgetBalance()}
+                accounts={offBudgetAccounts}
+                balances={accountBalances}
               />
             )}
             <AccountList
@@ -402,7 +413,8 @@ function AllAccountList({
                 id="closed"
                 name={t('Closed')}
                 onPress={onToggleClosedAccounts}
-                amount={getClosedAccountsBalance()}
+                accounts={closedAccounts}
+                balances={accountBalances}
                 style={{ marginTop: 30 }}
                 showCheveronDown={showClosedAccounts}
               />
@@ -547,7 +559,7 @@ AccountList.displayName = 'AccountList';
 export function AccountsPage() {
   const location = useLocation();
   const dispatch = useDispatch();
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = [], isPending, isPlaceholderData } = useAccounts();
   const [_numberFormat] = useSyncedPref('numberFormat');
   const numberFormat = _numberFormat || 'comma-dot';
   const [hideFraction] = useSyncedPref('hideFraction');
@@ -590,11 +602,8 @@ export function AccountsPage() {
         // format changes
         key={numberFormat + hideFraction}
         accounts={accounts}
+        isLoading={isPending || isPlaceholderData}
         getAccountBalance={bindings.accountBalance}
-        getAllAccountsBalance={bindings.allAccountBalance}
-        getOnBudgetBalance={bindings.onBudgetAccountBalance}
-        getOffBudgetBalance={bindings.offBudgetAccountBalance}
-        getClosedAccountsBalance={bindings.closedAccountBalance}
         onAddAccount={onAddAccount}
         onOpenAccount={onOpenAccount}
         onSync={onSync}

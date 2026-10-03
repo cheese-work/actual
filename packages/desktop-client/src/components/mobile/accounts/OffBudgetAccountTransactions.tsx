@@ -52,7 +52,10 @@ function TransactionListWithPreviews() {
   } = useTransactions({
     query: transactionsQuery,
   });
-  const { data: offBudgetAccounts = [] } = useOffBudgetAccounts();
+  const {
+    data: offBudgetAccounts = [],
+    isPlaceholderData: isOffBudgetAccountsPlaceholder,
+  } = useOffBudgetAccounts();
   const offBudgetAccountsFilter = useCallback(
     (schedule: ScheduleEntity) =>
       offBudgetAccounts.some(a => a.id === schedule._account),
@@ -145,6 +148,9 @@ function TransactionListWithPreviews() {
       }
       transactions={transactionsToDisplay}
       balance={balanceBindings.balance}
+      aggregateAccounts={
+        isOffBudgetAccountsPlaceholder ? null : offBudgetAccounts
+      }
       isLoadingMore={isLoadingMoreTransactions}
       onLoadMore={fetchMoreTransactions}
       searchPlaceholder={t('Search Off Budget Accounts')}

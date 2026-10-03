@@ -86,6 +86,10 @@ export type Spreadsheets = {
     [key: `balance-query-${string}`]: number;
     [key: `selected-transactions-${string}`]: Array<{ id: string }>;
     [key: `selected-balance-${string}`]: number;
+    [key: `account-amounts-${string}`]: Array<{
+      account: string;
+      amount: number;
+    }>;
   };
 };
 

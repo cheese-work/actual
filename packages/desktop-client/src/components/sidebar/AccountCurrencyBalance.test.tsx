@@ -166,6 +166,37 @@ describe('AccountCurrencyBalance', () => {
     expect(screen.getByTestId('group-balance')).toHaveTextContent('0');
   });
 
+  it('shows pending account values as loading instead of a zero total', () => {
+    const vnd = makeAccount('VND cash', 'VND');
+
+    const result = render(
+      <TestProviders>
+        <AccountCurrencyBalance
+          accounts={[vnd]}
+          balances={{}}
+          testId="group-balance"
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('group-balance')).toHaveTextContent('Loading...');
+
+    result.rerender(
+      <TestProviders>
+        <AccountCurrencyBalance
+          accounts={[vnd]}
+          balances={{ [vnd.id]: 0 }}
+          testId="group-balance"
+        />
+      </TestProviders>,
+    );
+
+    expect(screen.getByTestId('group-balance')).toHaveTextContent('0');
+    expect(screen.getByTestId('group-balance')).not.toHaveTextContent(
+      'Loading...',
+    );
+  });
+
   it('keeps totals unavailable when no Main currency is configured', () => {
     const usd = makeAccount('USD savings', 'USD');
     mocks.prefs = { ...mocks.prefs, defaultCurrencyCode: '' };
