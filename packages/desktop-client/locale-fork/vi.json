@@ -73,5 +73,10 @@
   "<0><0>Custom Report:</0></0> <2>{{name}}</2>": "<0><0>Báo cáo tùy chỉnh:</0></0> <2>{{name}}</2>",
   "Average per month": "Trung bình tháng",
   "Average per transaction": "Trung bình giao dịch",
-  "Back": "Trở về"
+  "Back": "Trở về",
+  "<0>Language</0> is the display language of all text. Please note that no warranty is provided for the accuracy or completeness of non-English translations. If you encounter a translation error, feel free to make a suggestion on <3>Weblate</3>.": "<0>Ngôn ngữ</0> là ngôn ngữ hiển thị của toàn bộ văn bản. Xin lưu ý rằng bản dịch không phải tiếng Anh không được bảo đảm về độ chính xác hoặc tính đầy đủ. Nếu gặp lỗi dịch, bạn có thể gửi đề xuất trên <3>Weblate</3>.",
+  "<0>Language</0> support is not available. Please follow the instructions <3>here</3> to add missing translation files.": "<0>Chưa có hỗ trợ ngôn ngữ</0>. Vui lòng làm theo hướng dẫn <3>tại đây</3> để thêm các tệp bản dịch còn thiếu.",
+  "No languages available": "Không có ngôn ngữ nào khả dụng",
+  "Select language": "Chọn ngôn ngữ",
+  "System default": "Mặc định của hệ thống"
 }
