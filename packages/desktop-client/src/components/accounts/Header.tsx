@@ -26,6 +26,8 @@ import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { Tooltip } from '@actual-app/components/tooltip';
 import { View } from '@actual-app/components/view';
+import type { AccountAmount } from '@actual-app/core/shared/currency-aggregation';
+import type { Query } from '@actual-app/core/shared/query';
 import { tsToRelativeTime } from '@actual-app/core/shared/util';
 import type {
   AccountEntity,
@@ -72,9 +74,11 @@ type AccountHeaderProps = {
   showReconciled: boolean;
   showEmptyMessage: boolean;
   balanceQuery: ComponentProps<typeof ReconcilingMessage>['balanceQuery'];
+  accountAmountsQuery: Query;
+  aggregateAccounts?: AccountEntity[];
   reconcileAmount?: number | null;
   isFiltered: boolean;
-  filteredAmount?: number | null;
+  filteredAmount?: number | AccountAmount[] | null;
   isSorted: boolean;
   search: string;
   filterConditions: RuleConditionEntity[];
@@ -144,6 +148,8 @@ export function AccountHeader({
   showReconciled,
   showEmptyMessage,
   balanceQuery,
+  accountAmountsQuery,
+  aggregateAccounts,
   reconcileAmount,
   isFiltered,
   filteredAmount,
@@ -312,6 +318,8 @@ export function AccountHeader({
 
             <Balances
               balanceQuery={balanceQuery}
+              accountAmountsQuery={accountAmountsQuery}
+              aggregateAccounts={aggregateAccounts}
               showExtraBalances={showExtraBalances}
               onToggleExtraBalances={onToggleExtraBalances}
               account={account}
