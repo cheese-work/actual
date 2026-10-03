@@ -3,8 +3,10 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
+import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { aggregateAccountAmountsInMainCurrency } from '@actual-app/core/shared/currency-aggregation';
+import type { AccountAmount } from '@actual-app/core/shared/currency-aggregation';
 import {
   getDisplayDecimalPlaces,
   getEffectiveAccountCurrency,
@@ -18,29 +20,35 @@ import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 type AccountCurrencyBalanceProps = {
   accounts: readonly AccountEntity[] | null;
   balances: Record<string, number | null>;
+  amounts?: readonly AccountAmount[] | null;
   style?: CSSProperties;
   testId?: string;
   immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+  highlightSign?: boolean;
 };
 
 export function AccountCurrencyBalance({
   accounts,
   balances,
+  amounts: amountRows,
   style,
   testId,
   immediateChildAccountGroups,
+  highlightSign = false,
 }: AccountCurrencyBalanceProps) {
   const { t } = useTranslation();
   const format = useFormat();
   const [prefs] = useSyncedPrefs();
   const amounts =
-    accounts === null ||
-    accounts.some(account => typeof balances[account.id] !== 'number')
-      ? null
-      : accounts.map(account => ({
-          accountId: account.id,
-          amount: balances[account.id] as number,
-        }));
+    amountRows !== undefined
+      ? amountRows
+      : accounts === null ||
+          accounts.some(account => typeof balances[account.id] !== 'number')
+        ? null
+        : accounts.map(account => ({
+            accountId: account.id,
+            amount: balances[account.id] as number,
+          }));
   const result = aggregateAccountAmountsInMainCurrency(
     amounts,
     accounts ?? [],
@@ -88,6 +96,12 @@ export function AccountCurrencyBalance({
       account =>
         getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency,
     ) ?? false;
+  const balanceColor =
+    result.amount < 0
+      ? theme.numberNegative
+      : result.amount > 0
+        ? theme.numberPositive
+        : theme.pageTextSubdued;
 
   const balanceTestId = testId ?? 'sidebar-account-currency-balance';
 
@@ -97,7 +111,11 @@ export function AccountCurrencyBalance({
         name={balanceTestId}
         value={result.amount}
         type="financial"
-        style={{ textAlign: 'right', ...style }}
+        style={{
+          textAlign: 'right',
+          ...(highlightSign && { color: balanceColor }),
+          ...style,
+        }}
         formatter={amount =>
           `${isApproximate ? '~ ' : ''}${format.forCurrency(amount, mainCurrency)}`
         }
