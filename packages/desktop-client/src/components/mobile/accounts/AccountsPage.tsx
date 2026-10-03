@@ -118,6 +118,7 @@ function AccountHeader({
         accounts={accounts}
         balances={balances}
         testId={`mobile-account-total-${id}`}
+        privacyOnMobile
         style={{ ...styles.text, textAlign: 'right' }}
       />
     </Button>
@@ -290,6 +291,7 @@ function EmptyMessage({ onAddAccount }: { onAddAccount: () => void }) {
 
 type AllAccountListProps = {
   accounts: AccountEntity[];
+  isLoading: boolean;
   getAccountBalance: (
     accountId: AccountEntity['id'],
   ) => Binding<'account', 'balance'>;
@@ -300,6 +302,7 @@ type AllAccountListProps = {
 
 function AllAccountList({
   accounts,
+  isLoading,
   getAccountBalance,
   onAddAccount,
   onOpenAccount,
@@ -355,7 +358,15 @@ function AllAccountList({
       }
       padding={0}
     >
-      {accounts.length === 0 ? (
+      {isLoading ? (
+        <Text
+          role="status"
+          data-testid="mobile-accounts-loading"
+          style={{ padding: 24, textAlign: 'center' }}
+        >
+          {t('Loading...')}
+        </Text>
+      ) : accounts.length === 0 ? (
         <EmptyMessage onAddAccount={onAddAccount} />
       ) : (
         <PullToRefresh onRefresh={onSync}>
@@ -548,7 +559,7 @@ AccountList.displayName = 'AccountList';
 export function AccountsPage() {
   const location = useLocation();
   const dispatch = useDispatch();
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = [], isPending, isPlaceholderData } = useAccounts();
   const [_numberFormat] = useSyncedPref('numberFormat');
   const numberFormat = _numberFormat || 'comma-dot';
   const [hideFraction] = useSyncedPref('hideFraction');
@@ -591,6 +602,7 @@ export function AccountsPage() {
         // format changes
         key={numberFormat + hideFraction}
         accounts={accounts}
+        isLoading={isPending || isPlaceholderData}
         getAccountBalance={bindings.accountBalance}
         onAddAccount={onAddAccount}
         onOpenAccount={onOpenAccount}

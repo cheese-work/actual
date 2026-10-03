@@ -113,7 +113,7 @@ test.describe('Onboarding', () => {
     const accountPage = await navigation.goToAccountPage('All accounts');
     await expect(accountPage.accountName).toBeVisible();
     await expect(accountPage.accountName).toHaveText('All Accounts');
-    await expect(accountPage.accountBalance).toHaveText('0.00');
+    await expect(accountPage.accountBalance).toHaveText('N/A');
   });
 
   test('navigates back to start page by clicking on "no server" in an empty budget file', async () => {

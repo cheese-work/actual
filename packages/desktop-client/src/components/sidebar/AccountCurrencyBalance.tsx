@@ -158,6 +158,8 @@ type AccountCurrencyBalanceProps =
       style?: CSSProperties;
       testId?: string;
       highlightSign?: boolean;
+      privacyOnMobile?: boolean;
+      alignment?: 'center' | 'right';
     }
   | {
       aggregation?: never;
@@ -168,6 +170,8 @@ type AccountCurrencyBalanceProps =
       style?: CSSProperties;
       testId?: string;
       highlightSign?: boolean;
+      privacyOnMobile?: boolean;
+      alignment?: 'center' | 'right';
     };
 
 export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
@@ -177,12 +181,13 @@ export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
     'aggregation' in props ? undefined : props.immediateChildAccountGroups,
     'aggregation' in props ? undefined : props.amounts,
   );
-  const aggregation =
-    'aggregation' in props ? props.aggregation : computedAggregation;
+  const aggregation = props.aggregation ?? computedAggregation;
   const { t } = useTranslation();
   const { result, mainCurrency, isApproximate, formatCurrency } = aggregation;
   const { style, testId } = props;
   const highlightSign = props.highlightSign ?? false;
+  const privacyOnMobile = props.privacyOnMobile ?? false;
+  const alignment = props.alignment ?? 'right';
 
   if (result.status === 'loading') {
     return (
@@ -190,7 +195,7 @@ export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
         role="status"
         aria-label={t('Loading...')}
         data-testid={testId}
-        style={{ textAlign: 'right', ...style }}
+        style={{ textAlign: alignment, ...style }}
       >
         {t('Loading...')}
       </Text>
@@ -202,7 +207,7 @@ export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
       <Text
         role="status"
         data-testid={testId}
-        style={{ textAlign: 'right', ...style }}
+        style={{ textAlign: alignment, ...style }}
       >
         {result.status === 'unavailable' && result.unavailableCurrency
           ? `(${t('no rate')}: ${result.unavailableCurrency})`
@@ -221,16 +226,19 @@ export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
   const balanceTestId = testId ?? 'sidebar-account-currency-balance';
 
   return (
-    <View style={{ alignItems: 'flex-end' }}>
+    <View
+      style={{ alignItems: alignment === 'center' ? 'center' : 'flex-end' }}
+    >
       <CellValueText<'account', 'balance'>
         name={balanceTestId}
         value={result.amount}
         type="financial"
         style={{
-          textAlign: 'right',
+          textAlign: alignment,
           ...(highlightSign && { color: balanceColor }),
           ...style,
         }}
+        privacyOnMobile={privacyOnMobile}
         formatter={amount =>
           `${isApproximate ? '~ ' : ''}${formatCurrency(
             result.displayAmount ?? amount,

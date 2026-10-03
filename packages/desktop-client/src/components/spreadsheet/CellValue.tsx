@@ -82,6 +82,7 @@ type CellValueTextProps<
    * this value in, instead of the Main currency. Ignored for non-financial
    * `type`s, and when `formatter` or `children` is provided. */
   currency?: string | null;
+  privacyOnMobile?: boolean;
 };
 
 export function CellValueText<
@@ -93,6 +94,7 @@ export function CellValueText<
   value,
   formatter,
   currency,
+  privacyOnMobile = false,
   style,
   ...props
 }: CellValueTextProps<SheetName, FieldName>) {
@@ -126,6 +128,7 @@ export function CellValueText<
       >
         <PrivacyFilter
           activationFilters={[PRIVACY_FILTER_TYPES.includes(type)]}
+          enableOnMobile={privacyOnMobile}
         >
           {renderValue()}
         </PrivacyFilter>
