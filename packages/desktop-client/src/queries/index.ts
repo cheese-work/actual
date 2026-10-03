@@ -80,6 +80,10 @@ export function transactions(
   return query;
 }
 
+export function withInlineTransactionSplits(query: Query) {
+  return query.options({ ...query.state.tableOptions, splits: 'inline' });
+}
+
 export function transactionsSearch(
   currentQuery: Query,
   search: string,
