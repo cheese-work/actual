@@ -9,9 +9,9 @@ import { SvgSearchAlternate } from '@actual-app/components/icons/v2';
 import { theme } from '@actual-app/components/theme';
 import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
-import type { AccountEntity } from '@actual-app/core/types/models';
 
 import { Link } from '#components/common/Link';
+import type { AccountCurrencyAggregation } from '#components/sidebar/AccountCurrencyBalance';
 import { replaceModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
 import * as bindings from '#spreadsheet/bindings';
@@ -20,9 +20,7 @@ import { SidebarBalance } from './SidebarBalance';
 import { SidebarIconButton } from './SidebarIconButton';
 
 type AccountsHeaderRowProps = {
-  aggregateAccounts: readonly AccountEntity[] | null;
-  aggregateBalances: Record<string, number | null>;
-  immediateChildAccountGroups: readonly (readonly string[])[];
+  aggregation: AccountCurrencyAggregation;
   allOpen: boolean;
   onToggleAll: () => void;
   isToggleAllDisabled: boolean;
@@ -31,9 +29,7 @@ type AccountsHeaderRowProps = {
 };
 
 export function AccountsHeaderRow({
-  aggregateAccounts,
-  aggregateBalances,
-  immediateChildAccountGroups,
+  aggregation,
   allOpen,
   onToggleAll,
   isToggleAllDisabled,
@@ -100,9 +96,7 @@ export function AccountsHeaderRow({
           binding={bindings.allAccountBalance()}
           testId="sidebar-all-accounts-balance"
           style={{ fontSize: 12, fontWeight: 600 }}
-          aggregateAccounts={aggregateAccounts}
-          aggregateBalances={aggregateBalances}
-          immediateChildAccountGroups={immediateChildAccountGroups}
+          aggregation={aggregation}
         />
       </Link>
     </View>

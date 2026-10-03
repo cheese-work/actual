@@ -5,6 +5,7 @@ import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { View } from '@actual-app/components/view';
 import { aggregateAccountAmountsInMainCurrency } from '@actual-app/core/shared/currency-aggregation';
+import type { CurrencyAggregationResult } from '@actual-app/core/shared/currency-aggregation';
 import {
   getDisplayDecimalPlaces,
   getEffectiveAccountCurrency,
@@ -15,22 +16,20 @@ import { CellValueText } from '#components/spreadsheet/CellValue';
 import { useFormat } from '#hooks/useFormat';
 import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
-type AccountCurrencyBalanceProps = {
-  accounts: readonly AccountEntity[] | null;
-  balances: Record<string, number | null>;
-  style?: CSSProperties;
-  testId?: string;
-  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+type CurrencyFormatter = ReturnType<typeof useFormat>['forCurrency'];
+
+export type AccountCurrencyAggregation = {
+  result: CurrencyAggregationResult;
+  mainCurrency: string | undefined;
+  isApproximate: boolean;
+  formatCurrency: CurrencyFormatter;
 };
 
-export function AccountCurrencyBalance({
-  accounts,
-  balances,
-  style,
-  testId,
-  immediateChildAccountGroups,
-}: AccountCurrencyBalanceProps) {
-  const { t } = useTranslation();
+export function useAccountCurrencyAggregation(
+  accounts: readonly AccountEntity[] | null,
+  balances: Record<string, number | null>,
+  immediateChildAccountGroups?: readonly (readonly string[])[] | null,
+): AccountCurrencyAggregation {
   const format = useFormat();
   const [prefs] = useSyncedPrefs();
   const amounts =
@@ -45,16 +44,44 @@ export function AccountCurrencyBalance({
     amounts,
     accounts ?? [],
     prefs,
-    immediateChildAccountGroups != null && prefs.defaultCurrencyCode
+    prefs.defaultCurrencyCode
       ? {
           displayDecimalPlaces: format.numberFormat.hideFraction
             ? 0
             : getDisplayDecimalPlaces(prefs.defaultCurrencyCode),
-          immediateChildAccountGroups,
+          ...(immediateChildAccountGroups != null && {
+            immediateChildAccountGroups,
+          }),
         }
       : undefined,
   );
   const mainCurrency = prefs.defaultCurrencyCode;
+
+  return {
+    result,
+    mainCurrency,
+    isApproximate:
+      accounts?.some(
+        account =>
+          getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency,
+      ) ?? false,
+    formatCurrency: format.forCurrency,
+  };
+}
+
+type AccountCurrencyBalanceProps = {
+  aggregation: AccountCurrencyAggregation;
+  style?: CSSProperties;
+  testId?: string;
+};
+
+export function AccountCurrencyBalance({
+  aggregation,
+  style,
+  testId,
+}: AccountCurrencyBalanceProps) {
+  const { t } = useTranslation();
+  const { result, mainCurrency, isApproximate, formatCurrency } = aggregation;
 
   if (result.status === 'loading') {
     return (
@@ -83,12 +110,6 @@ export function AccountCurrencyBalance({
     );
   }
 
-  const isApproximate =
-    accounts?.some(
-      account =>
-        getEffectiveAccountCurrency(account.currency, prefs) !== mainCurrency,
-    ) ?? false;
-
   const balanceTestId = testId ?? 'sidebar-account-currency-balance';
 
   return (
@@ -98,33 +119,68 @@ export function AccountCurrencyBalance({
         value={result.amount}
         type="financial"
         style={{ textAlign: 'right', ...style }}
-        formatter={amount =>
-          `${isApproximate ? '~ ' : ''}${format.forCurrency(amount, mainCurrency)}`
+        formatter={() =>
+          `${isApproximate ? '~ ' : ''}${formatCurrency(
+            result.displayAmount ?? result.amount,
+            mainCurrency,
+          )}`
         }
       />
-      {result.presentationAdjustment && (
-        <View
-          data-testid={`${balanceTestId}-adjustment`}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-        >
-          <Text style={{ fontSize: 10 }}>
-            <Trans>Rounding adjustment</Trans>
-          </Text>
-          <CellValueText<'account', 'balance'>
-            name={`${balanceTestId}-adjustment-value`}
-            value={result.presentationAdjustment.amount}
-            type="financial-with-sign"
-            style={{ fontSize: 10, textAlign: 'right' }}
-            formatter={amount =>
-              `${isApproximate ? '~ ' : ''}${format.forCurrency(
-                amount,
-                mainCurrency,
-                'financial-with-sign',
-              )}`
-            }
-          />
-        </View>
-      )}
+    </View>
+  );
+}
+
+type AccountCurrencyAdjustmentProps = {
+  aggregation: AccountCurrencyAggregation;
+  testId: string;
+  style?: CSSProperties;
+};
+
+export function AccountCurrencyAdjustment({
+  aggregation,
+  testId,
+  style,
+}: AccountCurrencyAdjustmentProps) {
+  const { t } = useTranslation();
+  const { result, mainCurrency, isApproximate, formatCurrency } = aggregation;
+  if (
+    result.status !== 'complete' ||
+    !result.presentationAdjustment ||
+    !mainCurrency
+  ) {
+    return null;
+  }
+
+  const adjustment = result.presentationAdjustment;
+  const amount = formatCurrency(
+    adjustment.amount,
+    mainCurrency,
+    'financial-with-sign',
+  );
+
+  return (
+    <View
+      role="status"
+      aria-label={t('Rounding adjustment')}
+      data-testid={`${testId}-adjustment`}
+      style={{
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        gap: 4,
+        ...style,
+      }}
+    >
+      <Text style={{ fontSize: 10 }}>
+        <Trans>Rounding adjustment</Trans>
+      </Text>
+      <CellValueText<'account', 'balance'>
+        name={`${testId}-adjustment-value`}
+        value={adjustment.amount}
+        type="financial-with-sign"
+        style={{ fontSize: 10, textAlign: 'right' }}
+        formatter={() => `${isApproximate ? '~ ' : ''}${amount}`}
+      />
     </View>
   );
 }

@@ -16,10 +16,19 @@ vi.mock('#hooks/useSyncedPrefs', () => ({
   useSyncedPrefs: () => [mocks.prefs, vi.fn()],
 }));
 
-function renderApprox(value: number, currency: string | null) {
-  return render(<ApproxMain value={value} currency={currency} />, {
-    wrapper: TestProviders,
-  });
+function renderApprox(
+  value: number,
+  currency: string | null,
+  halfEvenDisplay = false,
+) {
+  return render(
+    <ApproxMain
+      value={value}
+      currency={currency}
+      halfEvenDisplay={halfEvenDisplay}
+    />,
+    { wrapper: TestProviders },
+  );
 }
 
 describe('ApproxMain', () => {
@@ -42,6 +51,30 @@ describe('ApproxMain', () => {
   it('shows the main-currency value of a custom-unit account', () => {
     renderApprox(1000, 'X-BANANA'); // 10 bananas stored
     expect(screen.getByText(/~.*50,000.*₫/)).toBeInTheDocument();
+  });
+
+  it('uses half-even only for explicitly rounded sidebar estimates', () => {
+    mocks.prefs = {
+      ...mocks.prefs,
+      'manualRate.USD.VND': '50',
+    };
+
+    const ordinaryEstimate = renderApprox(1, 'USD');
+    expect(screen.getByText(/~.*1.*₫/)).toBeInTheDocument();
+
+    ordinaryEstimate.rerender(
+      <TestProviders>
+        <ApproxMain value={1} currency="USD" halfEvenDisplay />
+      </TestProviders>,
+    );
+    expect(screen.getByText(/~.*0.*₫/)).toBeInTheDocument();
+
+    ordinaryEstimate.rerender(
+      <TestProviders>
+        <ApproxMain value={-1} currency="USD" halfEvenDisplay />
+      </TestProviders>,
+    );
+    expect(screen.getByText(/~.*0.*₫/)).toBeInTheDocument();
   });
 
   it('shows a no-rate hint and no number when the rate is missing', () => {

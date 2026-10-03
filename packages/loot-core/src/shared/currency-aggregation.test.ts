@@ -144,7 +144,10 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
       aggregateAccountAmountsInMainCurrency(leafAmounts, accounts, {
         defaultCurrencyCode: 'VND',
       }),
-    ).toEqual({ status: 'complete', amount: MAX_SAFE_NUMBER });
+    ).toEqual({
+      status: 'complete',
+      amount: MAX_SAFE_NUMBER,
+    });
   });
 
   it('keeps rounding-adjustment child sums exact through cancellation', () => {
@@ -158,7 +161,11 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
           immediateChildAmounts: [MAX_SAFE_NUMBER, 1, -1],
         },
       ),
-    ).toEqual({ status: 'complete', amount: MAX_SAFE_NUMBER });
+    ).toEqual({
+      status: 'complete',
+      amount: MAX_SAFE_NUMBER,
+      displayAmount: MAX_SAFE_NUMBER,
+    });
   });
 
   it('uses one valuation time to select cached automatic rates for all leaves', () => {
@@ -226,6 +233,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: 98,
+      displayAmount: 100,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: 100,
@@ -244,6 +252,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: -98,
+      displayAmount: -100,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: -100,
@@ -270,6 +279,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: 150,
+      displayAmount: 200,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: 200,
@@ -288,6 +298,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: -150,
+      displayAmount: -200,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: -200,
@@ -303,7 +314,11 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         prefs,
         { displayDecimalPlaces: 0, immediateChildAmounts: [100] },
       ),
-    ).toEqual({ status: 'complete', amount: 100 });
+    ).toEqual({
+      status: 'complete',
+      amount: 100,
+      displayAmount: 100,
+    });
   });
 
   it('derives displayed child totals from the same conversion snapshot', () => {
@@ -334,6 +349,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: 80,
+      displayAmount: 100,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: 100,
@@ -355,6 +371,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: -80,
+      displayAmount: -100,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: -100,
@@ -373,7 +390,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         prefs,
         display,
       ),
-    ).toEqual({ status: 'complete', amount: 200 });
+    ).toEqual({ status: 'complete', amount: 200, displayAmount: 200 });
 
     expect(dateNow).toHaveBeenCalledTimes(3);
   });
@@ -397,7 +414,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         displayDecimalPlaces: 0,
         immediateChildAccountGroups: [['usd-left', 'usd-right']],
       }),
-    ).toEqual({ status: 'complete', amount: 80 });
+    ).toEqual({ status: 'complete', amount: 80, displayAmount: 100 });
 
     expect(
       aggregateAccountAmountsInMainCurrency(amounts, childAccounts, prefs, {
@@ -407,6 +424,7 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
     ).toEqual({
       status: 'complete',
       amount: 80,
+      displayAmount: 100,
       presentationAdjustment: {
         label: 'Rounding adjustment',
         amount: 100,
@@ -414,6 +432,68 @@ describe('aggregateAccountAmountsInMainCurrency', () => {
         placement: 'last-child',
       },
     });
+  });
+
+  it('reconciles USD/VND 50 positive and negative half-even ties', () => {
+    const childAccounts = [
+      { id: 'usd-left', currency: 'USD' },
+      { id: 'usd-right', currency: 'USD' },
+    ] satisfies readonly CurrencyAccount[];
+    const prefs = {
+      defaultCurrencyCode: 'VND',
+      [manualRateKey('USD', 'VND')]: '50',
+    };
+
+    for (const sign of [1, -1]) {
+      expect(
+        aggregateAccountAmountsInMainCurrency(
+          [
+            { accountId: 'usd-left', amount: sign },
+            { accountId: 'usd-right', amount: sign },
+          ],
+          childAccounts,
+          prefs,
+          {
+            displayDecimalPlaces: 0,
+            immediateChildAccountGroups: [['usd-left'], ['usd-right']],
+          },
+        ),
+      ).toEqual({
+        status: 'complete',
+        amount: sign * 100,
+        displayAmount: sign * 100,
+        presentationAdjustment: {
+          label: 'Rounding adjustment',
+          amount: sign * 100,
+          displayOnly: true,
+          placement: 'last-child',
+        },
+      });
+    }
+  });
+
+  it('exposes half-even display values without changing canonical totals', () => {
+    for (const [amount, displayAmount] of [
+      [50, 0],
+      [150, 200],
+      [250, 200],
+      [-50, 0],
+      [-150, -200],
+      [-250, -200],
+    ]) {
+      expect(
+        aggregateAccountAmountsInMainCurrency(
+          [{ accountId: 'vnd', amount }],
+          accounts,
+          { defaultCurrencyCode: 'VND' },
+          { displayDecimalPlaces: 0 },
+        ),
+      ).toEqual({
+        status: 'complete',
+        amount,
+        displayAmount,
+      });
+    }
   });
 
   it('returns unavailable for missing rates, unknown accounts, unsafe inputs, and overflow', () => {
