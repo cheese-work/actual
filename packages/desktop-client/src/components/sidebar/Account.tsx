@@ -41,6 +41,7 @@ import type { Binding, SheetFields } from '#spreadsheet';
 import { isTouchDevice } from '#util/isTouchDevice';
 
 import { AccountCurrencyBalance } from './AccountCurrencyBalance';
+import type { AccountCurrencyAggregation } from './AccountCurrencyBalance';
 
 export const accountNameStyle: CSSProperties = {
   marginTop: -2,
@@ -71,7 +72,11 @@ function AccountBalance<FieldName extends SheetFields<'account'>>({
     <View style={{ alignItems: 'flex-end' }}>
       <CellValue binding={query} type="financial" currency={accountCurrency} />
       {typeof balance === 'number' && (
-        <ApproxMain value={balance} currency={account?.currency} />
+        <ApproxMain
+          value={balance}
+          currency={account?.currency}
+          halfEvenDisplay
+        />
       )}
     </View>
   );
@@ -93,9 +98,7 @@ type AccountProps<FieldName extends SheetFields<'account'>> = {
   titleAccount?: boolean;
   isExactPathMatch?: boolean;
   balanceTestId?: string;
-  aggregateAccounts?: readonly AccountEntity[] | null;
-  aggregateBalances?: Record<string, number | null>;
-  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+  currencyAggregation?: AccountCurrencyAggregation;
 };
 
 export function Account<FieldName extends SheetFields<'account'>>({
@@ -114,9 +117,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
   titleAccount,
   isExactPathMatch,
   balanceTestId,
-  aggregateAccounts,
-  aggregateBalances,
-  immediateChildAccountGroups,
+  currencyAggregation,
 }: AccountProps<FieldName>) {
   const isTestEnv = useIsTestEnv();
   const { t } = useTranslation();
@@ -158,17 +159,13 @@ export function Account<FieldName extends SheetFields<'account'>>({
   const updateAccount = useUpdateAccountMutation();
 
   const balanceCell =
-    aggregateAccounts === undefined ? (
+    currencyAggregation === undefined ? (
       <AccountBalance query={query} account={account} />
     ) : (
-      <View style={{ alignItems: 'flex-end' }}>
-        <AccountCurrencyBalance
-          accounts={aggregateAccounts}
-          balances={aggregateBalances ?? {}}
-          testId={balanceTestId}
-          immediateChildAccountGroups={immediateChildAccountGroups}
-        />
-      </View>
+      <AccountCurrencyBalance
+        aggregation={currencyAggregation}
+        testId={balanceTestId}
+      />
     );
 
   const isContextMenuOpen = useSelector(state =>
@@ -303,7 +300,7 @@ export function Account<FieldName extends SheetFields<'account'>>({
                 )
               }
               right={
-                aggregateAccounts === undefined && balanceTestId ? (
+                currencyAggregation === undefined && balanceTestId ? (
                   <View data-testid={balanceTestId}>{balanceCell}</View>
                 ) : (
                   balanceCell

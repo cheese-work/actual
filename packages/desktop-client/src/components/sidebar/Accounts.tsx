@@ -18,6 +18,10 @@ import { useSelector } from '#redux';
 import * as bindings from '#spreadsheet/bindings';
 
 import { Account } from './Account';
+import {
+  AccountCurrencyAdjustment,
+  useAccountCurrencyAggregation,
+} from './AccountCurrencyBalance';
 import { SecondaryItem } from './SecondaryItem';
 
 const fontWeight = 600;
@@ -40,6 +44,33 @@ export function Accounts() {
       : [...onBudgetAccountsQuery.data, ...offBudgetAccountsQuery.data];
   const accountBalances = useAccountBalances(
     [...onBudgetAccounts, ...offbudgetAccounts].map(account => account.id),
+  );
+  const allImmediateChildAccountGroups = [
+    ...(onBudgetAccounts.length > 0
+      ? [onBudgetAccounts.map(account => account.id)]
+      : []),
+    ...(offbudgetAccounts.length > 0
+      ? [offbudgetAccounts.map(account => account.id)]
+      : []),
+  ];
+  const allCurrencyAggregation = useAccountCurrencyAggregation(
+    aggregateAccounts,
+    accountBalances,
+    allImmediateChildAccountGroups,
+  );
+  const onBudgetCurrencyAggregation = useAccountCurrencyAggregation(
+    onBudgetAccountsQuery.isPlaceholderData
+      ? null
+      : (onBudgetAccountsQuery.data ?? null),
+    accountBalances,
+    onBudgetAccounts.map(account => [account.id]),
+  );
+  const offBudgetCurrencyAggregation = useAccountCurrencyAggregation(
+    offBudgetAccountsQuery.isPlaceholderData
+      ? null
+      : (offBudgetAccountsQuery.data ?? null),
+    accountBalances,
+    offbudgetAccounts.map(account => [account.id]),
   );
   const { data: closedAccounts = [] } = useClosedAccounts();
   const syncingAccountIds = useSelector(state => state.account.accountsSyncing);
@@ -110,16 +141,7 @@ export function Accounts() {
           style={{ fontWeight, marginTop: 15 }}
           isExactPathMatch
           balanceTestId="sidebar-all-accounts-balance"
-          aggregateAccounts={aggregateAccounts}
-          aggregateBalances={accountBalances}
-          immediateChildAccountGroups={[
-            ...(onBudgetAccounts.length > 0
-              ? [onBudgetAccounts.map(account => account.id)]
-              : []),
-            ...(offbudgetAccounts.length > 0
-              ? [offbudgetAccounts.map(account => account.id)]
-              : []),
-          ]}
+          currencyAggregation={allCurrencyAggregation}
         />
 
         {onBudgetAccounts.length > 0 && (
@@ -134,15 +156,7 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-on-budget-balance"
-            aggregateAccounts={
-              onBudgetAccountsQuery.isPlaceholderData
-                ? null
-                : (onBudgetAccountsQuery.data ?? null)
-            }
-            aggregateBalances={accountBalances}
-            immediateChildAccountGroups={onBudgetAccounts.map(account => [
-              account.id,
-            ])}
+            currencyAggregation={onBudgetCurrencyAggregation}
           />
         )}
 
@@ -162,6 +176,11 @@ export function Accounts() {
             outerStyle={makeDropPadding(i)}
           />
         ))}
+        <AccountCurrencyAdjustment
+          aggregation={onBudgetCurrencyAggregation}
+          testId="sidebar-on-budget-balance"
+          style={{ paddingLeft: 35, paddingRight: 8 }}
+        />
 
         {offbudgetAccounts.length > 0 && (
           <Account
@@ -175,15 +194,7 @@ export function Accounts() {
             }}
             titleAccount
             balanceTestId="sidebar-off-budget-balance"
-            aggregateAccounts={
-              offBudgetAccountsQuery.isPlaceholderData
-                ? null
-                : (offBudgetAccountsQuery.data ?? null)
-            }
-            aggregateBalances={accountBalances}
-            immediateChildAccountGroups={offbudgetAccounts.map(account => [
-              account.id,
-            ])}
+            currencyAggregation={offBudgetCurrencyAggregation}
           />
         )}
 
@@ -203,6 +214,16 @@ export function Accounts() {
             outerStyle={makeDropPadding(i)}
           />
         ))}
+        <AccountCurrencyAdjustment
+          aggregation={offBudgetCurrencyAggregation}
+          testId="sidebar-off-budget-balance"
+          style={{ paddingLeft: 35, paddingRight: 8 }}
+        />
+        <AccountCurrencyAdjustment
+          aggregation={allCurrencyAggregation}
+          testId="sidebar-all-accounts-balance"
+          style={{ paddingLeft: 35, paddingRight: 8 }}
+        />
 
         {closedAccounts.length > 0 && (
           <SecondaryItem

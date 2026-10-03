@@ -5,7 +5,11 @@ import { render, screen } from '@testing-library/react';
 
 import { TestProviders } from '#mocks';
 
-import { AccountCurrencyBalance } from './AccountCurrencyBalance';
+import {
+  AccountCurrencyAdjustment,
+  AccountCurrencyBalance as CurrencyBalance,
+  useAccountCurrencyAggregation,
+} from './AccountCurrencyBalance';
 
 const mocks = vi.hoisted(() => ({
   prefs: {} as Record<string, string>,
@@ -39,6 +43,39 @@ function resetMocks() {
 
 function makeAccount(name: string, currency: string) {
   return { ...generateAccount(name), currency };
+}
+
+type TestBalanceProps = {
+  accounts: ReturnType<typeof makeAccount>[] | null;
+  balances: Record<string, number | null>;
+  testId?: string;
+  immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+};
+
+function AccountCurrencyBalance({
+  accounts,
+  balances,
+  testId,
+  immediateChildAccountGroups,
+}: TestBalanceProps) {
+  const aggregation = useAccountCurrencyAggregation(
+    accounts,
+    balances,
+    immediateChildAccountGroups,
+  );
+
+  return (
+    <>
+      <CurrencyBalance aggregation={aggregation} testId={testId} />
+      {immediateChildAccountGroups != null && (
+        <span data-testid={`${testId}-immediate-children`} />
+      )}
+      <AccountCurrencyAdjustment
+        aggregation={aggregation}
+        testId={testId ?? 'sidebar-account-currency-balance'}
+      />
+    </>
+  );
 }
 
 describe('AccountCurrencyBalance', () => {
@@ -92,6 +129,12 @@ describe('AccountCurrencyBalance', () => {
     expect(screen.getByTestId('group-balance-adjustment')).toHaveTextContent(
       '₫',
     );
+    const children = screen.getByTestId('group-balance-immediate-children');
+    const adjustment = screen.getByTestId('group-balance-adjustment');
+    expect(
+      children.compareDocumentPosition(adjustment) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('keeps Main-only totals exact and treats a loaded empty list as zero', () => {

@@ -16,15 +16,11 @@ export type AccountAmount = {
   amount: IntegerAmount;
 };
 
-export type DisplayRoundingOptions =
-  | {
-      displayDecimalPlaces: number;
-      immediateChildAmounts: readonly IntegerAmount[];
-    }
-  | {
-      displayDecimalPlaces: number;
-      immediateChildAccountGroups: readonly (readonly string[])[];
-    };
+export type DisplayRoundingOptions = {
+  displayDecimalPlaces: number;
+  immediateChildAmounts?: readonly IntegerAmount[];
+  immediateChildAccountGroups?: readonly (readonly string[])[];
+};
 
 export type DisplayRoundingAdjustment = {
   label: 'Rounding adjustment';
@@ -39,6 +35,7 @@ export type CurrencyAggregationResult =
   | {
       status: 'complete';
       amount: IntegerAmount;
+      displayAmount?: IntegerAmount;
       presentationAdjustment?: DisplayRoundingAdjustment;
     };
 
@@ -55,10 +52,18 @@ function toSafeAmount(amount: bigint): IntegerAmount | null {
   return amount >= -maximum && amount <= maximum ? Number(amount) : null;
 }
 
-function roundToDisplayPrecision(
+export function roundToDisplayPrecision(
   amount: IntegerAmount,
   displayDecimalPlaces: number,
 ): IntegerAmount | null {
+  if (
+    !Number.isInteger(displayDecimalPlaces) ||
+    displayDecimalPlaces < 0 ||
+    displayDecimalPlaces > STORAGE_DECIMAL_PLACES
+  ) {
+    return null;
+  }
+
   const unit = 10n ** BigInt(STORAGE_DECIMAL_PLACES - displayDecimalPlaces);
   const value = BigInt(amount);
   const quotient = value / unit;
@@ -81,23 +86,10 @@ function roundToDisplayPrecision(
 }
 
 function getPresentationAdjustment(
-  amount: IntegerAmount,
+  roundedTotal: IntegerAmount,
   displayDecimalPlaces: number,
   immediateChildAmounts: readonly IntegerAmount[],
 ): DisplayRoundingAdjustment | null | undefined {
-  if (
-    !Number.isInteger(displayDecimalPlaces) ||
-    displayDecimalPlaces < 0 ||
-    displayDecimalPlaces > STORAGE_DECIMAL_PLACES
-  ) {
-    return undefined;
-  }
-
-  const roundedTotal = roundToDisplayPrecision(amount, displayDecimalPlaces);
-  if (roundedTotal === null) {
-    return undefined;
-  }
-
   let roundedChildren = 0n;
   for (const childAmount of immediateChildAmounts) {
     if (!isSafeAmount(childAmount)) {
@@ -257,28 +249,53 @@ export function aggregateAccountAmountsInMainCurrency(
     return { status: 'complete', amount: safeTotal };
   }
 
-  const immediateChildAmounts =
-    'immediateChildAmounts' in display
-      ? display.immediateChildAmounts
-      : getImmediateChildAmounts(
-          display.immediateChildAccountGroups,
-          convertedAmountsByAccount,
-        );
-  if (immediateChildAmounts === null) {
+  const displayAmount = roundToDisplayPrecision(
+    safeTotal,
+    display.displayDecimalPlaces,
+  );
+  if (displayAmount === null) {
     return { status: 'unavailable' };
   }
 
-  const presentationAdjustment = getPresentationAdjustment(
-    safeTotal,
-    display.displayDecimalPlaces,
-    immediateChildAmounts,
-  );
-  if (presentationAdjustment === undefined) {
+  if (
+    display.immediateChildAmounts !== undefined &&
+    display.immediateChildAccountGroups !== undefined
+  ) {
+    return { status: 'unavailable' };
+  }
+
+  let presentationAdjustment: DisplayRoundingAdjustment | null | undefined;
+  if (display.immediateChildAmounts !== undefined) {
+    presentationAdjustment = getPresentationAdjustment(
+      displayAmount,
+      display.displayDecimalPlaces,
+      display.immediateChildAmounts,
+    );
+  } else if (display.immediateChildAccountGroups !== undefined) {
+    const immediateChildAmounts = getImmediateChildAmounts(
+      display.immediateChildAccountGroups,
+      convertedAmountsByAccount,
+    );
+    if (immediateChildAmounts === null) {
+      return { status: 'unavailable' };
+    }
+    presentationAdjustment = getPresentationAdjustment(
+      displayAmount,
+      display.displayDecimalPlaces,
+      immediateChildAmounts,
+    );
+  }
+  if (
+    presentationAdjustment === undefined &&
+    (display.immediateChildAmounts !== undefined ||
+      display.immediateChildAccountGroups !== undefined)
+  ) {
     return { status: 'unavailable' };
   }
   return {
     status: 'complete',
     amount: safeTotal,
+    displayAmount,
     ...(presentationAdjustment && { presentationAdjustment }),
   };
 }

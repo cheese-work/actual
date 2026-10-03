@@ -8,6 +8,10 @@ import { View } from '@actual-app/components/view';
 import { css } from '@emotion/css';
 
 import { Link } from '#components/common/Link';
+import {
+  AccountCurrencyAdjustment,
+  useAccountCurrencyAggregation,
+} from '#components/sidebar/AccountCurrencyBalance';
 import type { Binding } from '#spreadsheet';
 
 import { AccountTree } from './AccountTree';
@@ -55,6 +59,22 @@ export function SideGroup({
   onToggleBucket,
 }: SideGroupProps) {
   const { t } = useTranslation();
+  const aggregateAccounts = fullSideData.buckets.flatMap(
+    bucket => bucket.accounts,
+  );
+  const immediateChildAccountGroups =
+    isOpen && !isSearching
+      ? fullSideData.buckets.flatMap(bucket =>
+          bucket.group == null
+            ? bucket.accounts.map(account => [account.id])
+            : [bucket.accounts.map(account => account.id)],
+        )
+      : null;
+  const currencyAggregation = useAccountCurrencyAggregation(
+    aggregateAccounts,
+    aggregateBalances,
+    immediateChildAccountGroups,
+  );
 
   return (
     <View style={{ marginTop: spacing.xxs }}>
@@ -114,19 +134,7 @@ export function SideGroup({
             binding={totalBinding}
             testId={balanceTestId}
             style={{ fontSize: 12, fontWeight: 600, color: 'inherit' }}
-            aggregateAccounts={fullSideData.buckets.flatMap(
-              bucket => bucket.accounts,
-            )}
-            aggregateBalances={aggregateBalances}
-            immediateChildAccountGroups={
-              isOpen && !isSearching
-                ? fullSideData.buckets.flatMap(bucket =>
-                    bucket.group == null
-                      ? bucket.accounts.map(account => [account.id])
-                      : [bucket.accounts.map(account => account.id)],
-                  )
-                : null
-            }
+            aggregation={currencyAggregation}
           />
         </Link>
       </View>
@@ -142,6 +150,13 @@ export function SideGroup({
           isDragDisabled={isDragDisabled}
           isBucketOpen={isBucketOpen}
           onToggleBucket={onToggleBucket}
+        />
+      )}
+      {isOpen && (
+        <AccountCurrencyAdjustment
+          aggregation={currencyAggregation}
+          testId={balanceTestId}
+          style={{ paddingInline: spacing.md }}
         />
       )}
     </View>

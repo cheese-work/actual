@@ -11,6 +11,7 @@ import { TestProviders } from '#mocks';
 import * as bindings from '#spreadsheet/bindings';
 
 import { Account } from './Account';
+import { useAccountCurrencyAggregation } from './AccountCurrencyBalance';
 import { SidebarBalance } from './redesign/SidebarBalance';
 
 const mocks = vi.hoisted(() => ({
@@ -57,6 +58,32 @@ function renderRow(row: ReactNode) {
         <DndProvider backend={HTML5Backend}>{row}</DndProvider>
       </MemoryRouter>
     </TestProviders>,
+  );
+}
+
+function AggregateBalance({
+  layout,
+  testId,
+}: {
+  layout: 'legacy' | 'redesigned';
+  testId: string;
+}) {
+  const aggregation = useAccountCurrencyAggregation([account], mocks.balances);
+
+  return layout === 'legacy' ? (
+    <Account
+      name="All accounts"
+      to="/accounts"
+      query={bindings.allAccountBalance()}
+      currencyAggregation={aggregation}
+      balanceTestId={testId}
+    />
+  ) : (
+    <SidebarBalance
+      binding={bindings.allAccountBalance()}
+      aggregation={aggregation}
+      testId={testId}
+    />
   );
 }
 
@@ -113,14 +140,7 @@ describe('approximate Main-currency value in both sidebars', () => {
   it('converts legacy aggregate rows from member account balances', () => {
     mocks.balances = { [account.id]: 40_000 };
     renderRow(
-      <Account
-        name="All accounts"
-        to="/accounts"
-        query={bindings.allAccountBalance()}
-        aggregateAccounts={[account]}
-        aggregateBalances={mocks.balances}
-        balanceTestId="legacy-aggregate-balance"
-      />,
+      <AggregateBalance layout="legacy" testId="legacy-aggregate-balance" />,
     );
 
     expect(screen.getByTestId('legacy-aggregate-balance')).toHaveTextContent(
@@ -131,10 +151,8 @@ describe('approximate Main-currency value in both sidebars', () => {
   it('converts redesigned aggregate rows from member account balances', () => {
     mocks.balances = { [account.id]: 40_000 };
     renderRow(
-      <SidebarBalance
-        binding={bindings.allAccountBalance()}
-        aggregateAccounts={[account]}
-        aggregateBalances={mocks.balances}
+      <AggregateBalance
+        layout="redesigned"
         testId="redesigned-aggregate-balance"
       />,
     );
@@ -150,14 +168,7 @@ describe('approximate Main-currency value in both sidebars', () => {
 
     renderRow(
       <>
-        <Account
-          name="All accounts"
-          to="/accounts"
-          query={bindings.allAccountBalance()}
-          aggregateAccounts={[account]}
-          aggregateBalances={mocks.balances}
-          balanceTestId="unavailable-total"
-        />
+        <AggregateBalance layout="legacy" testId="unavailable-total" />
         <Account
           name={account.name}
           account={account}

@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
 
+import {
+  AccountCurrencyAdjustment,
+  useAccountCurrencyAggregation,
+} from '#components/sidebar/AccountCurrencyBalance';
 import { useAccountBalances } from '#hooks/useAccountBalances';
 import * as bindings from '#spreadsheet/bindings';
 
@@ -41,6 +45,27 @@ export function AccountsSection() {
     trackedAccounts.map(account => account.id),
   );
   const allAccounts = tree.accountsLoaded ? trackedAccounts : null;
+  const allImmediateChildAccountGroups = [
+    ...(tree.onBudget.accountCount > 0
+      ? [
+          tree.onBudget.buckets.flatMap(bucket =>
+            bucket.accounts.map(account => account.id),
+          ),
+        ]
+      : []),
+    ...(tree.offBudget.accountCount > 0
+      ? [
+          tree.offBudget.buckets.flatMap(bucket =>
+            bucket.accounts.map(account => account.id),
+          ),
+        ]
+      : []),
+  ];
+  const allCurrencyAggregation = useAccountCurrencyAggregation(
+    allAccounts,
+    accountBalances,
+    allImmediateChildAccountGroups,
+  );
 
   const showSyncDot = [
     ...tree.onBudget.buckets.map(b => b.accounts).flat(),
@@ -63,24 +88,7 @@ export function AccountsSection() {
           isToggleAllDisabled={isSearching}
           isSearchOpen={isSearchOpen}
           onToggleSearch={onToggleSearch}
-          aggregateAccounts={allAccounts}
-          aggregateBalances={accountBalances}
-          immediateChildAccountGroups={[
-            ...(tree.onBudget.accountCount > 0
-              ? [
-                  tree.onBudget.buckets.flatMap(bucket =>
-                    bucket.accounts.map(account => account.id),
-                  ),
-                ]
-              : []),
-            ...(tree.offBudget.accountCount > 0
-              ? [
-                  tree.offBudget.buckets.flatMap(bucket =>
-                    bucket.accounts.map(account => account.id),
-                  ),
-                ]
-              : []),
-          ]}
+          aggregation={allCurrencyAggregation}
         />
         {isSearchOpen && (
           <AccountSearchField
@@ -125,6 +133,11 @@ export function AccountsSection() {
             onToggleBucket={bucket => collapse.toggle(bucketKey('off', bucket))}
           />
         )}
+        <AccountCurrencyAdjustment
+          aggregation={allCurrencyAggregation}
+          testId="sidebar-all-accounts-balance"
+          style={{ paddingInline: spacing.md }}
+        />
         <ClosedSection
           accounts={visibleTree.closed}
           isOpen={collapse.isOpen('closed')}
