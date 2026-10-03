@@ -376,12 +376,19 @@ test.describe('sidebar display rounding adjustments', () => {
         if (sign < 0) {
           await expect(legacyBalance).toContainText('-');
         }
-        await expect(page.getByText(/~.*-?0/)).toHaveCount(2);
         const legacyAdjustmentElement = await legacyAdjustment.elementHandle();
         expect(legacyAdjustmentElement).not.toBeNull();
-        for (const accountId of [leftId, rightId]) {
+        for (const [accountId, side] of [
+          [leftId, 'left'],
+          [rightId, 'right'],
+        ] as const) {
           const child = page.locator(`[data-cellname$="balance-${accountId}"]`);
           await expect(child).toHaveCount(1);
+          const childRow = page
+            .getByRole('link')
+            .filter({ hasText: `USD ${signLabel} ${side}` });
+          await expect(childRow).toHaveCount(1);
+          await expect(childRow.getByText(/~.*-?0/)).toHaveCount(1);
           expect(
             await child.evaluate(
               (childNode, adjustment) =>
