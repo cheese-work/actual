@@ -3,12 +3,16 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
+import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import {
   aggregateAccountAmountsInMainCurrency,
   roundToDisplayPrecision,
 } from '@actual-app/core/shared/currency-aggregation';
-import type { CurrencyAggregationResult } from '@actual-app/core/shared/currency-aggregation';
+import type {
+  AccountAmount,
+  CurrencyAggregationResult,
+} from '@actual-app/core/shared/currency-aggregation';
 import {
   getDisplayDecimalPlaces,
   getEffectiveAccountCurrency,
@@ -101,17 +105,20 @@ export function useAccountCurrencyAggregation(
   accounts: readonly AccountEntity[] | null,
   balances: Record<string, number | null>,
   immediateChildAccountGroups?: readonly (readonly string[])[] | null,
+  amountRows?: readonly AccountAmount[] | null,
 ): AccountCurrencyAggregation {
   const format = useFormat();
   const [prefs] = useSyncedPrefs();
   const amounts =
-    accounts === null ||
-    accounts.some(account => typeof balances[account.id] !== 'number')
-      ? null
-      : accounts.map(account => ({
-          accountId: account.id,
-          amount: balances[account.id] as number,
-        }));
+    amountRows !== undefined
+      ? amountRows
+      : accounts === null ||
+          accounts.some(account => typeof balances[account.id] !== 'number')
+        ? null
+        : accounts.map(account => ({
+            accountId: account.id,
+            amount: balances[account.id] as number,
+          }));
   const result = aggregateAccountAmountsInMainCurrency(
     amounts,
     accounts ?? [],
@@ -141,19 +148,41 @@ export function useAccountCurrencyAggregation(
   };
 }
 
-type AccountCurrencyBalanceProps = {
-  aggregation: AccountCurrencyAggregation;
-  style?: CSSProperties;
-  testId?: string;
-};
+type AccountCurrencyBalanceProps =
+  | {
+      aggregation: AccountCurrencyAggregation;
+      accounts?: never;
+      balances?: never;
+      amounts?: never;
+      immediateChildAccountGroups?: never;
+      style?: CSSProperties;
+      testId?: string;
+      highlightSign?: boolean;
+    }
+  | {
+      aggregation?: never;
+      accounts: readonly AccountEntity[] | null;
+      balances: Record<string, number | null>;
+      amounts?: readonly AccountAmount[] | null;
+      immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+      style?: CSSProperties;
+      testId?: string;
+      highlightSign?: boolean;
+    };
 
-export function AccountCurrencyBalance({
-  aggregation,
-  style,
-  testId,
-}: AccountCurrencyBalanceProps) {
+export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
+  const computedAggregation = useAccountCurrencyAggregation(
+    'aggregation' in props ? null : props.accounts,
+    'aggregation' in props ? {} : props.balances,
+    'aggregation' in props ? undefined : props.immediateChildAccountGroups,
+    'aggregation' in props ? undefined : props.amounts,
+  );
+  const aggregation =
+    'aggregation' in props ? props.aggregation : computedAggregation;
   const { t } = useTranslation();
   const { result, mainCurrency, isApproximate, formatCurrency } = aggregation;
+  const { style, testId } = props;
+  const highlightSign = props.highlightSign ?? false;
 
   if (result.status === 'loading') {
     return (
@@ -182,6 +211,13 @@ export function AccountCurrencyBalance({
     );
   }
 
+  const balanceColor =
+    result.amount < 0
+      ? theme.numberNegative
+      : result.amount > 0
+        ? theme.numberPositive
+        : theme.pageTextSubdued;
+
   const balanceTestId = testId ?? 'sidebar-account-currency-balance';
 
   return (
@@ -190,10 +226,14 @@ export function AccountCurrencyBalance({
         name={balanceTestId}
         value={result.amount}
         type="financial"
-        style={{ textAlign: 'right', ...style }}
-        formatter={() =>
+        style={{
+          textAlign: 'right',
+          ...(highlightSign && { color: balanceColor }),
+          ...style,
+        }}
+        formatter={amount =>
           `${isApproximate ? '~ ' : ''}${formatCurrency(
-            result.displayAmount ?? result.amount,
+            result.displayAmount ?? amount,
             mainCurrency,
           )}`
         }
