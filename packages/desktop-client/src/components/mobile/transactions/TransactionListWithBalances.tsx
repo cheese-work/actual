@@ -9,11 +9,16 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import type { IntegerAmount } from '@actual-app/core/shared/util';
-import type { TransactionEntity } from '@actual-app/core/types/models';
+import type {
+  AccountEntity,
+  TransactionEntity,
+} from '@actual-app/core/types/models';
 
 import { Search } from '#components/common/Search';
 import { PullToRefresh } from '#components/mobile/PullToRefresh';
+import { AccountCurrencyBalance } from '#components/sidebar/AccountCurrencyBalance';
 import { CellValue, CellValueText } from '#components/spreadsheet/CellValue';
+import { useAccountBalances } from '#hooks/useAccountBalances';
 import { DisplayPayeeProvider } from '#hooks/useDisplayPayee';
 import { SelectedProvider, useSelected } from '#hooks/useSelected';
 import { useSheetValue } from '#hooks/useSheetValue';
@@ -71,6 +76,7 @@ type TransactionListWithBalancesProps = {
     | Binding<'category', 'balance'>
     | Binding<'account', 'balance'>
     | Binding<'account', 'accounts-balance'>;
+  aggregateAccounts?: readonly AccountEntity[] | null;
   balanceCleared?:
     | Binding<'category', 'balanceCleared'>
     | Binding<'account', 'balanceCleared'>;
@@ -95,6 +101,7 @@ export function TransactionListWithBalances({
   isLoading,
   transactions,
   balance,
+  aggregateAccounts,
   balanceCleared,
   balanceUncleared,
   showRunningBalances,
@@ -137,7 +144,10 @@ export function TransactionListWithBalances({
             ) : (
               <>
                 <View style={{ flexBasis: '33%' }} />
-                <Balance balance={balance} />
+                <Balance
+                  balance={balance}
+                  aggregateAccounts={aggregateAccounts}
+                />
                 <View
                   style={{
                     flexBasis: '33%',
@@ -303,32 +313,58 @@ function BalanceWithCleared({
 
 type BalanceProps = {
   balance: TransactionListWithBalancesProps['balance'];
+  aggregateAccounts?: readonly AccountEntity[] | null;
 };
 
-function Balance({ balance }: BalanceProps) {
+function Balance({ balance, aggregateAccounts }: BalanceProps) {
   const { t } = useTranslation();
   return (
     <View style={{ flexBasis: '33%' }}>
       <Label title={t('Balance')} style={{ textAlign: 'center' }} />
-      <TransactionListBalanceCellValue binding={balance} type="financial">
-        {props => (
-          <CellValueText
-            {...props}
-            style={{
-              fontSize: 18,
-              textAlign: 'center',
-              fontWeight: '500',
-              color:
-                props.value < 0
-                  ? theme.numberNegative
-                  : props.value > 0
-                    ? theme.numberPositive
-                    : theme.numberNeutral,
-            }}
-            data-testid="transactions-balance"
-          />
-        )}
-      </TransactionListBalanceCellValue>
+      {aggregateAccounts !== undefined ? (
+        <AggregateBalance accounts={aggregateAccounts} />
+      ) : (
+        <TransactionListBalanceCellValue binding={balance} type="financial">
+          {props => (
+            <CellValueText
+              {...props}
+              style={{
+                fontSize: 18,
+                textAlign: 'center',
+                fontWeight: '500',
+                color:
+                  props.value < 0
+                    ? theme.numberNegative
+                    : props.value > 0
+                      ? theme.numberPositive
+                      : theme.numberNeutral,
+              }}
+              data-testid="transactions-balance"
+            />
+          )}
+        </TransactionListBalanceCellValue>
+      )}
     </View>
+  );
+}
+
+function AggregateBalance({
+  accounts,
+}: {
+  accounts: readonly AccountEntity[] | null;
+}) {
+  const balances = useAccountBalances(
+    accounts?.map(account => account.id) ?? [],
+  );
+  return (
+    <AccountCurrencyBalance
+      accounts={accounts}
+      balances={balances}
+      testId="transactions-balance"
+      highlightSign
+      privacyOnMobile
+      alignment="center"
+      style={{ fontSize: 18, fontWeight: '500' }}
+    />
   );
 }

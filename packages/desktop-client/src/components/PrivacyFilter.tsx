@@ -40,9 +40,11 @@ export function ConditionalPrivacyFilter({
 
 type PrivacyFilterProps = ComponentPropsWithRef<typeof View> & {
   activationFilters?: (boolean | (() => boolean))[];
+  enableOnMobile?: boolean;
 };
 export function PrivacyFilter({
   activationFilters,
+  enableOnMobile = false,
   children,
   ...props
 }: PrivacyFilterProps) {
@@ -51,7 +53,7 @@ export function PrivacyFilter({
   const { isNarrowWidth } = useResponsive();
   const activate =
     privacyMode &&
-    !isNarrowWidth &&
+    (!isNarrowWidth || enableOnMobile) &&
     (!activationFilters ||
       activationFilters.every(value =>
         typeof value === 'boolean' ? value : value(),
