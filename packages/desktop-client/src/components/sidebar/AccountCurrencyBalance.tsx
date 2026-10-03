@@ -4,7 +4,10 @@ import { Trans, useTranslation } from 'react-i18next';
 import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { View } from '@actual-app/components/view';
-import { aggregateAccountAmountsInMainCurrency } from '@actual-app/core/shared/currency-aggregation';
+import {
+  aggregateAccountAmountsInMainCurrency,
+  roundToDisplayPrecision,
+} from '@actual-app/core/shared/currency-aggregation';
 import type { CurrencyAggregationResult } from '@actual-app/core/shared/currency-aggregation';
 import {
   getDisplayDecimalPlaces,
@@ -12,11 +15,80 @@ import {
 } from '@actual-app/core/shared/currency-setup';
 import type { AccountEntity } from '@actual-app/core/types/models';
 
-import { CellValueText } from '#components/spreadsheet/CellValue';
+import { ApproxMain } from '#components/accounts/ApproxMain';
+import { CellValue, CellValueText } from '#components/spreadsheet/CellValue';
 import { useFormat } from '#hooks/useFormat';
 import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
+import type { Binding, SheetFields } from '#spreadsheet';
 
 type CurrencyFormatter = ReturnType<typeof useFormat>['forCurrency'];
+
+type SidebarAccountBalanceProps<FieldName extends SheetFields<'account'>> = {
+  binding: Binding<'account', FieldName>;
+  currency?: string | null;
+  approxCurrency?: string | null;
+  style?: CSSProperties;
+  testId?: string;
+};
+
+export function SidebarAccountBalance<
+  FieldName extends SheetFields<'account'>,
+>({
+  binding,
+  currency,
+  approxCurrency,
+  style,
+  testId,
+}: SidebarAccountBalanceProps<FieldName>) {
+  const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const mainCurrency = prefs.defaultCurrencyCode;
+  const displayDecimalPlaces =
+    prefs.hideFraction === 'true'
+      ? 0
+      : mainCurrency
+        ? getDisplayDecimalPlaces(mainCurrency)
+        : 0;
+
+  return (
+    <CellValue<'account', FieldName> binding={binding} type="financial">
+      {props => {
+        const displayAmount =
+          typeof props.value === 'number' &&
+          !!mainCurrency &&
+          currency === mainCurrency
+            ? roundToDisplayPrecision(props.value, displayDecimalPlaces)
+            : null;
+        const balance = (
+          <CellValueText<'account', FieldName>
+            {...props}
+            currency={currency}
+            {...(displayAmount !== null && {
+              formatter: () =>
+                format.forCurrency(displayAmount, currency, 'financial'),
+            })}
+            data-testid={testId ?? props.name}
+            style={{ textAlign: 'right', ...style }}
+          />
+        );
+
+        if (approxCurrency === undefined || typeof props.value !== 'number') {
+          return balance;
+        }
+        return (
+          <View style={{ alignItems: 'flex-end' }}>
+            {balance}
+            <ApproxMain
+              value={props.value}
+              currency={approxCurrency}
+              halfEvenDisplay
+            />
+          </View>
+        );
+      }}
+    </CellValue>
+  );
+}
 
 export type AccountCurrencyAggregation = {
   result: CurrencyAggregationResult;
