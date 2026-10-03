@@ -25,6 +25,7 @@ type SideGroupProps = {
   sideData: SidebarAccountSide;
   fullSideData: SidebarAccountSide;
   aggregateBalances: Record<string, number | null>;
+  isSearching: boolean;
   totalBinding: Binding<
     'account',
     'onbudget-accounts-balance' | 'offbudget-accounts-balance'
@@ -44,6 +45,7 @@ export function SideGroup({
   sideData,
   fullSideData,
   aggregateBalances,
+  isSearching,
   totalBinding,
   balanceTestId,
   isOpen,
@@ -116,6 +118,15 @@ export function SideGroup({
               bucket => bucket.accounts,
             )}
             aggregateBalances={aggregateBalances}
+            immediateChildAccountGroups={
+              isOpen && !isSearching
+                ? fullSideData.buckets.flatMap(bucket =>
+                    bucket.group == null
+                      ? bucket.accounts.map(account => [account.id])
+                      : [bucket.accounts.map(account => account.id)],
+                  )
+                : null
+            }
           />
         </Link>
       </View>
@@ -126,6 +137,7 @@ export function SideGroup({
           buckets={sideData.buckets}
           balanceBuckets={fullSideData.buckets}
           aggregateBalances={aggregateBalances}
+          isSearching={isSearching}
           showSyncDot={showSyncDot}
           isDragDisabled={isDragDisabled}
           isBucketOpen={isBucketOpen}

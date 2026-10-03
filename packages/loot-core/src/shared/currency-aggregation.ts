@@ -16,11 +16,15 @@ export type AccountAmount = {
   amount: IntegerAmount;
 };
 
-export type DisplayRoundingOptions = {
-  displayDecimalPlaces: number;
-  /** Canonical Main-currency amounts for this subtotal's immediate children. */
-  immediateChildAmounts: readonly IntegerAmount[];
-};
+export type DisplayRoundingOptions =
+  | {
+      displayDecimalPlaces: number;
+      immediateChildAmounts: readonly IntegerAmount[];
+    }
+  | {
+      displayDecimalPlaces: number;
+      immediateChildAccountGroups: readonly (readonly string[])[];
+    };
 
 export type DisplayRoundingAdjustment = {
   label: 'Rounding adjustment';
@@ -78,32 +82,30 @@ function roundToDisplayPrecision(
 
 function getPresentationAdjustment(
   amount: IntegerAmount,
-  options: DisplayRoundingOptions,
+  displayDecimalPlaces: number,
+  immediateChildAmounts: readonly IntegerAmount[],
 ): DisplayRoundingAdjustment | null | undefined {
   if (
-    !Number.isInteger(options.displayDecimalPlaces) ||
-    options.displayDecimalPlaces < 0 ||
-    options.displayDecimalPlaces > STORAGE_DECIMAL_PLACES
+    !Number.isInteger(displayDecimalPlaces) ||
+    displayDecimalPlaces < 0 ||
+    displayDecimalPlaces > STORAGE_DECIMAL_PLACES
   ) {
     return undefined;
   }
 
-  const roundedTotal = roundToDisplayPrecision(
-    amount,
-    options.displayDecimalPlaces,
-  );
+  const roundedTotal = roundToDisplayPrecision(amount, displayDecimalPlaces);
   if (roundedTotal === null) {
     return undefined;
   }
 
   let roundedChildren = 0n;
-  for (const childAmount of options.immediateChildAmounts) {
+  for (const childAmount of immediateChildAmounts) {
     if (!isSafeAmount(childAmount)) {
       return undefined;
     }
     const roundedChild = roundToDisplayPrecision(
       childAmount,
-      options.displayDecimalPlaces,
+      displayDecimalPlaces,
     );
     if (roundedChild === null) {
       return undefined;
@@ -124,6 +126,38 @@ function getPresentationAdjustment(
         displayOnly: true,
         placement: 'last-child',
       };
+}
+
+function getImmediateChildAmounts(
+  accountGroups: readonly (readonly string[])[],
+  accountAmounts: ReadonlyMap<string, bigint>,
+): IntegerAmount[] | null {
+  const seenAccountIds = new Set<string>();
+  const amounts: IntegerAmount[] = [];
+
+  for (const accountGroup of accountGroups) {
+    let groupAmount = 0n;
+    for (const accountId of accountGroup) {
+      if (seenAccountIds.has(accountId)) {
+        return null;
+      }
+      seenAccountIds.add(accountId);
+
+      const accountAmount = accountAmounts.get(accountId);
+      if (accountAmount === undefined) {
+        return null;
+      }
+      groupAmount += accountAmount;
+    }
+
+    const safeGroupAmount = toSafeAmount(groupAmount);
+    if (safeGroupAmount === null) {
+      return null;
+    }
+    amounts.push(safeGroupAmount);
+  }
+
+  return seenAccountIds.size === accountAmounts.size ? amounts : null;
 }
 
 export function aggregateAccountAmountsInMainCurrency(
@@ -165,6 +199,7 @@ export function aggregateAccountAmountsInMainCurrency(
   }
 
   let total = 0n;
+  const convertedAmountsByAccount = new Map<string, bigint>();
   for (const [accountId, bucketAmounts] of amountsByAccountAndBucket) {
     const account = accountsById.get(accountId);
     if (!account) {
@@ -178,6 +213,7 @@ export function aggregateAccountAmountsInMainCurrency(
       return { status: 'unavailable' };
     }
 
+    let accountTotal = 0n;
     for (const nativeAmountSum of bucketAmounts.values()) {
       const nativeAmount = toSafeAmount(nativeAmountSum);
       if (nativeAmount === null) {
@@ -207,7 +243,9 @@ export function aggregateAccountAmountsInMainCurrency(
         return { status: 'unavailable' };
       }
       total += BigInt(converted);
+      accountTotal += BigInt(converted);
     }
+    convertedAmountsByAccount.set(accountId, accountTotal);
   }
 
   const safeTotal = toSafeAmount(total);
@@ -219,7 +257,22 @@ export function aggregateAccountAmountsInMainCurrency(
     return { status: 'complete', amount: safeTotal };
   }
 
-  const presentationAdjustment = getPresentationAdjustment(safeTotal, display);
+  const immediateChildAmounts =
+    'immediateChildAmounts' in display
+      ? display.immediateChildAmounts
+      : getImmediateChildAmounts(
+          display.immediateChildAccountGroups,
+          convertedAmountsByAccount,
+        );
+  if (immediateChildAmounts === null) {
+    return { status: 'unavailable' };
+  }
+
+  const presentationAdjustment = getPresentationAdjustment(
+    safeTotal,
+    display.displayDecimalPlaces,
+    immediateChildAmounts,
+  );
   if (presentationAdjustment === undefined) {
     return { status: 'unavailable' };
   }

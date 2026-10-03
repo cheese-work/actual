@@ -65,6 +65,22 @@ export function AccountsSection() {
           onToggleSearch={onToggleSearch}
           aggregateAccounts={allAccounts}
           aggregateBalances={accountBalances}
+          immediateChildAccountGroups={[
+            ...(tree.onBudget.accountCount > 0
+              ? [
+                  tree.onBudget.buckets.flatMap(bucket =>
+                    bucket.accounts.map(account => account.id),
+                  ),
+                ]
+              : []),
+            ...(tree.offBudget.accountCount > 0
+              ? [
+                  tree.offBudget.buckets.flatMap(bucket =>
+                    bucket.accounts.map(account => account.id),
+                  ),
+                ]
+              : []),
+          ]}
         />
         {isSearchOpen && (
           <AccountSearchField
@@ -82,6 +98,7 @@ export function AccountsSection() {
             sideData={visibleTree.onBudget}
             fullSideData={tree.onBudget}
             aggregateBalances={accountBalances}
+            isSearching={isSearching}
             totalBinding={bindings.onBudgetAccountBalance()}
             balanceTestId="sidebar-on-budget-balance"
             isOpen={collapse.isOpen('onbudget')}
@@ -99,6 +116,7 @@ export function AccountsSection() {
             sideData={visibleTree.offBudget}
             fullSideData={tree.offBudget}
             aggregateBalances={accountBalances}
+            isSearching={isSearching}
             totalBinding={bindings.offBudgetAccountBalance()}
             balanceTestId="sidebar-off-budget-balance"
             isOpen={collapse.isOpen('offbudget')}

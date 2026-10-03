@@ -22,6 +22,7 @@ import { SidebarIconButton } from './SidebarIconButton';
 type AccountsHeaderRowProps = {
   aggregateAccounts: readonly AccountEntity[] | null;
   aggregateBalances: Record<string, number | null>;
+  immediateChildAccountGroups: readonly (readonly string[])[];
   allOpen: boolean;
   onToggleAll: () => void;
   isToggleAllDisabled: boolean;
@@ -32,6 +33,7 @@ type AccountsHeaderRowProps = {
 export function AccountsHeaderRow({
   aggregateAccounts,
   aggregateBalances,
+  immediateChildAccountGroups,
   allOpen,
   onToggleAll,
   isToggleAllDisabled,
@@ -100,6 +102,7 @@ export function AccountsHeaderRow({
           style={{ fontSize: 12, fontWeight: 600 }}
           aggregateAccounts={aggregateAccounts}
           aggregateBalances={aggregateBalances}
+          immediateChildAccountGroups={immediateChildAccountGroups}
         />
       </Link>
     </View>
