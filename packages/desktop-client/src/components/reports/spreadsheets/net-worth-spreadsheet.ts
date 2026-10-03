@@ -1,4 +1,6 @@
 import { send } from '@actual-app/core/platform/client/connection';
+import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
+import { convert } from '@actual-app/core/shared/exchange-rates';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type {
@@ -6,6 +8,7 @@ import type {
   RuleConditionEntity,
   TransactionEntity,
 } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import * as d from 'date-fns';
 import type { Locale } from 'date-fns';
 import { keyBy } from 'es-toolkit';
@@ -25,6 +28,7 @@ type AccountBalanceData = {
   name: string;
   balances: Record<string, Balance>;
   starting: number;
+  hasUnsafeAmount: boolean;
 };
 
 type TransferLeg = Pick<
@@ -52,11 +56,21 @@ export function createSpreadsheet(
   firstDayOfWeekIdx: string = '0',
   format: (value: unknown, type?: FormatType) => string,
   dateFormat?: string,
+  prefs: Readonly<SyncedPrefs> = {},
+  accountsReady = true,
 ) {
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
     setData: (data: ReturnType<typeof recalculate>) => void,
   ) => {
+    if (!accountsReady) {
+      return;
+    }
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     const { filters } = await send('make-filters-from-conditions', {
       conditions: conditions.filter(cond => !cond.customName),
     });
@@ -182,19 +196,31 @@ export function createSpreadsheet(
 
         // For weekly intervals, transform dates to week format and properly aggregate
         let processedBalances: Record<string, Balance>;
+        let hasUnsafeBalance = false;
         if (interval === 'Weekly') {
           // Group transactions by week and sum their amounts
-          const weeklyBalances: Record<string, number> = {};
+          const weeklyBalances = new Map<string, bigint>();
           balances.forEach(b => {
+            if (!Number.isSafeInteger(b.amount)) {
+              hasUnsafeBalance = true;
+              return;
+            }
             const weekDate = monthUtils.weekFromDate(b.date, firstDayOfWeekIdx);
-            weeklyBalances[weekDate] =
-              (weeklyBalances[weekDate] || 0) + b.amount;
+            weeklyBalances.set(
+              weekDate,
+              (weeklyBalances.get(weekDate) ?? 0n) + BigInt(b.amount),
+            );
           });
 
           // Convert back to Balance format
           processedBalances = {};
-          Object.entries(weeklyBalances).forEach(([date, amount]) => {
-            processedBalances[date] = { date, amount };
+          weeklyBalances.forEach((amount, date) => {
+            const safeAmount = safeNumberFromBigInt(amount);
+            if (safeAmount === null) {
+              hasUnsafeBalance = true;
+              return;
+            }
+            processedBalances[date] = { date, amount: safeAmount };
           });
         } else {
           processedBalances = keyBy(balances, b => b.date);
@@ -205,6 +231,7 @@ export function createSpreadsheet(
           name: acct.name,
           balances: processedBalances,
           starting,
+          hasUnsafeAmount: hasUnsafeBalance,
         };
       }),
     );
@@ -241,16 +268,22 @@ export function createSpreadsheet(
 
     // Prevent paired internal transfers from changing net worth between their
     // two posting dates.
-    alignInternalTransferDates(data, allTransferLegs, {
+    alignInternalTransferDates(data, allTransferLegs, accounts, prefs, {
       startDate,
       endDate,
       interval,
       firstDayOfWeekIdx,
     });
 
+    const convertedData = convertAccountBalances(data, accounts, prefs);
+    if (convertedData === null) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     setData(
       recalculate(
-        data,
+        convertedData,
         startDate,
         endDate,
         locale,
@@ -266,9 +299,14 @@ export function createSpreadsheet(
 function alignInternalTransferDates(
   data: AccountBalanceData[],
   transferLegs: TransferLeg[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
   range: IntervalRange,
 ) {
   const accountsById = new Map(data.map(account => [account.id, account]));
+  const accountEntitiesById = new Map(
+    accounts.map(account => [account.id, account]),
+  );
   const transfersById = new Map(transferLegs.map(leg => [leg.id, leg]));
   const processed = new Set<string>();
 
@@ -282,9 +320,17 @@ function alignInternalTransferDates(
       !counterpart ||
       counterpart.transfer_id !== leg.id ||
       counterpart.account === leg.account ||
-      counterpart.amount + leg.amount !== 0 ||
+      counterpart.amount !== -leg.amount ||
       !accountsById.has(leg.account) ||
-      !accountsById.has(counterpart.account)
+      !accountsById.has(counterpart.account) ||
+      getEffectiveAccountCurrency(
+        accountEntitiesById.get(leg.account)?.currency,
+        prefs,
+      ) !==
+        getEffectiveAccountCurrency(
+          accountEntitiesById.get(counterpart.account)?.currency,
+          prefs,
+        )
     ) {
       return;
     }
@@ -304,6 +350,98 @@ function alignInternalTransferDates(
       moveTransferLeg(account, earlier, later.date, range);
     }
   });
+}
+
+function convertAccountBalances(
+  data: AccountBalanceData[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+): AccountBalanceData[] | null {
+  const mainCurrency = prefs.defaultCurrencyCode;
+  if (!mainCurrency) {
+    return null;
+  }
+
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const valuationTime = Date.now();
+  const convertedData: AccountBalanceData[] = [];
+
+  for (const accountData of data) {
+    const account = accountsById.get(accountData.id);
+    if (!account || accountData.hasUnsafeAmount) {
+      return null;
+    }
+
+    const accountCurrency = getEffectiveAccountCurrency(
+      account.currency,
+      prefs,
+    );
+    if (!accountCurrency) {
+      return null;
+    }
+
+    const convertAmount = (amount: number) => {
+      if (!Number.isSafeInteger(amount)) {
+        return null;
+      }
+      try {
+        return convert(
+          amount,
+          accountCurrency,
+          mainCurrency,
+          prefs,
+          valuationTime,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+          return null;
+        }
+        throw error;
+      }
+    };
+
+    const starting = convertAmount(accountData.starting);
+    if (starting === null) {
+      return null;
+    }
+
+    const balances: Record<string, Balance> = {};
+    for (const [date, balance] of Object.entries(accountData.balances)) {
+      const amount = convertAmount(balance.amount);
+      if (amount === null) {
+        return null;
+      }
+      balances[date] = { date, amount };
+    }
+
+    convertedData.push({ ...accountData, starting, balances });
+  }
+
+  return convertedData;
+}
+
+function safeNumberFromBigInt(value: bigint): number | null {
+  const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+  return value >= -maximum && value <= maximum ? Number(value) : null;
+}
+
+function safeSum(values: readonly number[]): number | null {
+  let sum = 0n;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value)) {
+      return null;
+    }
+    sum += BigInt(value);
+  }
+  return safeNumberFromBigInt(sum);
+}
+
+function safeAdd(left: number, right: number): number | null {
+  return safeSum([left, right]);
+}
+
+function safeSubtract(left: number, right: number): number | null {
+  return safeSum([left, -right]);
 }
 
 function moveTransferLeg(
@@ -370,7 +508,32 @@ function recalculate(
   firstDayOfWeekIdx: string = '0',
   format: (value: unknown, type?: FormatType) => string,
   dateFormat?: string,
-) {
+):
+  | { status: 'unavailable' }
+  | {
+      status: 'complete';
+      graphData: {
+        data: Array<
+          {
+            x: string;
+            y: number;
+            assets: string;
+            debt: string;
+            change: string;
+            networth: string;
+            date: string;
+          } & Record<string, string | number>
+        >;
+        hasNegative: boolean;
+        start: string;
+        end: string;
+      };
+      netWorth: number;
+      totalChange: number;
+      lowestNetWorth: number | null;
+      highestNetWorth: number | null;
+      accounts: Array<{ id: string; name: string }>;
+    } {
   // Get intervals using the same pattern as other working spreadsheets
   const intervals =
     interval === 'Weekly'
@@ -384,20 +547,30 @@ function recalculate(
               monthUtils.getMonth(endDate),
             );
 
-  const accountBalances = data.map(account => {
+  const accountBalances: number[][] = [];
+  for (const account of data) {
     let balance = account.starting;
-    return intervals.map(intervalItem => {
+    const balances = [];
+    for (const intervalItem of intervals) {
       if (account.balances[intervalItem]) {
-        balance += account.balances[intervalItem].amount;
+        const nextBalance = safeAdd(
+          balance,
+          account.balances[intervalItem].amount,
+        );
+        if (nextBalance === null) {
+          return { status: 'unavailable' as const };
+        }
+        balance = nextBalance;
       }
-      return balance;
-    });
-  });
+      balances.push(balance);
+    }
+    accountBalances.push(balances);
+  }
 
-  const priorPeriodNetWorth = data.reduce(
-    (sum, account) => sum + account.starting,
-    0,
-  );
+  const priorPeriodNetWorth = safeSum(data.map(account => account.starting));
+  if (priorPeriodNetWorth === null) {
+    return { status: 'unavailable' };
+  }
 
   let hasNegative = false;
   let startNetWorth = 0;
@@ -405,8 +578,8 @@ function recalculate(
   let lowestNetWorth: number | null = null;
   let highestNetWorth: number | null = null;
 
-  const graphData = intervals.reduce<
-    Array<{
+  const graphData: Array<
+    {
       x: string;
       y: number;
       assets: string;
@@ -414,24 +587,25 @@ function recalculate(
       change: string;
       networth: string;
       date: string;
-    }>
-  >((arr, intervalItem, idx) => {
-    let debt = 0;
-    let assets = 0;
-    let total = 0;
-    const last = arr.length === 0 ? null : arr[arr.length - 1];
+    } & Record<string, string | number>
+  > = [];
+  for (let idx = 0; idx < intervals.length; idx++) {
+    const intervalItem = intervals[idx];
+    const values = accountBalances.map(accountBalances => accountBalances[idx]);
+    const assets = safeSum(values.filter(value => value >= 0));
+    const debt = safeSum(
+      values.filter(value => value < 0).map(value => -value),
+    );
+    const total = safeSum(values);
+    const last =
+      graphData.length === 0 ? null : graphData[graphData.length - 1];
+    if (assets === null || debt === null || total === null) {
+      return { status: 'unavailable' };
+    }
 
     const balances: Record<string, number> = {};
-    accountBalances.forEach((acctBalances, i) => {
-      const balance = acctBalances[idx];
-      balances[data[i].id] = balance;
-
-      if (balance < 0) {
-        debt += -balance;
-      } else {
-        assets += balance;
-      }
-      total += balance;
+    data.forEach((account, accountIndex) => {
+      balances[account.id] = values[accountIndex];
     });
 
     if (total < 0) {
@@ -448,9 +622,12 @@ function recalculate(
       x = d.parseISO(intervalItem + '-01');
     }
 
-    const change = last ? total - last.y : total - priorPeriodNetWorth;
+    const change = safeSubtract(total, last ? last.y : priorPeriodNetWorth);
+    if (change === null) {
+      return { status: 'unavailable' };
+    }
 
-    if (arr.length === 0) {
+    if (graphData.length === 0) {
       startNetWorth = total;
     }
     endNetWorth = total;
@@ -479,7 +656,7 @@ function recalculate(
       ...balances,
     };
 
-    arr.push(graphPoint);
+    graphData.push(graphPoint);
 
     // Track min/max for the current point only
     if (lowestNetWorth === null || graphPoint.y < lowestNetWorth) {
@@ -488,15 +665,19 @@ function recalculate(
     if (highestNetWorth === null || graphPoint.y > highestNetWorth) {
       highestNetWorth = graphPoint.y;
     }
-
-    return arr;
-  }, []);
+  }
 
   const hasBalance = accountBalances.map(balances =>
     balances.some(b => b !== 0),
   );
 
+  const totalChange = safeSubtract(endNetWorth, startNetWorth);
+  if (totalChange === null) {
+    return { status: 'unavailable' };
+  }
+
   return {
+    status: 'complete',
     graphData: {
       data: graphData,
       hasNegative,
@@ -504,7 +685,7 @@ function recalculate(
       end: endDate,
     },
     netWorth: endNetWorth,
-    totalChange: endNetWorth - startNetWorth,
+    totalChange,
     lowestNetWorth,
     highestNetWorth,
     accounts: data
