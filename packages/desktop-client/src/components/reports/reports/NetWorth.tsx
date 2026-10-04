@@ -414,7 +414,10 @@ function NetWorthInner({ widget }: NetWorthInnerProps) {
                 </PrivacyFilter>
               </View>
               <PrivacyFilter>
-                <Change amount={data.totalChange} />
+                <Change
+                  amount={data.totalChange}
+                  currencyCode={prefs.defaultCurrencyCode}
+                />
               </PrivacyFilter>
             </View>
 

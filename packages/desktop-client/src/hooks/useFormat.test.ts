@@ -1,6 +1,10 @@
+import { createElement } from 'react';
+
 import { formatAccountAmount } from '@actual-app/core/shared/currency-setup';
-import { renderHook } from '@testing-library/react';
+import { render, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { Change } from '#components/reports/Change';
 
 import { useFormat } from './useFormat';
 
@@ -192,5 +196,21 @@ describe('useFormat.forCurrency: custom units', () => {
     const { result } = renderHook(() => useFormat());
 
     expect(result.current.forCurrency(40000, 'X-BANANA')).toBe('400 🍌');
+  });
+
+  it('formats net-worth changes in a custom Main unit', () => {
+    mockPrefs = {
+      defaultCurrencyCode: 'X-BANANA',
+      'customUnit.X-BANANA': '{"name":"Banana","symbol":"🍌","decimals":0}',
+    };
+
+    const { container } = render(
+      createElement(Change, {
+        amount: 40000,
+        currencyCode: mockPrefs.defaultCurrencyCode,
+      }),
+    );
+
+    expect(container.textContent).toBe('+400 🍌');
   });
 });

@@ -11,11 +11,16 @@ import { useFormat } from '#hooks/useFormat';
 export function Change({
   amount,
   style,
+  currencyCode,
 }: {
   amount: number;
   style?: CSSProperties;
+  currencyCode?: string | null;
 }) {
   const format = useFormat();
+  const formattedAmount = currencyCode
+    ? format.forCurrency(amount, currencyCode, 'financial')
+    : format(amount, 'financial');
 
   return (
     <FinancialText
@@ -32,7 +37,7 @@ export function Change({
       }}
     >
       {amount >= 0 ? '+' : ''}
-      {format(amount, 'financial')}
+      {formattedAmount}
     </FinancialText>
   );
 }
