@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import type { RefObject, UIEventHandler } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Block } from '@actual-app/components/block';
 import type { CSSProperties } from '@actual-app/components/styles';
@@ -11,6 +12,9 @@ import type {
   RuleConditionEntity,
 } from '@actual-app/core/types/models';
 
+import { useFormat } from '#hooks/useFormat';
+
+import { createReportTableDisplayRows } from './report-display-rounding';
 import { ReportTableHeader } from './ReportTableHeader';
 import { ReportTableList } from './ReportTableList';
 import { ReportTableRow } from './ReportTableRow';
@@ -48,6 +52,7 @@ export type renderRowProps = {
   item: GroupedEntity;
   mode: string;
   style?: CSSProperties;
+  average?: number;
 };
 
 export function ReportTable({
@@ -70,6 +75,20 @@ export function ReportTable({
   showOffBudget,
 }: ReportTableProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
+  const format = useFormat();
+  const displayDecimalPlaces = format.numberFormat.hideFraction
+    ? 0
+    : format.currency.decimalPlaces;
+  const { data: displayData, totalAdjustment } = createReportTableDisplayRows({
+    data,
+    groupBy,
+    balanceTypeOp,
+    mode,
+    displayDecimalPlaces,
+    intervalsCount,
+    label: t('Rounding adjustment'),
+  });
 
   useLayoutEffect(() => {
     if (contentRef.current && saveScrollWidth) {
@@ -77,16 +96,17 @@ export function ReportTable({
     }
   });
 
-  const renderRow = ({ item, mode, style }: renderRowProps) => {
+  const renderRow = ({ item, mode, style, average }: renderRowProps) => {
     return (
       <ReportTableRow
         item={item}
+        averageOverride={average}
         balanceTypeOp={balanceTypeOp}
         groupBy={groupBy}
         mode={mode}
         filters={filters}
-        startDate={data.startDate}
-        endDate={data.endDate}
+        startDate={displayData.startDate}
+        endDate={displayData.endDate}
         intervalsCount={intervalsCount}
         compact={compact}
         style={style}
@@ -112,8 +132,8 @@ export function ReportTable({
         groupBy={groupBy}
         mode={mode}
         filters={filters}
-        startDate={data.startDate}
-        endDate={data.endDate}
+        startDate={displayData.startDate}
+        endDate={displayData.endDate}
         intervalsCount={intervalsCount}
         compact={compact}
         style={totalsStyle}
@@ -135,7 +155,7 @@ export function ReportTable({
       <ReportTableHeader
         headerScrollRef={headerScrollRef}
         handleScroll={handleScroll}
-        data={data.intervalData}
+        data={displayData.intervalData}
         groupBy={groupBy}
         interval={interval}
         balanceTypeOp={balanceTypeOp}
@@ -167,16 +187,17 @@ export function ReportTable({
           }}
         >
           <ReportTableList
-            data={data}
+            data={displayData}
             mode={mode}
             groupBy={groupBy}
             renderRow={renderRow}
+            totalAdjustment={totalAdjustment}
             style={style}
           />
         </Block>
       </View>
       <ReportTableTotals
-        data={data}
+        data={displayData}
         mode={mode}
         totalScrollRef={totalScrollRef}
         compact={compact}
