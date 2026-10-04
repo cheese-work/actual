@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
@@ -31,12 +31,15 @@ import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { calculateTimeRange } from '#components/reports/reportRanges';
 import { cashFlowByDate } from '#components/reports/spreadsheets/cash-flow-spreadsheet';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -72,6 +75,21 @@ function CashFlowInner({ widget }: CashFlowInnerProps) {
   const dispatch = useDispatch();
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isPending: accountsPending,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
 
   const {
     conditions,
@@ -113,13 +131,28 @@ function CashFlowInner({ widget }: CashFlowInnerProps) {
       cashFlowByDate(
         start,
         end,
+        accounts,
+        prefs,
+        !accountsPending && !accountsPlaceholderData,
         isConcise,
         conditions,
         conditionsOp,
         locale,
-        format,
+        formatMainCurrency,
       ),
-    [start, end, isConcise, conditions, conditionsOp, locale, format],
+    [
+      start,
+      end,
+      isConcise,
+      conditions,
+      conditionsOp,
+      locale,
+      formatMainCurrency,
+      accounts,
+      prefs,
+      accountsPending,
+      accountsPlaceholderData,
+    ],
   );
   const data = useReport('cash_flow', params);
 
@@ -245,11 +278,12 @@ function CashFlowInner({ widget }: CashFlowInnerProps) {
   const [_firstDayOfWeekIdx] = useSyncedPref('firstDayOfWeekIdx');
   const firstDayOfWeekIdx = _firstDayOfWeekIdx || '0';
 
-  if (!allMonths || !data) {
+  if (!allMonths) {
     return null;
   }
-
-  const { graphData, totalExpenses, totalIncome, totalTransfers } = data;
+  if (!data) {
+    return <LoadingIndicator />;
+  }
 
   return (
     <Page
@@ -315,91 +349,110 @@ function CashFlowInner({ widget }: CashFlowInnerProps) {
           overflowY: 'auto',
         }}
       >
-        <View
-          style={{
-            paddingTop: 20,
-            alignItems: 'flex-end',
-            color: theme.pageText,
-          }}
-        >
-          <AlignedText
-            style={{ marginBottom: 5, minWidth: 160 }}
-            left={
-              <Block>
-                <Trans>Income:</Trans>
-              </Block>
-            }
-            right={
-              <FinancialText style={{ fontWeight: 600 }}>
+        {data.status === 'unavailable' ? (
+          <Paragraph>
+            <Trans>
+              Cash flow is unavailable. Check that a Main currency is set and
+              every on-budget account uses it.
+            </Trans>
+          </Paragraph>
+        ) : (
+          <>
+            <View
+              style={{
+                paddingTop: 20,
+                alignItems: 'flex-end',
+                color: theme.pageText,
+              }}
+            >
+              <AlignedText
+                style={{ marginBottom: 5, minWidth: 160 }}
+                left={
+                  <Block>
+                    <Trans>Income:</Trans>
+                  </Block>
+                }
+                right={
+                  <FinancialText style={{ fontWeight: 600 }}>
+                    <PrivacyFilter>
+                      {formatMainCurrency(data.totalIncome, 'financial')}
+                    </PrivacyFilter>
+                  </FinancialText>
+                }
+              />
+
+              <AlignedText
+                style={{ marginBottom: 5, minWidth: 160 }}
+                left={
+                  <Block>
+                    <Trans>Expenses:</Trans>
+                  </Block>
+                }
+                right={
+                  <FinancialText style={{ fontWeight: 600 }}>
+                    <PrivacyFilter>
+                      {formatMainCurrency(data.totalExpenses, 'financial')}
+                    </PrivacyFilter>
+                  </FinancialText>
+                }
+              />
+
+              <AlignedText
+                style={{ marginBottom: 5, minWidth: 160 }}
+                left={
+                  <Block>
+                    <Trans>Transfers:</Trans>
+                  </Block>
+                }
+                right={
+                  <FinancialText style={{ fontWeight: 600 }}>
+                    <PrivacyFilter>
+                      {formatMainCurrency(data.totalTransfers, 'financial')}
+                    </PrivacyFilter>
+                  </FinancialText>
+                }
+              />
+              <Text style={{ fontWeight: 600 }}>
                 <PrivacyFilter>
-                  {format(totalIncome, 'financial')}
+                  <Change
+                    amount={
+                      data.totalIncome +
+                      data.totalExpenses +
+                      data.totalTransfers
+                    }
+                    currencyCode={prefs.defaultCurrencyCode}
+                  />
                 </PrivacyFilter>
-              </FinancialText>
-            }
-          />
+              </Text>
+            </View>
 
-          <AlignedText
-            style={{ marginBottom: 5, minWidth: 160 }}
-            left={
-              <Block>
-                <Trans>Expenses:</Trans>
-              </Block>
-            }
-            right={
-              <FinancialText style={{ fontWeight: 600 }}>
-                <PrivacyFilter>
-                  {format(totalExpenses, 'financial')}
-                </PrivacyFilter>
-              </FinancialText>
-            }
-          />
+            <CashFlowGraph
+              graphData={data.graphData}
+              isConcise={isConcise}
+              showBalance={showBalance}
+              format={formatMainCurrency}
+            />
 
-          <AlignedText
-            style={{ marginBottom: 5, minWidth: 160 }}
-            left={
-              <Block>
-                <Trans>Transfers:</Trans>
-              </Block>
-            }
-            right={
-              <FinancialText style={{ fontWeight: 600 }}>
-                <PrivacyFilter>
-                  {format(totalTransfers, 'financial')}
-                </PrivacyFilter>
-              </FinancialText>
-            }
-          />
-          <Text style={{ fontWeight: 600 }}>
-            <PrivacyFilter>
-              <Change amount={totalIncome + totalExpenses + totalTransfers} />
-            </PrivacyFilter>
-          </Text>
-        </View>
-
-        <CashFlowGraph
-          graphData={graphData}
-          isConcise={isConcise}
-          showBalance={showBalance}
-        />
-
-        <View
-          style={{
-            marginTop: 30,
-            userSelect: 'none',
-          }}
-        >
-          <Trans>
-            <Paragraph>
-              <strong>How is cash flow calculated?</strong>
-            </Paragraph>
-            <Paragraph>
-              Cash flow shows the balance of your budgeted accounts over time,
-              and the amount of expenses/income each day or month. Your budgeted
-              accounts are considered to be "cash on hand," so this gives you a
-              picture of how available money fluctuates.
-            </Paragraph>
-          </Trans>
-        </View>
+            <View
+              style={{
+                marginTop: 30,
+                userSelect: 'none',
+              }}
+            >
+              <Trans>
+                <Paragraph>
+                  <strong>How is cash flow calculated?</strong>
+                </Paragraph>
+                <Paragraph>
+                  Cash flow shows the balance of your budgeted accounts over
+                  time, and the amount of expenses/income each day or month.
+                  Your budgeted accounts are considered to be "cash on hand," so
+                  this gives you a picture of how available money fluctuates.
+                </Paragraph>
+              </Trans>
+            </View>
+          </>
+        )}
       </View>
     </Page>
   );
