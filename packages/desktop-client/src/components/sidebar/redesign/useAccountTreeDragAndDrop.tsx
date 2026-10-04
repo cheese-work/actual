@@ -21,6 +21,7 @@ import { useAccountGroups } from '#hooks/useAccountGroups';
 import { useAccounts } from '#hooks/useAccounts';
 
 import { computeAccountMove, computeGroupMove } from './accountTreeMoves';
+import type { AccountDropTarget } from './accountTreeMoves';
 import { parseTreeKey } from './treeKeys';
 import type { SidebarTreeNode } from './treeKeys';
 import { getEffectiveGroupId } from './useSidebarAccountTree';
@@ -94,6 +95,10 @@ export function useAccountTreeDragAndDrop({
     if (node.kind === 'account') {
       return target.dropPosition !== 'on';
     }
+    if (node.kind === 'adjustment') {
+      // Dropping before the adjustment row means "after the group's last account".
+      return target.dropPosition === 'before';
+    }
     if (target.dropPosition === 'on') {
       return true;
     }
@@ -124,22 +129,38 @@ export function useAccountTreeDragAndDrop({
       return;
     }
 
+    let accountTarget: AccountDropTarget;
+    if (targetNode.kind === 'adjustment') {
+      const lastAccountId = buckets
+        .find(bucket => bucket.group?.id === targetNode.groupId)
+        ?.accounts.at(-1)?.id;
+      if (lastAccountId == null) {
+        return;
+      }
+      accountTarget = {
+        kind: 'account',
+        accountId: lastAccountId,
+        position: 'after',
+      };
+    } else if (targetNode.kind === 'account') {
+      accountTarget = {
+        kind: 'account',
+        accountId: targetNode.accountId,
+        position: target.dropPosition === 'after' ? 'after' : 'before',
+      };
+    } else {
+      accountTarget = {
+        kind: 'group',
+        groupId: targetNode.groupId,
+        position: target.dropPosition,
+      };
+    }
+
     const move = computeAccountMove({
       accounts,
       liveGroupIds,
       draggedId: dragged.accountId,
-      target:
-        targetNode.kind === 'account'
-          ? {
-              kind: 'account',
-              accountId: targetNode.accountId,
-              position: target.dropPosition === 'after' ? 'after' : 'before',
-            }
-          : {
-              kind: 'group',
-              groupId: targetNode.groupId,
-              position: target.dropPosition,
-            },
+      target: accountTarget,
     });
     if (move != null) {
       moveAccount.mutate(move);
@@ -181,11 +202,11 @@ export function useAccountTreeDragAndDrop({
     onDragStart: e => {
       const [key] = e.keys;
       const node = key == null ? null : parseTreeKey(key);
-      setDragged(
-        node?.kind === 'account'
-          ? { ...node, groupId: groupOfNode(node) }
-          : node,
-      );
+      if (node?.kind === 'account') {
+        setDragged({ ...node, groupId: groupOfNode(node) });
+      } else {
+        setDragged(node?.kind === 'group' ? node : null);
+      }
       if (node?.kind === 'group') {
         collapseTimer.current = window.setTimeout(
           () => setIsDraggingGroup(true),

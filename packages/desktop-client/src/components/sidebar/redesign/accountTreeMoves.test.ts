@@ -63,6 +63,10 @@ describe('treeKeys', () => {
       kind: 'group',
       groupId: 'g1',
     });
+    expect(parseTreeKey(treeKeys.adjustment('g1'))).toEqual({
+      kind: 'adjustment',
+      groupId: 'g1',
+    });
     expect(parseTreeKey('abc')).toBeNull();
     expect(parseTreeKey(12)).toBeNull();
   });
