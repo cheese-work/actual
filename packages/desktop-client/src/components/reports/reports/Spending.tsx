@@ -237,11 +237,12 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
     );
   }
 
-  if (!data) {
+  if (reportData === null) {
     return null;
   }
 
   const showAverage =
+    data !== null &&
     (data.averageRange?.months.length ?? 0) > 0 &&
     data.intervalData.some(interval => Math.abs(interval.average) > 0);
 
@@ -253,11 +254,13 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
         : monthUtils.getDay(monthUtils.currentDay()) - 1;
 
   const showCompareTo =
-    compareTo === monthUtils.currentMonth() ||
-    Math.abs(data.intervalData[27].compareTo) > 0;
+    data !== null &&
+    (compareTo === monthUtils.currentMonth() ||
+      Math.abs(data.intervalData[27].compareTo) > 0);
   const showCompare =
-    compare === monthUtils.currentMonth() ||
-    Math.abs(data.intervalData[27].compare) > 0;
+    data !== null &&
+    (compare === monthUtils.currentMonth() ||
+      Math.abs(data.intervalData[27].compare) > 0);
   const averageRangeLabel = getSpendingAverageRangeLabel(averageRange, t);
   const averageRangeOptions = getSpendingAverageRangeOptions(t);
   const comparisonValue =
