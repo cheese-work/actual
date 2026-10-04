@@ -46,6 +46,7 @@ export function convertReportQueryRows(
 
     let amount: number | null;
     try {
+      // Per-row rounding can shift foreign off-budget interval totals by minor units.
       amount = convert(
         row.amount,
         accountCurrency,

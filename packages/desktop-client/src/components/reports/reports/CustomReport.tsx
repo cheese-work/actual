@@ -485,7 +485,11 @@ function CustomReportInner({
     ReportOptions.balanceTypeMap.get(balanceType) || 'totalDebts';
   const sortByOp: sortByOpType = sortBy || 'desc';
   const { data: payees = [] } = usePayees();
-  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const [prefs] = useSyncedPrefs();
 
   const hasWarning = calculateHasWarning(conditions, {
@@ -532,7 +536,7 @@ function CustomReportInner({
       sortByOp,
       firstDayOfWeekIdx,
       accounts,
-      accountsReady: !accountsLoading,
+      accountsReady: !accountsLoading && !accountsPlaceholderData,
       prefs,
     });
   }, [
@@ -553,6 +557,7 @@ function CustomReportInner({
     firstDayOfWeekIdx,
     accounts,
     accountsLoading,
+    accountsPlaceholderData,
     prefs,
   ]);
 
@@ -575,7 +580,7 @@ function CustomReportInner({
       sortByOp,
       payees,
       accounts,
-      accountsReady: !accountsLoading,
+      accountsReady: !accountsLoading && !accountsPlaceholderData,
       prefs,
       graphType,
       firstDayOfWeekIdx,
@@ -592,6 +597,7 @@ function CustomReportInner({
     payees,
     accounts,
     accountsLoading,
+    accountsPlaceholderData,
     prefs,
     conditions,
     conditionsOp,

@@ -581,7 +581,11 @@ function SankeyInner({ widget }: SankeyInnerProps) {
 
   const { data: { grouped: groupedCategories = [] } = { grouped: [] } } =
     useCategories();
-  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const [prefs] = useSyncedPrefs();
 
   const baseGraphParams = useMemo(() => {
@@ -607,7 +611,7 @@ function SankeyInner({ widget }: SankeyInnerProps) {
       showTransfers,
       accounts,
       prefs,
-      !accountsLoading,
+      !accountsLoading && !accountsPlaceholderData,
     );
   }, [
     earliestTransaction,
@@ -624,6 +628,7 @@ function SankeyInner({ widget }: SankeyInnerProps) {
     accounts,
     prefs,
     accountsLoading,
+    accountsPlaceholderData,
   ]);
 
   const defaultGetBaseGraph = async (

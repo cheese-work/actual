@@ -66,7 +66,11 @@ export function SankeyCard({
   const [datesInitialized, setDatesInitialized] = useState(false);
   const { data: { grouped: groupedCategories = [] } = { grouped: [] } } =
     useCategories();
-  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const [prefs] = useSyncedPrefs();
 
   useEffect(() => {
@@ -151,7 +155,7 @@ export function SankeyCard({
       meta?.showTransfers ?? false,
       accounts,
       prefs,
-      !accountsLoading,
+      !accountsLoading && !accountsPlaceholderData,
     );
   }, [
     datesInitialized,
@@ -168,6 +172,7 @@ export function SankeyCard({
     accounts,
     prefs,
     accountsLoading,
+    accountsPlaceholderData,
   ]);
 
   const baseGraph = useReport('sankey', baseGraphParams ?? defaultGetBaseGraph);
