@@ -31,6 +31,13 @@ test.describe('Reports', () => {
   });
 
   test('loads net worth and cash flow reports', async () => {
+    await configurationPage.initializeTestMainCurrency();
+    await expect(
+      page.getByText(
+        'Values in USD. Foreign-currency history is an estimate at current rates.',
+      ),
+    ).toBeVisible();
+
     const reports = await reportsPage.getAvailableReportList();
 
     expect(reports).toEqual([
@@ -55,7 +62,13 @@ test.describe('Reports', () => {
   });
 
   test('loads net worth graph and checks visuals', async () => {
+    await configurationPage.initializeTestMainCurrency();
     await reportsPage.goToNetWorthPage();
+    await expect(
+      page.getByText(
+        'Values in USD. Foreign-currency history is an estimate at current rates.',
+      ),
+    ).toBeVisible();
     await expect(page).toMatchThemeScreenshots();
   });
 

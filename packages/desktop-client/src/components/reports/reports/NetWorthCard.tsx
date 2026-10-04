@@ -23,10 +23,13 @@ import { ReportCardName } from '#components/reports/ReportCardName';
 import { calculateTimeRange } from '#components/reports/reportRanges';
 import { createSpreadsheet as netWorthSpreadsheet } from '#components/reports/spreadsheets/net-worth-spreadsheet';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useDateFormat } from '#hooks/useDateFormat';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 type NetWorthCardProps = {
   widgetId: string;
@@ -50,6 +53,20 @@ export function NetWorthCard({
   const firstDayOfWeekIdx = _firstDayOfWeekIdx || '0';
   const format = useFormat();
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
+  const [prefs] = useSyncedPrefs();
+  const {
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
 
   const [latestTransaction, setLatestTransaction] = useState<string>('');
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
@@ -84,8 +101,10 @@ export function NetWorthCard({
         locale,
         meta?.interval || 'Monthly',
         firstDayOfWeekIdx,
-        format,
+        formatMainCurrency,
         dateFormat,
+        prefs,
+        !accountsLoading && !accountsPlaceholderData,
       ),
     [
       start,
@@ -96,8 +115,11 @@ export function NetWorthCard({
       locale,
       meta?.interval,
       firstDayOfWeekIdx,
-      format,
+      formatMainCurrency,
       dateFormat,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
     ],
   );
   const data = useReport('net_worth', params);
@@ -131,7 +153,7 @@ export function NetWorthCard({
             />
             <DateRange start={start} end={end} />
           </View>
-          {data && (
+          {data?.status === 'complete' && (
             <View style={{ textAlign: 'right' }}>
               <Block
                 style={{
@@ -142,27 +164,44 @@ export function NetWorthCard({
               >
                 <PrivacyFilter activationFilters={[!isCardHovered]}>
                   <FinancialText>
-                    {format(data.netWorth, 'financial')}
+                    {formatMainCurrency(data.netWorth, 'financial')}
                   </FinancialText>
                 </PrivacyFilter>
               </Block>
               <PrivacyFilter activationFilters={[!isCardHovered]}>
-                <Change amount={data.totalChange} />
+                <Change
+                  amount={data.totalChange}
+                  currencyCode={prefs.defaultCurrencyCode}
+                />
               </PrivacyFilter>
             </View>
           )}
         </View>
 
-        {data ? (
-          <NetWorthGraph
-            graphData={data.graphData}
-            accounts={data.accounts}
-            compact
-            showTooltip={!isEditing && !isNarrowWidth}
-            interval={meta?.interval || 'Monthly'}
-            mode={meta?.mode || 'trend'}
-            style={{ height: 'auto', flex: 1 }}
-          />
+        {data?.status === 'complete' ? (
+          <>
+            <Block style={{ padding: '0 20px 8px' }}>
+              {t(
+                'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+                { currencyCode: prefs.defaultCurrencyCode },
+              )}
+            </Block>
+            <NetWorthGraph
+              graphData={data.graphData}
+              accounts={data.accounts}
+              compact
+              showTooltip={!isEditing && !isNarrowWidth}
+              interval={meta?.interval || 'Monthly'}
+              mode={meta?.mode || 'trend'}
+              style={{ height: 'auto', flex: 1 }}
+            />
+          </>
+        ) : data?.status === 'unavailable' ? (
+          <Block style={{ padding: 20 }}>
+            {t(
+              'Net worth is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+            )}
+          </Block>
         ) : (
           <LoadingIndicator />
         )}

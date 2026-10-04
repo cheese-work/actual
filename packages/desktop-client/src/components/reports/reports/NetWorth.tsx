@@ -39,11 +39,13 @@ import { fromDateRepr } from '#components/reports/util';
 import { useAccounts } from '#hooks/useAccounts';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useDateFormat } from '#hooks/useDateFormat';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -82,7 +84,21 @@ function NetWorthInner({ widget }: NetWorthInnerProps) {
     [],
   );
 
-  const { data: accounts = [] } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const [prefs] = useSyncedPrefs();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
   const {
     conditions,
     conditionsOp,
@@ -137,8 +153,10 @@ function NetWorthInner({ widget }: NetWorthInnerProps) {
         locale,
         interval,
         firstDayOfWeekIdx,
-        format,
+        formatMainCurrency,
         dateFormat,
+        prefs,
+        !accountsLoading && !accountsPlaceholderData,
       ),
     [
       start,
@@ -149,8 +167,11 @@ function NetWorthInner({ widget }: NetWorthInnerProps) {
       locale,
       interval,
       firstDayOfWeekIdx,
-      format,
+      formatMainCurrency,
       dateFormat,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
     ],
   );
   const data = useReport('net_worth', reportParams);
@@ -358,50 +379,75 @@ function NetWorthInner({ widget }: NetWorthInnerProps) {
           overflowY: 'auto',
         }}
       >
-        <View
-          style={{
-            textAlign: 'right',
-            paddingTop: 20,
-          }}
-        >
-          <View
-            style={{ ...styles.largeText, fontWeight: 400, marginBottom: 5 }}
-          >
-            <PrivacyFilter>
-              <FinancialText>
-                {format(data.netWorth, 'financial')}
-              </FinancialText>
-            </PrivacyFilter>
-          </View>
-          <PrivacyFilter>
-            <Change amount={data.totalChange} />
-          </PrivacyFilter>
-        </View>
-
-        <NetWorthGraph
-          graphData={data.graphData}
-          accounts={data.accounts}
-          showTooltip={!isNarrowWidth}
-          interval={interval}
-          mode={graphMode}
-        />
-
-        <View style={{ marginTop: 30, userSelect: 'none' }}>
-          <Paragraph>
-            <strong>
-              <Trans>How is net worth calculated?</Trans>
-            </strong>
-          </Paragraph>
+        {data.status === 'unavailable' ? (
           <Paragraph>
             <Trans>
-              Net worth shows the balance of all accounts over time, including
-              all of your investments. Your "net worth" is considered to be the
-              amount you'd have if you sold all your assets and paid off as much
-              debt as possible. If you hover over the graph, you can also see
-              the amount of assets and debt individually.
+              Net worth is unavailable. Check that a Main currency is set and
+              every included account has a valid exchange rate.
             </Trans>
           </Paragraph>
-        </View>
+        ) : (
+          <>
+            <Paragraph>
+              {t(
+                'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+                { currencyCode: prefs.defaultCurrencyCode },
+              )}
+            </Paragraph>
+            <View
+              style={{
+                textAlign: 'right',
+                paddingTop: 20,
+              }}
+            >
+              <View
+                style={{
+                  ...styles.largeText,
+                  fontWeight: 400,
+                  marginBottom: 5,
+                }}
+              >
+                <PrivacyFilter>
+                  <FinancialText>
+                    {formatMainCurrency(data.netWorth, 'financial')}
+                  </FinancialText>
+                </PrivacyFilter>
+              </View>
+              <PrivacyFilter>
+                <Change
+                  amount={data.totalChange}
+                  currencyCode={prefs.defaultCurrencyCode}
+                />
+              </PrivacyFilter>
+            </View>
+
+            <NetWorthGraph
+              graphData={data.graphData}
+              accounts={data.accounts}
+              showTooltip={!isNarrowWidth}
+              interval={interval}
+              mode={graphMode}
+            />
+
+            <View style={{ marginTop: 30, userSelect: 'none' }}>
+              <Paragraph>
+                <strong>
+                  <Trans>How is net worth calculated?</Trans>
+                </strong>
+              </Paragraph>
+              <Paragraph>
+                <Trans>
+                  Net worth shows the balance of all accounts over time,
+                  including all of your investments. Your "net worth" is
+                  considered to be the amount you'd have if you sold all your
+                  assets and paid off as much debt as possible. If you hover
+                  over the graph, you can also see the amount of assets and debt
+                  individually.
+                </Trans>
+              </Paragraph>
+            </View>
+          </>
+        )}
       </View>
     </Page>
   );

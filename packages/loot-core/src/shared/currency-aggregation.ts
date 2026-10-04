@@ -85,7 +85,7 @@ export function roundToDisplayPrecision(
     : null;
 }
 
-function getPresentationAdjustment(
+export function getPresentationAdjustment(
   roundedTotal: IntegerAmount,
   displayDecimalPlaces: number,
   immediateChildAmounts: readonly IntegerAmount[],
