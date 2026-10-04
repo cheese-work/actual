@@ -1,4 +1,5 @@
 import type {
+  AccountEntity,
   balanceTypeOpType,
   CategoryEntity,
   CategoryGroupEntity,
@@ -11,6 +12,8 @@ import { aqlQuery } from '#queries/aqlQuery';
 
 import { fetchBudgetData } from './budgetDataQuery';
 import { makeQuery } from './makeQuery';
+import { convertReportQueryRows } from './report-currency';
+import type { ReportDataStatus } from './report-currency';
 
 export async function fetchSpreadsheetQueryData({
   balanceTypeOp,
@@ -24,6 +27,10 @@ export async function fetchSpreadsheetQueryData({
   conditionsOpKey,
   filters,
   budgetType,
+  accounts,
+  prefs,
+  showOffBudget,
+  accountsReady,
 }: {
   balanceTypeOp: balanceTypeOpType | undefined;
   startDate: string;
@@ -36,7 +43,17 @@ export async function fetchSpreadsheetQueryData({
   conditionsOpKey: string;
   filters: unknown[];
   budgetType?: SyncedPrefs['budgetType'];
-}): Promise<{ assets: QueryDataEntity[]; debts: QueryDataEntity[] }> {
+  accounts: AccountEntity[];
+  prefs: Readonly<SyncedPrefs>;
+  showOffBudget: boolean;
+  accountsReady: boolean;
+}): Promise<
+  { assets: QueryDataEntity[]; debts: QueryDataEntity[] } | ReportDataStatus
+> {
+  if (!prefs.defaultCurrencyCode) {
+    return { status: 'unavailable' };
+  }
+
   if (balanceTypeOp === 'totalBudgeted') {
     return fetchBudgetData({
       startDate,
@@ -48,6 +65,10 @@ export async function fetchSpreadsheetQueryData({
       conditionsOp: conditionsOp === 'or' ? 'or' : 'and',
       budgetType,
     });
+  }
+
+  if (!accountsReady) {
+    return { status: 'loading' };
   }
 
   const [assets, debts] = await Promise.all([
@@ -73,5 +94,27 @@ export async function fetchSpreadsheetQueryData({
     ).then(({ data }) => data),
   ]);
 
-  return { assets, debts };
+  const valuationTime = Date.now();
+  const convertedAssets = convertReportQueryRows(
+    assets,
+    accounts,
+    prefs,
+    showOffBudget,
+    valuationTime,
+  );
+  const convertedDebts = convertReportQueryRows(
+    debts,
+    accounts,
+    prefs,
+    showOffBudget,
+    valuationTime,
+  );
+  if (!Array.isArray(convertedAssets)) {
+    return convertedAssets;
+  }
+  if (!Array.isArray(convertedDebts)) {
+    return convertedDebts;
+  }
+
+  return { assets: convertedAssets, debts: convertedDebts };
 }

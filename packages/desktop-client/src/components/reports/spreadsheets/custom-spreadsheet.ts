@@ -21,10 +21,7 @@ import {
   groupBySelections,
   ReportOptions,
 } from '#components/reports/ReportOptions';
-import type {
-  QueryDataEntity,
-  UncategorizedEntity,
-} from '#components/reports/ReportOptions';
+import type { UncategorizedEntity } from '#components/reports/ReportOptions';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 
 import { calculateLegend } from './calculateLegend';
@@ -32,6 +29,7 @@ import { fetchSpreadsheetQueryData } from './fetchSpreadsheetQueryData';
 import { filterEmptyRows } from './filterEmptyRows';
 import { filterHiddenItems } from './filterHiddenItems';
 import { recalculate } from './recalculate';
+import type { ReportDataStatus } from './report-currency';
 import { sortData } from './sortData';
 import {
   determineIntervalRange,
@@ -57,6 +55,8 @@ export type createCustomSpreadsheetProps = {
   sortByOp?: sortByOpType;
   payees?: PayeeEntity[];
   accounts?: AccountEntity[];
+  accountsReady?: boolean;
+  prefs: Readonly<SyncedPrefs>;
   graphType?: string;
   firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'];
   dateFormat?: SyncedPrefs['dateFormat'];
@@ -80,6 +80,8 @@ export function createCustomSpreadsheet({
   sortByOp = 'desc',
   payees = [],
   accounts = [],
+  accountsReady = true,
+  prefs,
   graphType,
   firstDayOfWeekIdx,
   dateFormat,
@@ -93,8 +95,17 @@ export function createCustomSpreadsheet({
 
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: DataEntity) => void,
+    setData: (data: DataEntity | ReportDataStatus) => void,
   ) => {
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    if (balanceTypeOp !== 'totalBudgeted' && !accountsReady) {
+      setData({ status: 'loading' });
+      return;
+    }
+
     if (groupByList.length === 0) {
       setData({
         data: [],
@@ -117,10 +128,7 @@ export function createCustomSpreadsheet({
     });
     const conditionsOpKey = conditionsOp === 'or' ? '$or' : '$and';
 
-    let assets: QueryDataEntity[];
-    let debts: QueryDataEntity[];
-
-    ({ assets, debts } = await fetchSpreadsheetQueryData({
+    const queryData = await fetchSpreadsheetQueryData({
       balanceTypeOp,
       startDate,
       endDate,
@@ -132,7 +140,16 @@ export function createCustomSpreadsheet({
       conditionsOpKey,
       filters,
       budgetType,
-    }));
+      accounts,
+      prefs,
+      showOffBudget,
+      accountsReady,
+    });
+    if (!('assets' in queryData)) {
+      setData(queryData);
+      return;
+    }
+    let { assets, debts } = queryData;
 
     if (interval === 'Weekly' && balanceTypeOp !== 'totalBudgeted') {
       debts = debts.map(d => {

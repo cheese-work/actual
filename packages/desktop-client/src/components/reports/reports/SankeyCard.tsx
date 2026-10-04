@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Block } from '@actual-app/components/block';
+import { Paragraph } from '@actual-app/components/paragraph';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
@@ -31,15 +32,18 @@ import {
 import type {
   Graph,
   GraphLayers,
+  SankeyResult,
 } from '#components/reports/spreadsheets/sankey-spreadsheet';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useLocale } from '#hooks/useLocale';
 import { useResizeObserver } from '#hooks/useResizeObserver';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 const defaultGetBaseGraph = async (
   _spreadsheet: unknown,
-  setData: (data: Graph) => void,
+  setData: (data: SankeyResult) => void,
 ) => setData(new Map());
 
 type SankeyCardProps = {
@@ -62,6 +66,8 @@ export function SankeyCard({
   const [datesInitialized, setDatesInitialized] = useState(false);
   const { data: { grouped: groupedCategories = [] } = { grouped: [] } } =
     useCategories();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const [prefs] = useSyncedPrefs();
 
   useEffect(() => {
     void Promise.all([
@@ -143,6 +149,9 @@ export function SankeyCard({
       mode,
       groupAccounts,
       meta?.showTransfers ?? false,
+      accounts,
+      prefs,
+      !accountsLoading,
     );
   }, [
     datesInitialized,
@@ -156,18 +165,30 @@ export function SankeyCard({
     mode,
     groupAccounts,
     meta?.showTransfers,
+    accounts,
+    prefs,
+    accountsLoading,
   ]);
 
   const baseGraph = useReport('sankey', baseGraphParams ?? defaultGetBaseGraph);
-  const baseGraphRef = useRef(baseGraph);
+  const baseGraphRef = useRef<Graph | null>(null);
 
   useEffect(() => {
-    if (baseGraph) {
+    if (baseGraph && !('status' in baseGraph)) {
       baseGraphRef.current = baseGraph;
     }
   }, [baseGraph]);
 
-  const displayBaseGraph = baseGraph || baseGraphRef.current;
+  const isUnavailable =
+    baseGraph !== null &&
+    !(baseGraph instanceof Map) &&
+    baseGraph.status === 'unavailable';
+  const displayBaseGraph =
+    baseGraph instanceof Map
+      ? baseGraph
+      : baseGraph === null
+        ? baseGraphRef.current
+        : null;
   const compactData = useMemo(() => {
     if (!displayBaseGraph) {
       return null;
@@ -235,10 +256,25 @@ export function SankeyCard({
             <Block style={{ color: theme.pageTextSubdued }}>
               {dateDescription}
             </Block>
+            {prefs.defaultCurrencyCode && (
+              <Block style={{ color: theme.pageTextSubdued }}>
+                <Trans
+                  i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+                  values={{ currency: prefs.defaultCurrencyCode }}
+                />
+              </Block>
+            )}
           </View>
         </View>
 
-        {compactData ? (
+        {isUnavailable ? (
+          <Paragraph>
+            <Trans>
+              Sankey values are unavailable. Check that a Main currency is set
+              and every included account has a valid exchange rate.
+            </Trans>
+          </Paragraph>
+        ) : compactData ? (
           <View ref={containerRef} style={{ flexGrow: 1 }}>
             <SankeyGraph
               data={compactData}

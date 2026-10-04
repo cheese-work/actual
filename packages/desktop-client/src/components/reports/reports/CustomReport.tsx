@@ -5,6 +5,7 @@ import { useLocation, useParams } from 'react-router';
 import { AlignedText } from '@actual-app/components/aligned-text';
 import { Block } from '@actual-app/components/block';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
+import { Paragraph } from '@actual-app/components/paragraph';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -66,6 +67,7 @@ import { usePayees } from '#hooks/usePayees';
 import { useReport as useCustomReport } from '#hooks/useReport';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 /**
  * Transform `selectedCategories` into `conditions`.
@@ -483,7 +485,8 @@ function CustomReportInner({
     ReportOptions.balanceTypeMap.get(balanceType) || 'totalDebts';
   const sortByOp: sortByOpType = sortBy || 'desc';
   const { data: payees = [] } = usePayees();
-  const { data: accounts = [] } = useAccounts();
+  const { data: accounts = [], isLoading: accountsLoading } = useAccounts();
+  const [prefs] = useSyncedPrefs();
 
   const hasWarning = calculateHasWarning(conditions, {
     categories: categories.list,
@@ -528,6 +531,9 @@ function CustomReportInner({
       balanceTypeOp,
       sortByOp,
       firstDayOfWeekIdx,
+      accounts,
+      accountsReady: !accountsLoading,
+      prefs,
     });
   }, [
     startDate,
@@ -545,6 +551,9 @@ function CustomReportInner({
     trimIntervals,
     sortByOp,
     firstDayOfWeekIdx,
+    accounts,
+    accountsLoading,
+    prefs,
   ]);
 
   const getGraphData = useMemo(() => {
@@ -566,6 +575,8 @@ function CustomReportInner({
       sortByOp,
       payees,
       accounts,
+      accountsReady: !accountsLoading,
+      prefs,
       graphType,
       firstDayOfWeekIdx,
       dateFormat,
@@ -580,6 +591,8 @@ function CustomReportInner({
     categories,
     payees,
     accounts,
+    accountsLoading,
+    prefs,
     conditions,
     conditionsOp,
     showEmpty,
@@ -595,9 +608,16 @@ function CustomReportInner({
   const graphData = useReport('default', getGraphData);
   const groupedData = useReport('grouped', getGroupData);
 
-  const data: DataEntity | null = graphData
-    ? { ...graphData, groupedData }
-    : null;
+  const reportStatus =
+    graphData && 'status' in graphData
+      ? graphData.status
+      : groupedData && !Array.isArray(groupedData)
+        ? groupedData.status
+        : null;
+  const data: DataEntity | null =
+    graphData && !('status' in graphData) && Array.isArray(groupedData)
+      ? { ...graphData, groupedData }
+      : null;
 
   const customReportItems: CustomReportEntity = {
     id: '',
@@ -1038,7 +1058,23 @@ function CustomReportInner({
                 </View>
               )}
               <View style={{ flex: 1, overflow: 'auto' }}>
-                {data ? (
+                {prefs.defaultCurrencyCode && (
+                  <Paragraph>
+                    <Trans
+                      i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+                      values={{ currency: prefs.defaultCurrencyCode }}
+                    />
+                  </Paragraph>
+                )}
+                {reportStatus === 'unavailable' ? (
+                  <Paragraph>
+                    <Trans>
+                      Custom report values are unavailable. Check that a Main
+                      currency is set and every included account has a valid
+                      exchange rate.
+                    </Trans>
+                  </Paragraph>
+                ) : data ? (
                   <ChooseGraph
                     data={data}
                     filters={conditions}

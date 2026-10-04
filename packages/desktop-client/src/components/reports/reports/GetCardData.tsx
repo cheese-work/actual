@@ -3,6 +3,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { Trans } from 'react-i18next';
 
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
+import { Paragraph } from '@actual-app/components/paragraph';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -25,6 +26,7 @@ import { createGroupedSpreadsheet } from '#components/reports/spreadsheets/group
 import { useReport } from '#components/reports/useReport';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 function ErrorFallback() {
   return (
@@ -74,6 +76,7 @@ export function GetCardData({
   latestTransaction,
   firstDayOfWeekIdx,
   showTooltip,
+  accountsReady,
 }: {
   report: CustomReportEntity;
   payees: PayeeEntity[];
@@ -83,9 +86,11 @@ export function GetCardData({
   latestTransaction: string;
   firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'];
   showTooltip?: boolean;
+  accountsReady: boolean;
 }) {
   const { isNarrowWidth } = useResponsive();
   const [budgetType = 'envelope'] = useSyncedPref('budgetType');
+  const [prefs] = useSyncedPrefs();
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
 
   let startDate = report.startDate;
@@ -140,8 +145,21 @@ export function GetCardData({
       balanceTypeOp: ReportOptions.balanceTypeMap.get(report.balanceType),
       firstDayOfWeekIdx,
       sortByOp: report.sortBy,
+      accounts,
+      accountsReady,
+      prefs,
     });
-  }, [report, categories, startDate, endDate, firstDayOfWeekIdx, budgetType]);
+  }, [
+    report,
+    categories,
+    startDate,
+    endDate,
+    firstDayOfWeekIdx,
+    budgetType,
+    accounts,
+    accountsReady,
+    prefs,
+  ]);
   const getGraphData = useMemo(() => {
     return createCustomSpreadsheet({
       startDate,
@@ -160,6 +178,8 @@ export function GetCardData({
       balanceTypeOp: ReportOptions.balanceTypeMap.get(report.balanceType),
       payees,
       accounts,
+      accountsReady,
+      prefs,
       graphType: report.graphType,
       firstDayOfWeekIdx,
       sortByOp: report.sortBy,
@@ -170,6 +190,8 @@ export function GetCardData({
     categories,
     payees,
     accounts,
+    accountsReady,
+    prefs,
     startDate,
     endDate,
     firstDayOfWeekIdx,
@@ -181,25 +203,50 @@ export function GetCardData({
   const graphData = useReport('default' + report.name, getGraphData);
   const groupedData = useReport('grouped' + report.name, getGroupData);
 
+  const reportStatus =
+    graphData && 'status' in graphData
+      ? graphData.status
+      : groupedData && !Array.isArray(groupedData)
+        ? groupedData.status
+        : null;
   const data =
-    graphData && groupedData ? { ...graphData, groupedData } : graphData;
+    graphData && !('status' in graphData) && Array.isArray(groupedData)
+      ? { ...graphData, groupedData }
+      : null;
 
-  return data?.data ? (
-    <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <ChooseGraph
-        data={data}
-        mode={report.mode}
-        graphType={report.graphType}
-        balanceType={report.balanceType}
-        groupBy={report.groupBy}
-        interval={report.interval}
-        compact
-        style={{ height: 'auto', flex: 1 }}
-        intervalsCount={intervals.length}
-        showTrendLines={report.showTrendLines}
-        showTooltip={!isNarrowWidth && showTooltip}
-      />
-    </ErrorBoundary>
+  return reportStatus === 'unavailable' ? (
+    <Paragraph>
+      <Trans>
+        Custom report values are unavailable. Check that a Main currency is set
+        and every included account has a valid exchange rate.
+      </Trans>
+    </Paragraph>
+  ) : data?.data ? (
+    <>
+      {prefs.defaultCurrencyCode && (
+        <Paragraph>
+          <Trans
+            i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+            values={{ currency: prefs.defaultCurrencyCode }}
+          />
+        </Paragraph>
+      )}
+      <ErrorBoundary FallbackComponent={ErrorFallback}>
+        <ChooseGraph
+          data={data}
+          mode={report.mode}
+          graphType={report.graphType}
+          balanceType={report.balanceType}
+          groupBy={report.groupBy}
+          interval={report.interval}
+          compact
+          style={{ height: 'auto', flex: 1 }}
+          intervalsCount={intervals.length}
+          showTrendLines={report.showTrendLines}
+          showTooltip={!isNarrowWidth && showTooltip}
+        />
+      </ErrorBoundary>
+    </>
   ) : (
     <LoadingIndicator />
   );
