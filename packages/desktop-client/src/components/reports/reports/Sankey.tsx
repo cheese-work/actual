@@ -46,8 +46,12 @@ import {
   GRAPH_LAYER_ORDER,
   GraphLayers,
 } from '#components/reports/spreadsheets/sankey-spreadsheet';
-import type { Graph } from '#components/reports/spreadsheets/sankey-spreadsheet';
+import type {
+  Graph,
+  SankeyResult,
+} from '#components/reports/spreadsheets/sankey-spreadsheet';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormatList } from '#hooks/useFormatList';
@@ -55,6 +59,7 @@ import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import { useResizeObserver } from '#hooks/useResizeObserver';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -576,6 +581,12 @@ function SankeyInner({ widget }: SankeyInnerProps) {
 
   const { data: { grouped: groupedCategories = [] } = { grouped: [] } } =
     useCategories();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const [prefs] = useSyncedPrefs();
 
   const baseGraphParams = useMemo(() => {
     if (!datesInitialized) {
@@ -598,6 +609,9 @@ function SankeyInner({ widget }: SankeyInnerProps) {
       graphMode,
       groupAccounts,
       showTransfers,
+      accounts,
+      prefs,
+      !accountsLoading && !accountsPlaceholderData,
     );
   }, [
     earliestTransaction,
@@ -611,23 +625,36 @@ function SankeyInner({ widget }: SankeyInnerProps) {
     graphMode,
     groupAccounts,
     showTransfers,
+    accounts,
+    prefs,
+    accountsLoading,
+    accountsPlaceholderData,
   ]);
 
   const defaultGetBaseGraph = async (
     _spreadsheet: unknown,
-    setData: (data: Graph) => void,
+    setData: (data: SankeyResult) => void,
   ) => setData(new Map());
 
   const baseGraph = useReport('sankey', baseGraphParams ?? defaultGetBaseGraph);
-  const baseGraphRef = useRef(baseGraph);
+  const baseGraphRef = useRef<Graph | null>(null);
 
   useEffect(() => {
-    if (baseGraph) {
+    if (baseGraph && !('status' in baseGraph)) {
       baseGraphRef.current = baseGraph;
     }
   }, [baseGraph]);
 
-  const displayBaseGraph = baseGraph || baseGraphRef.current;
+  const isUnavailable =
+    baseGraph !== null &&
+    !(baseGraph instanceof Map) &&
+    baseGraph.status === 'unavailable';
+  const displayBaseGraph =
+    baseGraph instanceof Map
+      ? baseGraph
+      : baseGraph === null
+        ? baseGraphRef.current
+        : null;
   const displayData: SankeyData | null = useMemo(() => {
     if (!displayBaseGraph) {
       return null;
@@ -783,7 +810,7 @@ function SankeyInner({ widget }: SankeyInnerProps) {
     i18n.language,
   );
 
-  if (!datesInitialized || !displayData) {
+  if (!datesInitialized || (!displayData && !isUnavailable)) {
     return <LoadingIndicator />;
   }
 
@@ -942,9 +969,25 @@ function SankeyInner({ widget }: SankeyInnerProps) {
                   paddingTop: 10,
                 }}
               >
-                {displayData &&
-                displayData.links &&
-                displayData.links.length > 0 ? (
+                {prefs.defaultCurrencyCode && (
+                  <Paragraph>
+                    <Trans
+                      i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+                      values={{ currency: prefs.defaultCurrencyCode }}
+                    />
+                  </Paragraph>
+                )}
+                {isUnavailable ? (
+                  <Paragraph>
+                    <Trans>
+                      Sankey values are unavailable. Check that a Main currency
+                      is set and every included account has a valid exchange
+                      rate.
+                    </Trans>
+                  </Paragraph>
+                ) : displayData &&
+                  displayData.links &&
+                  displayData.links.length > 0 ? (
                   <View
                     ref={containerRef}
                     style={{

@@ -161,6 +161,7 @@ test.describe('Reports', () => {
     let customReportPage: CustomReportPage;
 
     test.beforeEach(async () => {
+      await configurationPage.initializeTestMainCurrency();
       customReportPage = await reportsPage.goToCustomReportPage();
       await page.addStyleTag({
         content: '[role="tooltip"] { display: none !important; }',

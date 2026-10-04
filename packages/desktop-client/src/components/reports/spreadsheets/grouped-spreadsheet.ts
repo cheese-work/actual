@@ -6,13 +6,13 @@ import {
   categoryLists,
   ReportOptions,
 } from '#components/reports/ReportOptions';
-import type { QueryDataEntity } from '#components/reports/ReportOptions';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 
 import type { createCustomSpreadsheetProps } from './custom-spreadsheet';
 import { fetchSpreadsheetQueryData } from './fetchSpreadsheetQueryData';
 import { filterEmptyRows } from './filterEmptyRows';
 import { recalculate } from './recalculate';
+import type { ReportDataStatus } from './report-currency';
 import { sortData } from './sortData';
 import {
   determineIntervalRange,
@@ -35,13 +35,25 @@ export function createGroupedSpreadsheet({
   balanceTypeOp,
   sortByOp,
   firstDayOfWeekIdx,
+  accounts = [],
+  accountsReady = true,
+  prefs,
 }: createCustomSpreadsheetProps) {
   const [categoryList, categoryGroup] = categoryLists(categories);
 
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: GroupedEntity[]) => void,
+    setData: (data: GroupedEntity[] | ReportDataStatus) => void,
   ) => {
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    if (balanceTypeOp !== 'totalBudgeted' && !accountsReady) {
+      setData({ status: 'loading' });
+      return;
+    }
+
     if (categoryList.length === 0) {
       setData([]);
       return;
@@ -52,10 +64,7 @@ export function createGroupedSpreadsheet({
     });
     const conditionsOpKey = conditionsOp === 'or' ? '$or' : '$and';
 
-    let assets: QueryDataEntity[];
-    let debts: QueryDataEntity[];
-
-    ({ assets, debts } = await fetchSpreadsheetQueryData({
+    const queryData = await fetchSpreadsheetQueryData({
       balanceTypeOp,
       startDate,
       endDate,
@@ -67,7 +76,16 @@ export function createGroupedSpreadsheet({
       conditionsOpKey,
       filters,
       budgetType,
-    }));
+      accounts,
+      prefs,
+      showOffBudget,
+      accountsReady,
+    });
+    if (!('assets' in queryData)) {
+      setData(queryData);
+      return;
+    }
+    let { assets, debts } = queryData;
 
     if (interval === 'Weekly' && balanceTypeOp !== 'totalBudgeted') {
       debts = debts.map(d => {

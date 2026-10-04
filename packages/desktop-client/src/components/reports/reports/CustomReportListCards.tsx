@@ -72,7 +72,11 @@ function CustomReportListCardsInner({
   const [latestTransaction, setLatestTransaction] = useState('');
 
   const { data: payees = [] } = usePayees();
-  const { data: accounts = [] } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const { data: categories = { list: [], grouped: [] } } = useCategories();
 
   const hasWarning = calculateHasWarning(report.conditions ?? [], {
@@ -164,6 +168,7 @@ function CustomReportListCardsInner({
           report={report}
           payees={payees}
           accounts={accounts}
+          accountsReady={!accountsLoading && !accountsPlaceholderData}
           categories={categories}
           earliestTransaction={earliestTransaction}
           latestTransaction={latestTransaction}

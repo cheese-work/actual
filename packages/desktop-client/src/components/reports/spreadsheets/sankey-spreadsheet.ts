@@ -1,16 +1,22 @@
 import { theme } from '@actual-app/components/theme';
 import { send } from '@actual-app/core/platform/client/connection';
+import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
+import { convert } from '@actual-app/core/shared/exchange-rates';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type {
+  AccountEntity,
   CategoryGroupEntity,
   RuleConditionEntity,
 } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import { t } from 'i18next';
 
 import { getColorScale } from '#components/reports/chart-theme';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { aqlQuery } from '#queries/aqlQuery';
+
+import type { ReportDataStatus } from './report-currency';
 
 type BudgetMonthCategory = {
   id: string;
@@ -113,6 +119,7 @@ export type NodeData = {
   color?: string;
 };
 export type Graph = Map<NodeKey, NodeData>;
+export type SankeyResult = Graph | ReportDataStatus;
 type VisualLayerIndex = number;
 
 type TooltipInfoMap = Map<
@@ -169,10 +176,13 @@ export function createBaseGraphSpreadsheet(
   mode: 'budgeted' | 'spent' = 'spent',
   groupAccounts: boolean = false,
   showTransfers: boolean = false,
+  accounts: AccountEntity[] = [],
+  prefs: Readonly<SyncedPrefs> = {},
+  accountsReady: boolean = true,
 ) {
   return async (
     _spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: Graph) => void,
+    setData: (data: SankeyResult) => void,
   ) => {
     const baseGraph = await createBaseGraph(
       start,
@@ -183,6 +193,9 @@ export function createBaseGraphSpreadsheet(
       mode,
       groupAccounts,
       showTransfers,
+      accounts,
+      prefs,
+      accountsReady,
     );
 
     setData(baseGraph);
@@ -198,7 +211,17 @@ async function createBaseGraph(
   mode: 'budgeted' | 'spent' = 'spent',
   groupAccounts: boolean = false,
   showTransfers: boolean = false,
-): Promise<Graph> {
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  accountsReady: boolean,
+): Promise<SankeyResult> {
+  if (!prefs.defaultCurrencyCode) {
+    return { status: 'unavailable' };
+  }
+  if (mode === 'spent' && !accountsReady) {
+    return { status: 'loading' };
+  }
+
   let data: CategoryEntry[] = [];
   let aggregated: AggregatedBudget | undefined;
   let transferData: TransferPair[] | undefined;
@@ -219,7 +242,12 @@ async function createBaseGraph(
       conditionsOp,
       groupAccounts,
       showTransfers,
+      accounts,
+      prefs,
     )();
+    if ('status' in res) {
+      return res;
+    }
     data = res.data;
     transferData = res.transferData;
   }
@@ -377,13 +405,18 @@ export function createTransactionsSpreadsheet(
   conditionsOp: 'and' | 'or' = 'and',
   groupAccounts: boolean,
   showTransfers: boolean,
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
 ) {
-  return async () => {
+  return async (): Promise<
+    { data: CategoryEntry[]; transferData: TransferPair[] } | ReportDataStatus
+  > => {
     // gather filters user has set
     const { filters } = await send('make-filters-from-conditions', {
       conditions: conditions.filter(cond => !cond.customName),
     });
     const conditionsOpKey = conditionsOp === 'or' ? '$or' : '$and';
+    const valuationTime = Date.now();
 
     const categoryData = await fetchCategoryData(
       categories,
@@ -392,20 +425,98 @@ export function createTransactionsSpreadsheet(
       start,
       end,
       groupAccounts,
+      accounts,
+      prefs,
+      valuationTime,
+    );
+    if (!Array.isArray(categoryData)) {
+      return categoryData;
+    }
+    let totalCategoryAmount = categoryData.reduce(
+      (total, entry) => total + BigInt(entry.value),
+      0n,
     );
 
     let transferData: TransferPair[] = [];
     if (showTransfers) {
-      transferData = await fetchTransferData(
+      const rawTransferData = await fetchTransferData(
         conditionsOpKey,
         filters,
         start,
         end,
       );
+      const convertedTransferData = convertTransferPairs(
+        rawTransferData,
+        accounts,
+        prefs,
+        valuationTime,
+      );
+      if (!convertedTransferData) {
+        return { status: 'unavailable' };
+      }
+      transferData = convertedTransferData;
+    }
+    totalCategoryAmount += transferData.reduce(
+      (total, transfer) => total + BigInt(transfer.amount),
+      0n,
+    );
+    if (totalCategoryAmount > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return { status: 'unavailable' };
     }
 
     return { data: categoryData, transferData };
   };
+}
+
+export function convertSankeyCategoryEntries(
+  categoryData: CategoryEntry[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): CategoryEntry[] | ReportDataStatus {
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const convertedCategoryData: CategoryEntry[] = [];
+
+  for (const entry of categoryData) {
+    if (!entry.accountId || !Number.isSafeInteger(entry.value)) {
+      return { status: 'unavailable' };
+    }
+
+    const account = accountsById.get(entry.accountId);
+    if (!account) {
+      return { status: 'unavailable' };
+    }
+
+    const accountCurrency = getEffectiveAccountCurrency(
+      account.currency,
+      prefs,
+    );
+    if (!accountCurrency || !prefs.defaultCurrencyCode) {
+      return { status: 'unavailable' };
+    }
+
+    let convertedValue: number | null;
+    try {
+      convertedValue = convert(
+        entry.value,
+        accountCurrency,
+        prefs.defaultCurrencyCode,
+        prefs,
+        valuationTime,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+        return { status: 'unavailable' };
+      }
+      throw error;
+    }
+    if (convertedValue === null) {
+      return { status: 'unavailable' };
+    }
+    convertedCategoryData.push({ ...entry, value: convertedValue });
+  }
+
+  return convertedCategoryData;
 }
 
 function cloneGraph(graph: Graph): Graph {
@@ -528,7 +639,10 @@ async function fetchCategoryData(
   start: string,
   end: string,
   groupAccounts: boolean,
-): Promise<CategoryEntry[]> {
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): Promise<CategoryEntry[] | ReportDataStatus> {
   const nested = await Promise.all(
     categoryGroups.map(async (categoryGroup: CategoryGroupEntity) => {
       const entries = await Promise.all(
@@ -588,9 +702,18 @@ async function fetchCategoryData(
     }),
   );
   const allCategoryData = nested.flat();
+  const convertedCategoryData = convertSankeyCategoryEntries(
+    allCategoryData,
+    accounts,
+    prefs,
+    valuationTime,
+  );
+  if (!Array.isArray(convertedCategoryData)) {
+    return convertedCategoryData;
+  }
 
   if (groupAccounts) {
-    allCategoryData.forEach(entry => {
+    convertedCategoryData.forEach(entry => {
       if (entry.accountName && entry.accountId) {
         entry.accountName = SpecialNodeKeys.AllAccounts;
         entry.accountId = SpecialNodeKeys.AllAccounts;
@@ -598,7 +721,7 @@ async function fetchCategoryData(
     });
   }
 
-  return allCategoryData;
+  return convertedCategoryData;
 }
 
 // Fetch transactions that are transfers within the provided month range
@@ -647,6 +770,61 @@ async function fetchTransferData(
   return aggregateTransferPairs(raw_results);
 }
 
+export function convertTransferPairs(
+  transferPairs: TransferPair[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): TransferPair[] | null {
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const mainCurrency = prefs.defaultCurrencyCode;
+  if (!mainCurrency) {
+    return null;
+  }
+
+  const converted: TransferPair[] = [];
+  let total = 0n;
+  for (const pair of transferPairs) {
+    const account = accountsById.get(pair.fromAccountId);
+    if (!account || !Number.isSafeInteger(pair.amount)) {
+      return null;
+    }
+    const accountCurrency = getEffectiveAccountCurrency(
+      account.currency,
+      prefs,
+    );
+    if (!accountCurrency) {
+      return null;
+    }
+
+    let amount: number | null;
+    try {
+      amount = convert(
+        pair.amount,
+        accountCurrency,
+        mainCurrency,
+        prefs,
+        valuationTime,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+        return null;
+      }
+      throw error;
+    }
+    if (amount === null) {
+      return null;
+    }
+    total += BigInt(amount);
+    if (total > BigInt(Number.MAX_SAFE_INTEGER)) {
+      return null;
+    }
+    converted.push({ ...pair, amount });
+  }
+
+  return converted;
+}
+
 export function aggregateTransferPairs(
   rawResults: TransferEntry[],
 ): TransferPair[] {
@@ -658,9 +836,12 @@ export function aggregateTransferPairs(
     byAccountId.set(String(transfer.accountId), transfer.accountName);
   });
 
-  const resultPairs = new Map<string, number>();
+  const resultPairs = new Map<string, bigint>();
 
   rawResults.forEach((from: TransferEntry) => {
+    if (!Number.isSafeInteger(from.amount)) {
+      throw new Error('safeNumber: invalid transfer amount');
+    }
     const to = byId.get(String(from.transfer_id));
     if (!to) return;
 
@@ -670,24 +851,31 @@ export function aggregateTransferPairs(
     const pairKey = `${accountId1}|${accountId2}`;
     const sourceAccountId = from.amount < 0 ? from.accountId : to.accountId;
     const sign = sourceAccountId === accountId1 ? 1 : -1;
-    const existingValue = resultPairs.get(pairKey) ?? 0;
+    const existingValue = resultPairs.get(pairKey) ?? 0n;
 
-    resultPairs.set(pairKey, existingValue + sign * Math.abs(from.amount));
+    resultPairs.set(
+      pairKey,
+      existingValue + BigInt(sign) * BigInt(Math.abs(from.amount)),
+    );
   });
 
   return Array.from(resultPairs.entries())
-    .filter(([, value]) => value !== 0)
+    .filter(([, value]) => value !== 0n)
     .map(([key, value]) => {
+      const absoluteValue = value < 0n ? -value : value;
+      if (absoluteValue > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error('safeNumber: transfer total is unsafe');
+      }
       const [accountId1, accountId2] = key.split('|');
-      const fromAccountId = value > 0 ? accountId1 : accountId2;
-      const toAccountId = value > 0 ? accountId2 : accountId1;
+      const fromAccountId = value > 0n ? accountId1 : accountId2;
+      const toAccountId = value > 0n ? accountId2 : accountId1;
 
       return {
         fromAccountId,
         fromAccountName: byAccountId.get(fromAccountId) || '',
         toAccountId,
         toAccountName: byAccountId.get(toAccountId) || '',
-        amount: Math.abs(value),
+        amount: Number(absoluteValue),
       };
     }) satisfies TransferPair[];
 }
