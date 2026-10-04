@@ -1,5 +1,11 @@
+import { createElement } from 'react';
+
 import type { GroupedEntity } from '@actual-app/core/types/models';
+import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+
+import { CustomTooltip as BarGraphTooltip } from '#components/reports/graphs/BarGraph';
+import { TestProviders } from '#mocks';
 
 import {
   createReportAmountFormatter,
@@ -38,14 +44,39 @@ describe('createReportAmountFormatter', () => {
   });
 
   it('keeps chart tooltip values aligned with table amounts', () => {
-    const format = createReportAmountFormatter(makeReportFormat(0));
-    const tableAmount = format(250);
-    const tooltipAmount = format(250);
+    const format = makeReportFormat(0);
+    const tableAmount = createReportAmountFormatter(format)(250);
+    const { container } = render(
+      createElement(
+        TestProviders,
+        null,
+        createElement(BarGraphTooltip, {
+          active: true,
+          payload: [
+            {
+              payload: {
+                name: 'Tie date',
+                totalAssets: 250,
+                totalDebts: 0,
+                netAssets: 250,
+                netDebts: 0,
+                totalTotals: 250,
+                totalBudgeted: 250,
+                networth: 250,
+                totalChange: 0,
+                children: [{ props: { name: 'Category', fill: '#000' } }],
+              },
+            },
+          ],
+          balanceTypeOp: 'totalTotals',
+          yAxis: 'name',
+          format: createReportAmountFormatter(format),
+        }),
+      ),
+    );
 
-    expect({ tableAmount, tooltipAmount }).toEqual({
-      tableAmount: '2',
-      tooltipAmount: '2',
-    });
+    expect(container.textContent).toContain(tableAmount);
+    expect(container.textContent).not.toContain('3');
   });
 });
 

@@ -73,7 +73,7 @@ type CustomTooltipProps = {
   format: ReportAmountFormatter;
 };
 
-const CustomTooltip = ({
+export const CustomTooltip = ({
   active,
   payload,
   balanceTypeOp,
