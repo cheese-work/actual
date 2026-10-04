@@ -24,6 +24,10 @@ import {
   useDeleteAccountGroupMutation,
   useUpdateAccountGroupMutation,
 } from '#account-groups';
+import {
+  AccountCurrencyAdjustment,
+  useAccountCurrencyAggregation,
+} from '#components/sidebar/AccountCurrencyBalance';
 import { useContextMenu } from '#hooks/useContextMenu';
 import { pushModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
@@ -42,6 +46,9 @@ type AccountGroupHeaderProps = {
   group: AccountGroupEntity;
   side: 'on' | 'off';
   accounts: AccountEntity[];
+  balanceAccounts: readonly AccountEntity[];
+  aggregateBalances: Record<string, number | null>;
+  showDisplayAdjustment: boolean;
   failedCount: number;
   showSyncDot: boolean;
   isDropZoneActive: boolean;
@@ -51,6 +58,9 @@ export function AccountGroupHeader({
   group,
   side,
   accounts,
+  balanceAccounts,
+  aggregateBalances,
+  showDisplayAdjustment,
   failedCount,
   showSyncDot,
   isDropZoneActive,
@@ -94,6 +104,17 @@ export function AccountGroupHeader({
 
   const treeState = useContext(TreeStateContext);
   const key = treeKeys.group(group.id);
+  const immediateChildAccountGroups = showDisplayAdjustment
+    ? balanceAccounts.map(account => [account.id])
+    : null;
+  const currencyAggregation = useAccountCurrencyAggregation(
+    balanceAccounts,
+    aggregateBalances,
+    immediateChildAccountGroups,
+  );
+  const hasDisplayAdjustment =
+    currencyAggregation.result.status === 'complete' &&
+    currencyAggregation.result.presentationAdjustment != null;
 
   return (
     <TreeItem
@@ -177,6 +198,8 @@ export function AccountGroupHeader({
                     side === 'off',
                   )}
                   style={{ fontSize: 11, color: groupLabelStyle.color }}
+                  testId={`sidebar-account-group-${group.id}-balance`}
+                  aggregation={currencyAggregation}
                 />
               </>
             )}
@@ -191,6 +214,25 @@ export function AccountGroupHeader({
           showSyncDot={showSyncDot}
         />
       ))}
+      {showDisplayAdjustment && hasDisplayAdjustment && (
+        <TreeItem
+          id={`rounding-adjustment:${group.id}`}
+          textValue={t('Rounding adjustment')}
+        >
+          <TreeItemContent>
+            <AccountCurrencyAdjustment
+              aggregation={currencyAggregation}
+              testId={`sidebar-account-group-${group.id}-balance`}
+              style={{
+                justifyContent: 'flex-start',
+                paddingBlock: spacing.xs,
+                paddingLeft: spacing.xs + spacing.sm,
+                paddingRight: spacing.sm,
+              }}
+            />
+          </TreeItemContent>
+        </TreeItem>
+      )}
     </TreeItem>
   );
 }

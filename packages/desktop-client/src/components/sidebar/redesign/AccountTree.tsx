@@ -14,6 +14,9 @@ type AccountTreeProps = {
   label: string;
   side: AccountTreeSide;
   buckets: GroupBucket[];
+  balanceBuckets: GroupBucket[];
+  aggregateBalances: Record<string, number | null>;
+  isSearching: boolean;
   showSyncDot: boolean;
   isDragDisabled: boolean;
   isBucketOpen?: (bucket: GroupBucket) => boolean;
@@ -24,6 +27,9 @@ export function AccountTree({
   label,
   side,
   buckets,
+  balanceBuckets,
+  aggregateBalances,
+  isSearching,
   showSyncDot,
   isDragDisabled,
   isBucketOpen,
@@ -73,6 +79,17 @@ export function AccountTree({
             group={bucket.group}
             side={side === 'off' ? 'off' : 'on'}
             accounts={bucket.accounts}
+            balanceAccounts={
+              balanceBuckets.find(
+                balanceBucket => balanceBucket.group?.id === bucket.group?.id,
+              )?.accounts ?? bucket.accounts
+            }
+            aggregateBalances={aggregateBalances}
+            showDisplayAdjustment={
+              !isSearching &&
+              !isDraggingGroup &&
+              expandedKeys.has(treeKeys.group(bucket.group.id))
+            }
             failedCount={bucket.failedCount}
             showSyncDot={showSyncDot}
             isDropZoneActive={isGroupDropZoneActive(bucket.group.id)}

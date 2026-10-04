@@ -8,6 +8,10 @@ import { View } from '@actual-app/components/view';
 import { css } from '@emotion/css';
 
 import { Link } from '#components/common/Link';
+import {
+  AccountCurrencyAdjustment,
+  useAccountCurrencyAggregation,
+} from '#components/sidebar/AccountCurrencyBalance';
 import type { Binding } from '#spreadsheet';
 
 import { AccountTree } from './AccountTree';
@@ -23,6 +27,9 @@ type SideGroupProps = {
   side: 'on' | 'off';
   showSyncDot: boolean;
   sideData: SidebarAccountSide;
+  fullSideData: SidebarAccountSide;
+  aggregateBalances: Record<string, number | null>;
+  isSearching: boolean;
   totalBinding: Binding<
     'account',
     'onbudget-accounts-balance' | 'offbudget-accounts-balance'
@@ -40,6 +47,9 @@ export function SideGroup({
   side,
   showSyncDot,
   sideData,
+  fullSideData,
+  aggregateBalances,
+  isSearching,
   totalBinding,
   balanceTestId,
   isOpen,
@@ -49,6 +59,22 @@ export function SideGroup({
   onToggleBucket,
 }: SideGroupProps) {
   const { t } = useTranslation();
+  const aggregateAccounts = fullSideData.buckets.flatMap(
+    bucket => bucket.accounts,
+  );
+  const immediateChildAccountGroups =
+    isOpen && !isSearching
+      ? fullSideData.buckets.flatMap(bucket =>
+          bucket.group == null
+            ? bucket.accounts.map(account => [account.id])
+            : [bucket.accounts.map(account => account.id)],
+        )
+      : null;
+  const currencyAggregation = useAccountCurrencyAggregation(
+    aggregateAccounts,
+    aggregateBalances,
+    immediateChildAccountGroups,
+  );
 
   return (
     <View style={{ marginTop: spacing.xxs }}>
@@ -108,6 +134,7 @@ export function SideGroup({
             binding={totalBinding}
             testId={balanceTestId}
             style={{ fontSize: 12, fontWeight: 600, color: 'inherit' }}
+            aggregation={currencyAggregation}
           />
         </Link>
       </View>
@@ -116,10 +143,20 @@ export function SideGroup({
           label={label}
           side={side}
           buckets={sideData.buckets}
+          balanceBuckets={fullSideData.buckets}
+          aggregateBalances={aggregateBalances}
+          isSearching={isSearching}
           showSyncDot={showSyncDot}
           isDragDisabled={isDragDisabled}
           isBucketOpen={isBucketOpen}
           onToggleBucket={onToggleBucket}
+        />
+      )}
+      {isOpen && (
+        <AccountCurrencyAdjustment
+          aggregation={currencyAggregation}
+          testId={balanceTestId}
+          style={{ paddingInline: spacing.md }}
         />
       )}
     </View>

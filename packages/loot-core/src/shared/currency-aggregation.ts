@@ -18,8 +18,8 @@ export type AccountAmount = {
 
 export type DisplayRoundingOptions = {
   displayDecimalPlaces: number;
-  /** Canonical Main-currency amounts for this subtotal's immediate children. */
-  immediateChildAmounts: readonly IntegerAmount[];
+  immediateChildAmounts?: readonly IntegerAmount[];
+  immediateChildAccountGroups?: readonly (readonly string[])[];
 };
 
 export type DisplayRoundingAdjustment = {
@@ -31,10 +31,11 @@ export type DisplayRoundingAdjustment = {
 
 export type CurrencyAggregationResult =
   | { status: 'loading' }
-  | { status: 'unavailable' }
+  | { status: 'unavailable'; unavailableCurrency?: string }
   | {
       status: 'complete';
       amount: IntegerAmount;
+      displayAmount?: IntegerAmount;
       presentationAdjustment?: DisplayRoundingAdjustment;
     };
 
@@ -51,10 +52,18 @@ function toSafeAmount(amount: bigint): IntegerAmount | null {
   return amount >= -maximum && amount <= maximum ? Number(amount) : null;
 }
 
-function roundToDisplayPrecision(
+export function roundToDisplayPrecision(
   amount: IntegerAmount,
   displayDecimalPlaces: number,
 ): IntegerAmount | null {
+  if (
+    !Number.isInteger(displayDecimalPlaces) ||
+    displayDecimalPlaces < 0 ||
+    displayDecimalPlaces > STORAGE_DECIMAL_PLACES
+  ) {
+    return null;
+  }
+
   const unit = 10n ** BigInt(STORAGE_DECIMAL_PLACES - displayDecimalPlaces);
   const value = BigInt(amount);
   const quotient = value / unit;
@@ -77,33 +86,18 @@ function roundToDisplayPrecision(
 }
 
 function getPresentationAdjustment(
-  amount: IntegerAmount,
-  options: DisplayRoundingOptions,
+  roundedTotal: IntegerAmount,
+  displayDecimalPlaces: number,
+  immediateChildAmounts: readonly IntegerAmount[],
 ): DisplayRoundingAdjustment | null | undefined {
-  if (
-    !Number.isInteger(options.displayDecimalPlaces) ||
-    options.displayDecimalPlaces < 0 ||
-    options.displayDecimalPlaces > STORAGE_DECIMAL_PLACES
-  ) {
-    return undefined;
-  }
-
-  const roundedTotal = roundToDisplayPrecision(
-    amount,
-    options.displayDecimalPlaces,
-  );
-  if (roundedTotal === null) {
-    return undefined;
-  }
-
   let roundedChildren = 0n;
-  for (const childAmount of options.immediateChildAmounts) {
+  for (const childAmount of immediateChildAmounts) {
     if (!isSafeAmount(childAmount)) {
       return undefined;
     }
     const roundedChild = roundToDisplayPrecision(
       childAmount,
-      options.displayDecimalPlaces,
+      displayDecimalPlaces,
     );
     if (roundedChild === null) {
       return undefined;
@@ -124,6 +118,38 @@ function getPresentationAdjustment(
         displayOnly: true,
         placement: 'last-child',
       };
+}
+
+function getImmediateChildAmounts(
+  accountGroups: readonly (readonly string[])[],
+  accountAmounts: ReadonlyMap<string, bigint>,
+): IntegerAmount[] | null {
+  const seenAccountIds = new Set<string>();
+  const amounts: IntegerAmount[] = [];
+
+  for (const accountGroup of accountGroups) {
+    let groupAmount = 0n;
+    for (const accountId of accountGroup) {
+      if (seenAccountIds.has(accountId)) {
+        return null;
+      }
+      seenAccountIds.add(accountId);
+
+      const accountAmount = accountAmounts.get(accountId);
+      if (accountAmount === undefined) {
+        return null;
+      }
+      groupAmount += accountAmount;
+    }
+
+    const safeGroupAmount = toSafeAmount(groupAmount);
+    if (safeGroupAmount === null) {
+      return null;
+    }
+    amounts.push(safeGroupAmount);
+  }
+
+  return seenAccountIds.size === accountAmounts.size ? amounts : null;
 }
 
 export function aggregateAccountAmountsInMainCurrency(
@@ -165,6 +191,7 @@ export function aggregateAccountAmountsInMainCurrency(
   }
 
   let total = 0n;
+  const convertedAmountsByAccount = new Map<string, bigint>();
   for (const [accountId, bucketAmounts] of amountsByAccountAndBucket) {
     const account = accountsById.get(accountId);
     if (!account) {
@@ -178,6 +205,7 @@ export function aggregateAccountAmountsInMainCurrency(
       return { status: 'unavailable' };
     }
 
+    let accountTotal = 0n;
     for (const nativeAmountSum of bucketAmounts.values()) {
       const nativeAmount = toSafeAmount(nativeAmountSum);
       if (nativeAmount === null) {
@@ -200,11 +228,16 @@ export function aggregateAccountAmountsInMainCurrency(
         throw error;
       }
 
-      if (converted === null || !isSafeAmount(converted)) {
+      if (converted === null) {
+        return { status: 'unavailable', unavailableCurrency: accountCurrency };
+      }
+      if (!isSafeAmount(converted)) {
         return { status: 'unavailable' };
       }
       total += BigInt(converted);
+      accountTotal += BigInt(converted);
     }
+    convertedAmountsByAccount.set(accountId, accountTotal);
   }
 
   const safeTotal = toSafeAmount(total);
@@ -216,13 +249,53 @@ export function aggregateAccountAmountsInMainCurrency(
     return { status: 'complete', amount: safeTotal };
   }
 
-  const presentationAdjustment = getPresentationAdjustment(safeTotal, display);
-  if (presentationAdjustment === undefined) {
+  const displayAmount = roundToDisplayPrecision(
+    safeTotal,
+    display.displayDecimalPlaces,
+  );
+  if (displayAmount === null) {
+    return { status: 'unavailable' };
+  }
+
+  if (
+    display.immediateChildAmounts !== undefined &&
+    display.immediateChildAccountGroups !== undefined
+  ) {
+    return { status: 'unavailable' };
+  }
+
+  let presentationAdjustment: DisplayRoundingAdjustment | null | undefined;
+  if (display.immediateChildAmounts !== undefined) {
+    presentationAdjustment = getPresentationAdjustment(
+      displayAmount,
+      display.displayDecimalPlaces,
+      display.immediateChildAmounts,
+    );
+  } else if (display.immediateChildAccountGroups !== undefined) {
+    const immediateChildAmounts = getImmediateChildAmounts(
+      display.immediateChildAccountGroups,
+      convertedAmountsByAccount,
+    );
+    if (immediateChildAmounts === null) {
+      return { status: 'unavailable' };
+    }
+    presentationAdjustment = getPresentationAdjustment(
+      displayAmount,
+      display.displayDecimalPlaces,
+      immediateChildAmounts,
+    );
+  }
+  if (
+    presentationAdjustment === undefined &&
+    (display.immediateChildAmounts !== undefined ||
+      display.immediateChildAccountGroups !== undefined)
+  ) {
     return { status: 'unavailable' };
   }
   return {
     status: 'complete',
     amount: safeTotal,
+    displayAmount,
     ...(presentationAdjustment && { presentationAdjustment }),
   };
 }
