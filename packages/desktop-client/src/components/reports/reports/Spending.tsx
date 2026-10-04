@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 
@@ -44,12 +44,15 @@ import {
 import { createSpendingSpreadsheet } from '#components/reports/spreadsheets/spending-spreadsheet';
 import { useReport } from '#components/reports/useReport';
 import { fromDateRepr } from '#components/reports/util';
+import { useAccounts } from '#hooks/useAccounts';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -77,6 +80,21 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
   const dispatch = useDispatch();
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
   const [budgetTypePref] = useSyncedPref('budgetType');
   const budgetType: 'envelope' | 'tracking' =
     budgetTypePref === 'tracking' ? 'tracking' : 'envelope';
@@ -151,6 +169,9 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
   const getGraphData = useMemo(
     () =>
       createSpendingSpreadsheet({
+        accounts,
+        prefs,
+        accountsReady: !accountsLoading && !accountsPlaceholderData,
         conditions,
         conditionsOp,
         compare,
@@ -158,10 +179,23 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
         averageRange,
         budgetType,
       }),
-    [conditions, conditionsOp, compare, compareTo, averageRange, budgetType],
+    [
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
+      conditions,
+      conditionsOp,
+      compare,
+      compareTo,
+      averageRange,
+      budgetType,
+    ],
   );
 
-  const data = useReport('default', getGraphData);
+  const reportData = useReport('default', getGraphData);
+  const data = reportData && !('status' in reportData) ? reportData : null;
+  const reportUnavailable = reportData !== null && 'status' in reportData;
   const navigate = useNavigate();
   const { isNarrowWidth } = useResponsive();
 
@@ -203,11 +237,12 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
     );
   }
 
-  if (!data) {
+  if (reportData === null) {
     return null;
   }
 
   const showAverage =
+    data !== null &&
     (data.averageRange?.months.length ?? 0) > 0 &&
     data.intervalData.some(interval => Math.abs(interval.average) > 0);
 
@@ -219,11 +254,13 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
         : monthUtils.getDay(monthUtils.currentDay()) - 1;
 
   const showCompareTo =
-    compareTo === monthUtils.currentMonth() ||
-    Math.abs(data.intervalData[27].compareTo) > 0;
+    data !== null &&
+    (compareTo === monthUtils.currentMonth() ||
+      Math.abs(data.intervalData[27].compareTo) > 0);
   const showCompare =
-    compare === monthUtils.currentMonth() ||
-    Math.abs(data.intervalData[27].compare) > 0;
+    data !== null &&
+    (compare === monthUtils.currentMonth() ||
+      Math.abs(data.intervalData[27].compare) > 0);
   const averageRangeLabel = getSpendingAverageRangeLabel(averageRange, t);
   const averageRangeOptions = getSpendingAverageRangeOptions(t);
   const comparisonValue =
@@ -401,48 +438,66 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
               }}
             />
 
-            <View
-              style={{
-                alignItems: 'center',
-                flexDirection: 'row',
-                flex: 1,
-              }}
-            >
-              <FilterButton
-                onApply={onApplyFilter}
-                compact={isNarrowWidth}
-                hover={false}
-                exclude={['date']}
-              />
-              <View style={{ flex: 1 }} />
+            {data?.hasForeignCurrency && (
+              <Paragraph>
+                {t(
+                  'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+                  { currencyCode: prefs.defaultCurrencyCode },
+                )}
+              </Paragraph>
+            )}
+            {reportUnavailable && (
+              <Paragraph>
+                <Trans>
+                  Spending is unavailable. Check that a Main currency is set and
+                  every included account has a valid exchange rate.
+                </Trans>
+              </Paragraph>
+            )}
+            {data && (
+              <View
+                style={{
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  flex: 1,
+                }}
+              >
+                <FilterButton
+                  onApply={onApplyFilter}
+                  compact={isNarrowWidth}
+                  hover={false}
+                  exclude={['date']}
+                />
+                <View style={{ flex: 1 }} />
 
-              {widget && (
-                <Tooltip
-                  placement="top end"
-                  content={
-                    <Text>
-                      <Trans>Save compare and filter options</Trans>
-                    </Text>
-                  }
-                  style={{
-                    ...styles.tooltip,
-                    lineHeight: 1.5,
-                    padding: '6px 10px',
-                    marginLeft: 10,
-                  }}
-                >
-                  <Button
-                    variant="primary"
+                {widget && (
+                  <Tooltip
+                    placement="top end"
+                    content={
+                      <Text>
+                        <Trans>Save compare and filter options</Trans>
+                      </Text>
+                    }
                     style={{
+                      ...styles.tooltip,
+                      lineHeight: 1.5,
+                      padding: '6px 10px',
                       marginLeft: 10,
                     }}
-                    onPress={onSaveWidget}
                   >
-                    <Trans>Save</Trans>
-                  </Button>
-                </Tooltip>
-              )}
-            </View>
+                    <Button
+                      variant="primary"
+                      style={{
+                        marginLeft: 10,
+                      }}
+                      onPress={onSaveWidget}
+                    >
+                      <Trans>Save</Trans>
+                    </Button>
+                  </Tooltip>
+                )}
+              </View>
+            )}
           </SpaceBetween>
         )}
 
@@ -495,66 +550,130 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
                 paddingTop: 10,
               }}
             >
-              <View
-                style={{
-                  alignItems: 'center',
-                  flexDirection: 'row',
-                }}
-              >
-                <View>
-                  <LegendItem
-                    color={theme.reportsGreen}
-                    label={monthUtils.format(compare, 'MMM yyyy', locale)}
-                    style={{ padding: 0, paddingBottom: 10 }}
-                  />
-                  <LegendItem
-                    color={theme.reportsGray}
-                    label={
-                      reportMode === 'single-month'
-                        ? monthUtils.format(compareTo, 'MMM yyyy', locale)
-                        : reportMode === 'budget'
-                          ? t('Budgeted')
-                          : averageRangeLabel
-                    }
-                    style={{ padding: 0, paddingBottom: 10 }}
-                  />
-                </View>
-                <View style={{ flex: 1 }} />
+              {data && (
                 <View
                   style={{
-                    alignItems: 'flex-end',
-                    color: theme.pageText,
+                    alignItems: 'center',
+                    flexDirection: 'row',
                   }}
                 >
                   <View>
-                    {showCompare && (
+                    <LegendItem
+                      color={theme.reportsGreen}
+                      label={monthUtils.format(compare, 'MMM yyyy', locale)}
+                      style={{ padding: 0, paddingBottom: 10 }}
+                    />
+                    <LegendItem
+                      color={theme.reportsGray}
+                      label={
+                        reportMode === 'single-month'
+                          ? monthUtils.format(compareTo, 'MMM yyyy', locale)
+                          : reportMode === 'budget'
+                            ? t('Budgeted')
+                            : averageRangeLabel
+                      }
+                      style={{ padding: 0, paddingBottom: 10 }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }} />
+                  <View
+                    style={{
+                      alignItems: 'flex-end',
+                      color: theme.pageText,
+                    }}
+                  >
+                    <View>
+                      {showCompare && (
+                        <AlignedText
+                          style={{ marginBottom: 5, minWidth: 210 }}
+                          left={
+                            <Block>
+                              {compare === monthUtils.currentMonth()
+                                ? t('Spent {{monthYearFormatted}} MTD', {
+                                    monthYearFormatted: monthUtils.format(
+                                      compare,
+                                      'MMM yyyy',
+                                      locale,
+                                    ),
+                                  })
+                                : t('Spent {{monthYearFormatted}}', {
+                                    monthYearFormatted: monthUtils.format(
+                                      compare,
+                                      'MMM yyyy',
+                                      locale,
+                                    ),
+                                  })}
+                              :
+                            </Block>
+                          }
+                          right={
+                            <Text style={{ fontWeight: 600 }}>
+                              <PrivacyFilter>
+                                {formatMainCurrency(
+                                  Math.abs(data.intervalData[todayDay].compare),
+                                  'financial',
+                                )}
+                              </PrivacyFilter>
+                            </Text>
+                          }
+                        />
+                      )}
+                      {reportMode === 'single-month' && showCompareTo && (
+                        <AlignedText
+                          style={{ marginBottom: 5, minWidth: 210 }}
+                          left={
+                            <Block>
+                              {compareTo === monthUtils.currentMonth()
+                                ? t('Spent {{monthYearFormatted}} MTD:', {
+                                    monthYearFormatted: monthUtils.format(
+                                      compareTo,
+                                      'MMM yyyy',
+                                      locale,
+                                    ),
+                                  })
+                                : t('Spent {{monthYearFormatted}}:', {
+                                    monthYearFormatted: monthUtils.format(
+                                      compareTo,
+                                      'MMM yyyy',
+                                      locale,
+                                    ),
+                                  })}
+                            </Block>
+                          }
+                          right={
+                            <Text style={{ fontWeight: 600 }}>
+                              <PrivacyFilter>
+                                {formatMainCurrency(
+                                  Math.abs(
+                                    data.intervalData[todayDay].compareTo,
+                                  ),
+                                  'financial',
+                                )}
+                              </PrivacyFilter>
+                            </Text>
+                          }
+                        />
+                      )}
+                    </View>
+                    {Math.abs(data.intervalData[todayDay].budget) > 0 && (
                       <AlignedText
                         style={{ marginBottom: 5, minWidth: 210 }}
                         left={
                           <Block>
-                            {compare === monthUtils.currentMonth()
-                              ? t('Spent {{monthYearFormatted}} MTD', {
-                                  monthYearFormatted: monthUtils.format(
-                                    compare,
-                                    'MMM yyyy',
-                                    locale,
-                                  ),
-                                })
-                              : t('Spent {{monthYearFormatted}}', {
-                                  monthYearFormatted: monthUtils.format(
-                                    compare,
-                                    'MMM yyyy',
-                                    locale,
-                                  ),
-                                })}
-                            :
+                            {compare === monthUtils.currentMonth() ? (
+                              <Trans>Budgeted MTD</Trans>
+                            ) : (
+                              <Trans>Budgeted</Trans>
+                            )}
                           </Block>
                         }
                         right={
                           <Text style={{ fontWeight: 600 }}>
                             <PrivacyFilter>
-                              {format(
-                                Math.abs(data.intervalData[todayDay].compare),
+                              {formatMainCurrency(
+                                Math.round(
+                                  Math.abs(data.intervalData[todayDay].budget),
+                                ),
                                 'financial',
                               )}
                             </PrivacyFilter>
@@ -562,33 +681,24 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
                         }
                       />
                     )}
-                    {reportMode === 'single-month' && showCompareTo && (
+                    {showAverage && (
                       <AlignedText
                         style={{ marginBottom: 5, minWidth: 210 }}
                         left={
                           <Block>
-                            {compareTo === monthUtils.currentMonth()
-                              ? t('Spent {{monthYearFormatted}} MTD:', {
-                                  monthYearFormatted: monthUtils.format(
-                                    compareTo,
-                                    'MMM yyyy',
-                                    locale,
-                                  ),
-                                })
-                              : t('Spent {{monthYearFormatted}}:', {
-                                  monthYearFormatted: monthUtils.format(
-                                    compareTo,
-                                    'MMM yyyy',
-                                    locale,
-                                  ),
-                                })}
+                            {getSpendingAverageSummaryLabel({
+                              averageRange,
+                              isCurrentMonth:
+                                compare === monthUtils.currentMonth(),
+                              t,
+                            })}
                           </Block>
                         }
                         right={
                           <Text style={{ fontWeight: 600 }}>
                             <PrivacyFilter>
-                              {format(
-                                Math.abs(data.intervalData[todayDay].compareTo),
+                              {formatMainCurrency(
+                                Math.abs(data.intervalData[todayDay].average),
                                 'financial',
                               )}
                             </PrivacyFilter>
@@ -597,59 +707,8 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
                       />
                     )}
                   </View>
-                  {Math.abs(data.intervalData[todayDay].budget) > 0 && (
-                    <AlignedText
-                      style={{ marginBottom: 5, minWidth: 210 }}
-                      left={
-                        <Block>
-                          {compare === monthUtils.currentMonth() ? (
-                            <Trans>Budgeted MTD</Trans>
-                          ) : (
-                            <Trans>Budgeted</Trans>
-                          )}
-                        </Block>
-                      }
-                      right={
-                        <Text style={{ fontWeight: 600 }}>
-                          <PrivacyFilter>
-                            {format(
-                              Math.round(
-                                Math.abs(data.intervalData[todayDay].budget),
-                              ),
-                              'financial',
-                            )}
-                          </PrivacyFilter>
-                        </Text>
-                      }
-                    />
-                  )}
-                  {showAverage && (
-                    <AlignedText
-                      style={{ marginBottom: 5, minWidth: 210 }}
-                      left={
-                        <Block>
-                          {getSpendingAverageSummaryLabel({
-                            averageRange,
-                            isCurrentMonth:
-                              compare === monthUtils.currentMonth(),
-                            t,
-                          })}
-                        </Block>
-                      }
-                      right={
-                        <Text style={{ fontWeight: 600 }}>
-                          <PrivacyFilter>
-                            {format(
-                              Math.abs(data.intervalData[todayDay].average),
-                              'financial',
-                            )}
-                          </PrivacyFilter>
-                        </Text>
-                      }
-                    />
-                  )}
                 </View>
-              </View>
+              )}
               {data ? (
                 <SpendingGraph
                   style={{ flexGrow: 1 }}
@@ -658,10 +717,11 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
                   mode={reportMode}
                   compare={compare}
                   compareTo={compareTo}
+                  format={formatMainCurrency}
                 />
-              ) : (
+              ) : !reportUnavailable ? (
                 <LoadingIndicator message={t('Loading report...')} />
-              )}
+              ) : null}
               {showAverage && (
                 <View style={{ marginTop: 30 }}>
                   <Trans>
