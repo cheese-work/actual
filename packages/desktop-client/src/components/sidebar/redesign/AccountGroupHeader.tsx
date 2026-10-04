@@ -216,7 +216,7 @@ export function AccountGroupHeader({
       ))}
       {showDisplayAdjustment && hasDisplayAdjustment && (
         <TreeItem
-          id={`rounding-adjustment:${group.id}`}
+          id={treeKeys.adjustment(group.id)}
           textValue={t('Rounding adjustment')}
         >
           <TreeItemContent>
