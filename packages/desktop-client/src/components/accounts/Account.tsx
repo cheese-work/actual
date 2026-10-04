@@ -16,6 +16,7 @@ import { View } from '@actual-app/components/view';
 import { listen, send } from '@actual-app/core/platform/client/connection';
 import * as undo from '@actual-app/core/platform/client/undo';
 import type { UndoState } from '@actual-app/core/server/undo';
+import type { AccountAmount } from '@actual-app/core/shared/currency-aggregation';
 import { q } from '@actual-app/core/shared/query';
 import type { Query } from '@actual-app/core/shared/query';
 import {
@@ -216,6 +217,7 @@ type AccountInternalProps = {
     | AccountEntity['id']
     | 'onbudget'
     | 'offbudget'
+    | 'closed'
     | 'uncategorized'
     | undefined;
   filterConditions: RuleConditionEntity[];
@@ -265,6 +267,42 @@ type AccountInternalProps = {
   onCreatePayee: (name: PayeeEntity['name']) => Promise<PayeeEntity['id']>;
 };
 
+function isMultiAccountView(
+  accountId: AccountInternalProps['accountId'],
+): boolean {
+  return (
+    accountId === undefined ||
+    accountId === 'onbudget' ||
+    accountId === 'offbudget' ||
+    accountId === 'closed' ||
+    accountId === 'uncategorized'
+  );
+}
+
+function getAggregateAccounts(
+  accounts: AccountEntity[],
+  accountId: AccountInternalProps['accountId'],
+): AccountEntity[] | undefined {
+  switch (accountId) {
+    case undefined:
+      return accounts;
+    case 'onbudget':
+      return accounts.filter(
+        account => account.offbudget === 0 && account.closed === 0,
+      );
+    case 'offbudget':
+      return accounts.filter(
+        account => account.offbudget === 1 && account.closed === 0,
+      );
+    case 'closed':
+      return accounts.filter(account => account.closed === 1);
+    case 'uncategorized':
+      return accounts.filter(account => account.offbudget === 0);
+    default:
+      return undefined;
+  }
+}
+
 type AccountInternalState = {
   search: string;
   filterConditions: ConditionEntity[];
@@ -289,7 +327,7 @@ type AccountInternalState = {
     prevField?: string | undefined;
     prevAscDesc?: 'asc' | 'desc' | undefined;
   } | null;
-  filteredAmount: null | number;
+  filteredAmount: null | number | AccountAmount[];
 };
 
 export type TableRef = RefObject<{
@@ -1048,7 +1086,20 @@ class AccountInternal extends PureComponent<
 
   getFilteredAmount = async () => {
     if (!this.paged) {
-      return 0;
+      return isMultiAccountView(this.props.accountId) ? null : 0;
+    }
+
+    if (isMultiAccountView(this.props.accountId)) {
+      const { data: amounts }: { data: { account: string; amount: number }[] } =
+        await aqlQuery(
+          queries
+            .withInlineTransactionSplits(this.paged.query)
+            .select(['account', 'amount']),
+        );
+      return amounts.map(({ account, amount }) => ({
+        accountId: account,
+        amount,
+      }));
     }
 
     const { data: amount } = await aqlQuery(
@@ -1870,6 +1921,8 @@ class AccountInternal extends PureComponent<
                 showReconciled={showReconciled ?? false}
                 showEmptyMessage={showEmptyMessage ?? false}
                 balanceQuery={balanceQuery}
+                accountAmountsQuery={this.makeRootTransactionsQuery()}
+                aggregateAccounts={getAggregateAccounts(accounts, accountId)}
                 filteredAmount={filteredAmount}
                 isFiltered={transactionsFiltered ?? false}
                 isSorted={this.state.sort !== null}

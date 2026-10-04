@@ -11,6 +11,7 @@ import type {
 } from '@actual-app/core/types/models';
 
 import { TransactionListWithBalances } from '#components/mobile/transactions/TransactionListWithBalances';
+import { useAccounts } from '#hooks/useAccounts';
 import { SchedulesProvider } from '#hooks/useCachedSchedules';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useNavigate } from '#hooks/useNavigate';
@@ -35,6 +36,7 @@ export function AllAccountTransactions() {
 
 function TransactionListWithPreviews() {
   const { t } = useTranslation();
+  const { data: accounts = [], isPlaceholderData } = useAccounts();
   const location = useLocation();
   // Filter conditions passed by drill-downs (e.g. report activity)
   const filterConditions = location?.state?.filterConditions || [];
@@ -174,6 +176,11 @@ function TransactionListWithPreviews() {
       }
       transactions={transactionsToDisplay}
       balance={balanceBindings.balance}
+      aggregateAccounts={
+        isPlaceholderData
+          ? null
+          : accounts.filter(account => account.closed === 0)
+      }
       isLoadingMore={isLoadingMoreTransactions}
       onLoadMore={fetchMoreTransactions}
       searchPlaceholder={t('Search All Accounts')}

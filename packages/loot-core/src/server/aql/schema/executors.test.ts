@@ -5,6 +5,8 @@ import fc from 'fast-check';
 import * as arbs from '#mocks/arbitrary-schema';
 import * as db from '#server/db';
 import { batchMessages, setSyncingMode } from '#server/sync';
+import { aggregateAccountAmountsInMainCurrency } from '#shared/currency-aggregation';
+import { manualRateKey } from '#shared/exchange-rates';
 import { q } from '#shared/query';
 import { groupById } from '#shared/util';
 import { aqlQuery } from '..';
@@ -128,6 +130,86 @@ async function expectPagedData(query, numTransactions, allData) {
 }
 
 describe('transaction executors', () => {
+  it('converts only matching split leaves from inline account rows', async () => {
+    await db.insertAccount({ id: 'usd', name: 'USD checking', offbudget: 0 });
+    await db.insertCategoryGroup({ id: 'group', name: 'Categories' });
+    await db.insertCategory({
+      id: 'matching',
+      name: 'only-one',
+      cat_group: 'group',
+    });
+    await db.insertCategory({
+      id: 'excluded',
+      name: 'excluded',
+      cat_group: 'group',
+    });
+
+    const parentId = await db.insertTransaction({
+      id: 'split-parent',
+      account: 'usd',
+      amount: -10_000,
+      date: '2026-01-01',
+      is_parent: true,
+    });
+    await db.insertTransaction({
+      id: 'matching-child',
+      account: 'usd',
+      amount: -4_000,
+      category: 'matching',
+      date: '2026-01-01',
+      is_child: true,
+      parent_id: parentId,
+    });
+    await db.insertTransaction({
+      id: 'excluded-child',
+      account: 'usd',
+      amount: -6_000,
+      category: 'excluded',
+      date: '2026-01-01',
+      is_child: true,
+      parent_id: parentId,
+    });
+
+    const matchingQuery = q('transactions').filter({
+      'category.name': { $like: '%only-one%' },
+    });
+    const { data: groupedRows } = await aqlQuery(
+      matchingQuery
+        .options({ splits: 'grouped' })
+        .select(['account', 'amount'])
+        .serialize(),
+    );
+    const { data: matchingRows } = await aqlQuery(
+      matchingQuery
+        .options({ splits: 'inline' })
+        .select(['account', 'amount'])
+        .serialize(),
+    );
+
+    expect(groupedRows).toHaveLength(1);
+    expect(groupedRows[0]).toMatchObject({
+      account: 'usd',
+      amount: -10_000,
+      _unmatched: true,
+    });
+    expect(
+      matchingRows.map(({ account, amount }) => ({ account, amount })),
+    ).toEqual([{ account: 'usd', amount: -4_000 }]);
+    expect(
+      aggregateAccountAmountsInMainCurrency(
+        matchingRows.map(({ account, amount }) => ({
+          accountId: account,
+          amount,
+        })),
+        [{ id: 'usd', currency: 'USD' }],
+        {
+          defaultCurrencyCode: 'VND',
+          [manualRateKey('USD', 'VND')]: '25000',
+        },
+      ),
+    ).toEqual({ status: 'complete', amount: -100_000_000 });
+  });
+
   it('queries with `splits: inline` returns only non-parents', async () => {
     await fc.assert(
       fc.asyncProperty(

@@ -3,12 +3,16 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
+import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import {
   aggregateAccountAmountsInMainCurrency,
   roundToDisplayPrecision,
 } from '@actual-app/core/shared/currency-aggregation';
-import type { CurrencyAggregationResult } from '@actual-app/core/shared/currency-aggregation';
+import type {
+  AccountAmount,
+  CurrencyAggregationResult,
+} from '@actual-app/core/shared/currency-aggregation';
 import {
   getDisplayDecimalPlaces,
   getEffectiveAccountCurrency,
@@ -101,17 +105,20 @@ export function useAccountCurrencyAggregation(
   accounts: readonly AccountEntity[] | null,
   balances: Record<string, number | null>,
   immediateChildAccountGroups?: readonly (readonly string[])[] | null,
+  amountRows?: readonly AccountAmount[] | null,
 ): AccountCurrencyAggregation {
   const format = useFormat();
   const [prefs] = useSyncedPrefs();
   const amounts =
-    accounts === null ||
-    accounts.some(account => typeof balances[account.id] !== 'number')
-      ? null
-      : accounts.map(account => ({
-          accountId: account.id,
-          amount: balances[account.id] as number,
-        }));
+    amountRows !== undefined
+      ? amountRows
+      : accounts === null ||
+          accounts.some(account => typeof balances[account.id] !== 'number')
+        ? null
+        : accounts.map(account => ({
+            accountId: account.id,
+            amount: balances[account.id] as number,
+          }));
   const result = aggregateAccountAmountsInMainCurrency(
     amounts,
     accounts ?? [],
@@ -141,19 +148,46 @@ export function useAccountCurrencyAggregation(
   };
 }
 
-type AccountCurrencyBalanceProps = {
-  aggregation: AccountCurrencyAggregation;
-  style?: CSSProperties;
-  testId?: string;
-};
+type AccountCurrencyBalanceProps =
+  | {
+      aggregation: AccountCurrencyAggregation;
+      accounts?: never;
+      balances?: never;
+      amounts?: never;
+      immediateChildAccountGroups?: never;
+      style?: CSSProperties;
+      testId?: string;
+      highlightSign?: boolean;
+      privacyOnMobile?: boolean;
+      alignment?: 'center' | 'right';
+    }
+  | {
+      aggregation?: never;
+      accounts: readonly AccountEntity[] | null;
+      balances: Record<string, number | null>;
+      amounts?: readonly AccountAmount[] | null;
+      immediateChildAccountGroups?: readonly (readonly string[])[] | null;
+      style?: CSSProperties;
+      testId?: string;
+      highlightSign?: boolean;
+      privacyOnMobile?: boolean;
+      alignment?: 'center' | 'right';
+    };
 
-export function AccountCurrencyBalance({
-  aggregation,
-  style,
-  testId,
-}: AccountCurrencyBalanceProps) {
+export function AccountCurrencyBalance(props: AccountCurrencyBalanceProps) {
+  const computedAggregation = useAccountCurrencyAggregation(
+    'aggregation' in props ? null : props.accounts,
+    'aggregation' in props ? {} : props.balances,
+    'aggregation' in props ? undefined : props.immediateChildAccountGroups,
+    'aggregation' in props ? undefined : props.amounts,
+  );
+  const aggregation = props.aggregation ?? computedAggregation;
   const { t } = useTranslation();
   const { result, mainCurrency, isApproximate, formatCurrency } = aggregation;
+  const { style, testId } = props;
+  const highlightSign = props.highlightSign ?? false;
+  const privacyOnMobile = props.privacyOnMobile ?? false;
+  const alignment = props.alignment ?? 'right';
 
   if (result.status === 'loading') {
     return (
@@ -161,7 +195,7 @@ export function AccountCurrencyBalance({
         role="status"
         aria-label={t('Loading...')}
         data-testid={testId}
-        style={{ textAlign: 'right', ...style }}
+        style={{ textAlign: alignment, ...style }}
       >
         {t('Loading...')}
       </Text>
@@ -173,7 +207,7 @@ export function AccountCurrencyBalance({
       <Text
         role="status"
         data-testid={testId}
-        style={{ textAlign: 'right', ...style }}
+        style={{ textAlign: alignment, ...style }}
       >
         {result.status === 'unavailable' && result.unavailableCurrency
           ? `(${t('no rate')}: ${result.unavailableCurrency})`
@@ -182,18 +216,32 @@ export function AccountCurrencyBalance({
     );
   }
 
+  const balanceColor =
+    result.amount < 0
+      ? theme.numberNegative
+      : result.amount > 0
+        ? theme.numberPositive
+        : theme.pageTextSubdued;
+
   const balanceTestId = testId ?? 'sidebar-account-currency-balance';
 
   return (
-    <View style={{ alignItems: 'flex-end' }}>
+    <View
+      style={{ alignItems: alignment === 'center' ? 'center' : 'flex-end' }}
+    >
       <CellValueText<'account', 'balance'>
         name={balanceTestId}
         value={result.amount}
         type="financial"
-        style={{ textAlign: 'right', ...style }}
-        formatter={() =>
+        style={{
+          textAlign: alignment,
+          ...(highlightSign && { color: balanceColor }),
+          ...style,
+        }}
+        privacyOnMobile={privacyOnMobile}
+        formatter={amount =>
           `${isApproximate ? '~ ' : ''}${formatCurrency(
-            result.displayAmount ?? result.amount,
+            result.displayAmount ?? amount,
             mainCurrency,
           )}`
         }
