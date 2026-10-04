@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Block } from '@actual-app/components/block';
@@ -22,8 +22,11 @@ import {
 } from '#components/reports/spendingAverageRange';
 import { createSpendingSpreadsheet } from '#components/reports/spreadsheets/spending-spreadsheet';
 import { useReport } from '#components/reports/useReport';
-import { useFormat } from '#hooks/useFormat';
+import { useAccounts } from '#hooks/useAccounts';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 type SpendingCardProps = {
   widgetId: string;
@@ -40,6 +43,21 @@ export function SpendingCard({
 }: SpendingCardProps) {
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
   const [budgetTypePref] = useSyncedPref('budgetType');
   const budgetType: 'envelope' | 'tracking' =
     budgetTypePref === 'tracking' ? 'tracking' : 'envelope';
@@ -57,6 +75,9 @@ export function SpendingCard({
     spendingReportMode === 'single-month' ? 'compareTo' : spendingReportMode;
   const getGraphData = useMemo(() => {
     return createSpendingSpreadsheet({
+      accounts,
+      prefs,
+      accountsReady: !accountsLoading && !accountsPlaceholderData,
       conditions: meta?.conditions,
       conditionsOp: meta?.conditionsOp,
       compare,
@@ -67,13 +88,19 @@ export function SpendingCard({
   }, [
     meta?.conditions,
     meta?.conditionsOp,
+    accounts,
+    prefs,
+    accountsLoading,
+    accountsPlaceholderData,
     compare,
     compareTo,
     averageRange,
     budgetType,
   ]);
 
-  const data = useReport('default', getGraphData);
+  const reportData = useReport('default', getGraphData);
+  const data = reportData && !('status' in reportData) ? reportData : null;
+  const reportUnavailable = reportData !== null && 'status' in reportData;
   const todayDay =
     compare !== monthUtils.currentMonth()
       ? 27
@@ -142,14 +169,28 @@ export function SpendingCard({
                   <FinancialText>
                     {data &&
                       (difference && difference > 0 ? '+' : '') +
-                        format(difference || 0, 'financial')}
+                        formatMainCurrency(difference || 0, 'financial')}
                   </FinancialText>
                 </PrivacyFilter>
               </Block>
             </View>
           )}
         </View>
-        {data ? (
+        {data?.hasForeignCurrency && (
+          <Block style={{ padding: '0 20px 8px' }}>
+            {t(
+              'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+              { currencyCode: prefs.defaultCurrencyCode },
+            )}
+          </Block>
+        )}
+        {reportUnavailable ? (
+          <Block style={{ padding: 20 }}>
+            {t(
+              'Spending is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+            )}
+          </Block>
+        ) : data ? (
           <SpendingGraph
             style={{ flex: 1 }}
             compact
@@ -157,6 +198,7 @@ export function SpendingCard({
             mode={spendingReportMode}
             compare={compare}
             compareTo={compareTo}
+            format={formatMainCurrency}
           />
         ) : (
           <LoadingIndicator />

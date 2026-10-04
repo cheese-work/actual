@@ -20,7 +20,6 @@ import { FinancialText } from '#components/FinancialText';
 import { useRechartsAnimation } from '#components/reports/chart-theme';
 import { Container } from '#components/reports/Container';
 import { numberFormatterTooltip } from '#components/reports/numberFormatter';
-import { useFormat } from '#hooks/useFormat';
 import type { FormatType } from '#hooks/useFormat';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 
@@ -152,6 +151,7 @@ type SpendingGraphProps = {
   mode: 'single-month' | 'budget' | 'average';
   compare: string;
   compareTo: string;
+  format: (value: unknown, type?: FormatType) => string;
 };
 
 export function SpendingGraph({
@@ -161,12 +161,11 @@ export function SpendingGraph({
   mode,
   compare,
   compareTo,
+  format,
 }: SpendingGraphProps) {
   const privacyMode = usePrivacyMode();
   const animationProps = useRechartsAnimation({ animationDuration: 1000 });
   const balanceTypeOp = 'cumulative';
-  const format = useFormat();
-
   const selection = mode === 'single-month' ? compareTo : mode;
 
   const thisMonthMax = data.intervalData.reduce((a, b) =>
