@@ -73,8 +73,34 @@ test.describe('Reports', () => {
   });
 
   test('loads cash flow graph and checks visuals', async () => {
+    await configurationPage.initializeTestMainCurrency();
     await reportsPage.goToCashFlowPage();
     await expect(page).toMatchThemeScreenshots();
+  });
+
+  test('cash flow follows Main currency and reports when it is unavailable', async () => {
+    await configurationPage.initializeTestMainCurrency();
+    await reportsPage.goToCashFlowPage();
+
+    const incomeRow = page
+      .getByText('Income:', { exact: true })
+      .first()
+      .locator('../..');
+    await expect(incomeRow).toContainText(/Income:.*\$.*415\.00/);
+
+    await page.evaluate(async () => {
+      await window.__actionsForMenu.saveSyncedPrefs({
+        prefs: { defaultCurrencyCode: 'VND' },
+      });
+    });
+    await expect(incomeRow).toContainText('₫');
+
+    await page.evaluate(async () => {
+      await window.__actionsForMenu.saveSyncedPrefs({
+        prefs: { defaultCurrencyCode: null },
+      });
+    });
+    await expect(page.getByText(/Cash flow is unavailable/)).toBeVisible();
   });
 
   test('opens the date range picker and checks visuals', async () => {

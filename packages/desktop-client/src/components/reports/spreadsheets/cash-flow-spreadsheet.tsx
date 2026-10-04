@@ -3,9 +3,14 @@ import type { JSX } from 'react';
 
 import { AlignedText } from '@actual-app/components/aligned-text';
 import { send } from '@actual-app/core/platform/client/connection';
+import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
-import type { RuleConditionEntity } from '@actual-app/core/types/models';
+import type {
+  AccountEntity,
+  RuleConditionEntity,
+} from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import type { Locale } from 'date-fns';
 import * as d from 'date-fns';
 import { t } from 'i18next';
@@ -15,9 +20,35 @@ import { indexCashFlow, runAll } from '#components/reports/util';
 import type { FormatType } from '#hooks/useFormat';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 
+export type CashFlowSummaryData =
+  | { status: 'complete'; graphData: { income: number; expense: number } }
+  | { status: 'unavailable' };
+
+export type CashFlowByDateData =
+  | ({ status: 'complete' } & ReturnType<typeof recalculate>)
+  | { status: 'unavailable' };
+
+export function hasOnlyMainCurrencyAccounts(
+  accounts: readonly Pick<AccountEntity, 'currency' | 'offbudget'>[],
+  prefs: Readonly<SyncedPrefs>,
+) {
+  const mainCurrency = prefs.defaultCurrencyCode;
+  return (
+    Boolean(mainCurrency) &&
+    accounts.every(
+      account =>
+        account.offbudget ||
+        getEffectiveAccountCurrency(account.currency, prefs) === mainCurrency,
+    )
+  );
+}
+
 export function simpleCashFlow(
   startMonth: string,
   endMonth: string,
+  accounts: readonly AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  accountsReady: boolean,
   conditions: RuleConditionEntity[] = [],
   conditionsOp: 'and' | 'or' = 'and',
 ) {
@@ -26,8 +57,16 @@ export function simpleCashFlow(
 
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: { graphData: { income: number; expense: number } }) => void,
+    setData: (data: CashFlowSummaryData) => void,
   ) => {
+    if (!accountsReady) {
+      return;
+    }
+    if (!hasOnlyMainCurrencyAccounts(accounts, prefs)) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     const { filters } = await send('make-filters-from-conditions', {
       conditions: conditions.filter(cond => !cond.customName),
     });
@@ -61,6 +100,7 @@ export function simpleCashFlow(
       ],
       data => {
         setData({
+          status: 'complete',
           graphData: {
             income: data[0],
             expense: data[1],
@@ -74,6 +114,9 @@ export function simpleCashFlow(
 export function cashFlowByDate(
   startMonth: string,
   endMonth: string,
+  accounts: readonly AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  accountsReady: boolean,
   isConcise: boolean,
   conditions: RuleConditionEntity[] = [],
   conditionsOp: 'and' | 'or',
@@ -87,8 +130,16 @@ export function cashFlowByDate(
 
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: ReturnType<typeof recalculate>) => void,
+    setData: (data: CashFlowByDateData) => void,
   ) => {
+    if (!accountsReady) {
+      return;
+    }
+    if (!hasOnlyMainCurrencyAccounts(accounts, prefs)) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     const { filters } = await send('make-filters-from-conditions', {
       conditions: conditions.filter(cond => !cond.customName),
     });
@@ -139,7 +190,10 @@ export function cashFlowByDate(
         makeQuery().filter({ amount: { $lt: 0 } }),
       ],
       data => {
-        setData(recalculate(data, start, fixedEnd, isConcise, locale, format));
+        setData({
+          status: 'complete',
+          ...recalculate(data, start, fixedEnd, isConcise, locale, format),
+        });
       },
     );
   };

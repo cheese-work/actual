@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SVGAttributes } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
+import { Paragraph } from '@actual-app/components/paragraph';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
@@ -21,13 +22,17 @@ import { ReportCardName } from '#components/reports/ReportCardName';
 import { calculateTimeRange } from '#components/reports/reportRanges';
 import { simpleCashFlow } from '#components/reports/spreadsheets/cash-flow-spreadsheet';
 import { useReport } from '#components/reports/useReport';
-import { useFormat } from '#hooks/useFormat';
+import { useAccounts } from '#hooks/useAccounts';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 import { defaultTimeFrame } from './CashFlow';
 
 type CustomLabelProps = {
   value?: number;
   name: string;
+  format: (value: unknown, type?: FormatType) => string;
   position?: 'left' | 'right';
   x?: number;
   y?: number;
@@ -38,14 +43,13 @@ type CustomLabelProps = {
 function CustomLabel({
   value = 0,
   name,
+  format,
   position = 'left',
   x = 0,
   y = 0,
   width: barWidth = 0,
   height: barHeight = 0,
 }: CustomLabelProps) {
-  const format = useFormat();
-
   const valueLengthOffset = 20;
 
   const yOffset = barHeight < 25 ? 105 : y;
@@ -105,6 +109,22 @@ export function CashFlowCard({
   onMetaChange,
 }: CashFlowCardProps) {
   const { t } = useTranslation();
+  const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isPending: accountsPending,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
   const animationProps = useRechartsAnimation();
   const [latestTransaction, setLatestTransaction] = useState<string>('');
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
@@ -126,8 +146,26 @@ export function CashFlowCard({
   );
 
   const params = useMemo(
-    () => simpleCashFlow(start, end, meta?.conditions, meta?.conditionsOp),
-    [start, end, meta?.conditions, meta?.conditionsOp],
+    () =>
+      simpleCashFlow(
+        start,
+        end,
+        accounts,
+        prefs,
+        !accountsPending && !accountsPlaceholderData,
+        meta?.conditions,
+        meta?.conditionsOp,
+      ),
+    [
+      start,
+      end,
+      accounts,
+      prefs,
+      accountsPending,
+      accountsPlaceholderData,
+      meta?.conditions,
+      meta?.conditionsOp,
+    ],
   );
   const data = useReport('cash_flow_simple', params);
 
@@ -135,7 +173,7 @@ export function CashFlowCard({
   const onCardHover = useCallback(() => setIsCardHovered(true), []);
   const onCardHoverEnd = useCallback(() => setIsCardHovered(false), []);
 
-  const { graphData } = data || {};
+  const graphData = data?.status === 'complete' ? data.graphData : undefined;
   const expenses = -(graphData?.expense || 0);
   const income = graphData?.income || 0;
 
@@ -168,16 +206,26 @@ export function CashFlowCard({
             />
             <DateRange start={start} end={end} />
           </View>
-          {data && (
+          {data?.status === 'complete' && (
             <View style={{ textAlign: 'right' }}>
               <PrivacyFilter activationFilters={[!isCardHovered]}>
-                <Change amount={income - expenses} />
+                <Change
+                  amount={income - expenses}
+                  currencyCode={prefs.defaultCurrencyCode}
+                />
               </PrivacyFilter>
             </View>
           )}
         </View>
 
-        {data ? (
+        {data?.status === 'unavailable' ? (
+          <Paragraph>
+            <Trans>
+              Cash flow is unavailable. Check that a Main currency is set and
+              every on-budget account uses it.
+            </Trans>
+          </Paragraph>
+        ) : data?.status === 'complete' ? (
           <Container style={{ height: 'auto', flex: 1 }}>
             {(width, height) => (
               <BarChart
@@ -204,7 +252,12 @@ export function CashFlowCard({
                   <LabelList
                     dataKey="income"
                     position="left"
-                    content={<CustomLabel name={t('Income')} />}
+                    content={
+                      <CustomLabel
+                        name={t('Income')}
+                        format={formatMainCurrency}
+                      />
+                    }
                   />
                 </Bar>
 
@@ -217,7 +270,12 @@ export function CashFlowCard({
                   <LabelList
                     dataKey="expenses"
                     position="right"
-                    content={<CustomLabel name={t('Expenses')} />}
+                    content={
+                      <CustomLabel
+                        name={t('Expenses')}
+                        format={formatMainCurrency}
+                      />
+                    }
                   />
                 </Bar>
               </BarChart>

@@ -20,7 +20,6 @@ import {
 import { FinancialText } from '#components/FinancialText';
 import { useRechartsAnimation } from '#components/reports/chart-theme';
 import { Container } from '#components/reports/Container';
-import { useFormat } from '#hooks/useFormat';
 import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
@@ -132,19 +131,20 @@ type CashFlowGraphProps = {
     transfers: { x: Date; y: number }[];
   };
   isConcise: boolean;
+  format: (value: unknown, type?: FormatType) => string;
   showBalance?: boolean;
   style?: CSSProperties;
 };
 export function CashFlowGraph({
   graphData,
   isConcise,
+  format,
   showBalance = true,
   style,
 }: CashFlowGraphProps) {
   const locale = useLocale();
   const privacyMode = usePrivacyMode();
   const [yAxisIsHovered, setYAxisIsHovered] = useState(false);
-  const format = useFormat();
   const animationProps = useRechartsAnimation({
     animationDuration: ANIMATION_DURATION,
   });
