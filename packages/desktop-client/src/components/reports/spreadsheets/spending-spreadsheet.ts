@@ -1,7 +1,10 @@
 import { send } from '@actual-app/core/platform/client/connection';
+import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
+import { convert } from '@actual-app/core/shared/exchange-rates';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type {
+  AccountEntity,
   CategoryEntity,
   CategoryGroupEntity,
   RuleConditionEntity,
@@ -9,6 +12,7 @@ import type {
   SpendingEntity,
   SpendingMonthEntity,
 } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 // @ts-strict-ignore
 import { keyBy } from 'es-toolkit';
 
@@ -24,6 +28,9 @@ import {
 import { makeQuery } from './makeQuery';
 
 type createSpendingSpreadsheetProps = {
+  accounts: AccountEntity[];
+  prefs: Readonly<SyncedPrefs>;
+  accountsReady: boolean;
   conditions?: RuleConditionEntity[];
   conditionsOp?: 'and' | 'or';
   compare?: string;
@@ -31,6 +38,151 @@ type createSpendingSpreadsheetProps = {
   averageRange?: SpendingAverageRange;
   budgetType?: 'envelope' | 'tracking';
 };
+
+type SpendingReportData =
+  | (SpendingEntity & { hasForeignCurrency: boolean })
+  | { status: 'unavailable' };
+
+type SpendingQueryRow = {
+  account?: string | null;
+  accountOffBudget?: boolean | number;
+  categoryIncome?: boolean | number;
+  date: string;
+  amount: number;
+};
+
+type SpendingDateTotals = {
+  perIntervalAssets: number;
+  perIntervalDebts: number;
+};
+
+function safeNumberFromBigInt(value: bigint): number | null {
+  const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+  return value >= -maximum && value <= maximum ? Number(value) : null;
+}
+
+function safeSum(values: readonly number[]): number | null {
+  let sum = 0n;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value)) {
+      return null;
+    }
+    sum += BigInt(value);
+  }
+  return safeNumberFromBigInt(sum);
+}
+
+function safeAdd(left: number, right: number): number | null {
+  return safeSum([left, right]);
+}
+
+function getConvertedSpendingTotals(
+  assets: SpendingQueryRow[],
+  debts: SpendingQueryRow[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): {
+  totalsByDate: Map<string, SpendingDateTotals>;
+  hasForeignCurrency: boolean;
+} | null {
+  const mainCurrency = prefs.defaultCurrencyCode;
+  if (!mainCurrency) {
+    return null;
+  }
+
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const amountsByAccountAndDate = new Map<
+    string,
+    {
+      accountId: string;
+      date: string;
+      type: 'assets' | 'debts';
+      amount: bigint;
+    }
+  >();
+
+  for (const [type, rows] of [
+    ['assets', assets],
+    ['debts', debts],
+  ] as const) {
+    for (const row of rows) {
+      if (row.categoryIncome || row.accountOffBudget) {
+        continue;
+      }
+
+      if (!row.account || !accountsById.has(row.account)) {
+        return null;
+      }
+      if (!Number.isSafeInteger(row.amount)) {
+        return null;
+      }
+
+      const key = `${type}\u0000${row.account}\u0000${row.date}`;
+      const existing = amountsByAccountAndDate.get(key);
+      amountsByAccountAndDate.set(key, {
+        accountId: row.account,
+        date: row.date,
+        type,
+        amount: (existing?.amount ?? 0n) + BigInt(row.amount),
+      });
+    }
+  }
+
+  const totalsByDate = new Map<string, SpendingDateTotals>();
+  let hasForeignCurrency = false;
+
+  for (const leaf of amountsByAccountAndDate.values()) {
+    const amount = safeNumberFromBigInt(leaf.amount);
+    const account = accountsById.get(leaf.accountId);
+    if (amount === null || !account) {
+      return null;
+    }
+
+    const accountCurrency = getEffectiveAccountCurrency(
+      account.currency,
+      prefs,
+    );
+    if (!accountCurrency) {
+      return null;
+    }
+
+    let convertedAmount: number | null;
+    try {
+      convertedAmount = convert(
+        amount,
+        accountCurrency,
+        mainCurrency,
+        prefs,
+        valuationTime,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+        return null;
+      }
+      throw error;
+    }
+    if (convertedAmount === null) {
+      return null;
+    }
+
+    const totals = totalsByDate.get(leaf.date) ?? {
+      perIntervalAssets: 0,
+      perIntervalDebts: 0,
+    };
+    const field =
+      leaf.type === 'assets' ? 'perIntervalAssets' : 'perIntervalDebts';
+    const nextTotal = safeAdd(totals[field], convertedAmount);
+    if (nextTotal === null) {
+      return null;
+    }
+    totals[field] = nextTotal;
+    totalsByDate.set(leaf.date, totals);
+    hasForeignCurrency ||= accountCurrency !== mainCurrency;
+  }
+
+  return { totalsByDate, hasForeignCurrency };
+}
 
 export function getSpendingBudgetFilters({
   categories,
@@ -68,6 +220,9 @@ export function getSpendingBudgetFilters({
 }
 
 export function createSpendingSpreadsheet({
+  accounts,
+  prefs,
+  accountsReady,
   conditions = [],
   conditionsOp,
   compare,
@@ -88,8 +243,16 @@ export function createSpendingSpreadsheet({
 
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: SpendingEntity) => void,
+    setData: (data: SpendingReportData) => void,
   ) => {
+    if (!accountsReady) {
+      return;
+    }
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     const earliestTrans =
       averageRange?.mode === 'all-time'
         ? await send('get-earliest-transaction')
@@ -164,32 +327,18 @@ export function createSpendingSpreadsheet({
 
     const combineAssets = [...assets, ...overlapAssets];
     const combineDebts = [...debts, ...overlapDebts];
-    const totalsByDate = new Map<
-      string,
-      { perIntervalAssets: number; perIntervalDebts: number }
-    >();
-
-    combineAssets
-      .filter(e => !e.categoryIncome && !e.accountOffBudget)
-      .forEach(asset => {
-        const totals = totalsByDate.get(asset.date) ?? {
-          perIntervalAssets: 0,
-          perIntervalDebts: 0,
-        };
-        totals.perIntervalAssets += asset.amount;
-        totalsByDate.set(asset.date, totals);
-      });
-
-    combineDebts
-      .filter(e => !e.categoryIncome && !e.accountOffBudget)
-      .forEach(debt => {
-        const totals = totalsByDate.get(debt.date) ?? {
-          perIntervalAssets: 0,
-          perIntervalDebts: 0,
-        };
-        totals.perIntervalDebts += debt.amount;
-        totalsByDate.set(debt.date, totals);
-      });
+    const convertedSpending = getConvertedSpendingTotals(
+      combineAssets,
+      combineDebts,
+      accounts,
+      prefs,
+      Date.now(),
+    );
+    if (!convertedSpending) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    const { totalsByDate, hasForeignCurrency } = convertedSpending;
 
     const budgetMonth = parseInt(compareMonth.replace('-', ''));
     const budgetTable =
@@ -223,9 +372,12 @@ export function createSpendingSpreadsheet({
       ).then(({ data }) => data),
     ]);
 
-    const dailyBudget =
-      budgets &&
-      budgets.reduce((a, v) => a + v.amount, 0) / compareInterval.length;
+    const budgetTotal = safeSum((budgets ?? []).map(value => value.amount));
+    if (budgetTotal === null) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    const compareIntervalLength = BigInt(compareInterval.length);
 
     const intervals = monthUtils.dayRangeInclusive(startDate, endDate);
     if (endDateTo < startDate || startDateTo > endDate) {
@@ -239,6 +391,17 @@ export function createSpendingSpreadsheet({
     let totalAssets = 0;
     let totalDebts = 0;
     let totalBudget = 0;
+    let budgetDaysElapsed = 0;
+    let totalsAreSafe = true;
+
+    const addOrZero = (left: number, right: number) => {
+      const total = safeAdd(left, right);
+      if (total === null) {
+        totalsAreSafe = false;
+        return 0;
+      }
+      return total;
+    };
 
     const months = monthUtils.rangeInclusive(startDate, endDate).map(month => {
       return { month, perMonthAssets: 0, perMonthDebts: 0 };
@@ -272,45 +435,65 @@ export function createSpendingSpreadsheet({
             perIntervalAssets += totals?.perIntervalAssets ?? 0;
             perIntervalDebts += totals?.perIntervalDebts ?? 0;
 
-            totalAssets += perIntervalAssets;
-            totalDebts += perIntervalDebts;
+            totalAssets = addOrZero(totalAssets, perIntervalAssets);
+            totalDebts = addOrZero(totalDebts, perIntervalDebts);
 
             let cumulativeAssets = 0;
             let cumulativeDebts = 0;
 
             if (month.month === compareMonth) {
-              totalBudget -= dailyBudget;
+              budgetDaysElapsed += 1;
+              const allocatedBudget = safeNumberFromBigInt(
+                (BigInt(budgetTotal) * BigInt(budgetDaysElapsed)) /
+                  compareIntervalLength,
+              );
+              if (allocatedBudget === null) {
+                totalsAreSafe = false;
+                totalBudget = 0;
+              } else {
+                totalBudget = -allocatedBudget;
+              }
             }
 
             months.map(m => {
               if (m.month === month.month) {
-                cumulativeAssets = m.perMonthAssets += perIntervalAssets;
-                cumulativeDebts = m.perMonthDebts += perIntervalDebts;
+                m.perMonthAssets = addOrZero(
+                  m.perMonthAssets,
+                  perIntervalAssets,
+                );
+                m.perMonthDebts = addOrZero(m.perMonthDebts, perIntervalDebts);
+                cumulativeAssets = m.perMonthAssets;
+                cumulativeDebts = m.perMonthDebts;
               }
               return null;
             });
 
+            const cumulative = addOrZero(cumulativeAssets, cumulativeDebts);
+
             if (averageMonths.has(month.month)) {
               if (day === '28') {
                 if (monthUtils.getMonthEnd(intervalItem) === intervalItem) {
-                  averageSum += cumulativeAssets + cumulativeDebts;
+                  averageSum = addOrZero(averageSum, cumulative);
                   monthCount += 1;
                 }
               } else {
-                averageSum += cumulativeAssets + cumulativeDebts;
+                averageSum = addOrZero(averageSum, cumulative);
                 monthCount += 1;
               }
             }
+
+            const totalInterval = addOrZero(
+              perIntervalDebts,
+              perIntervalAssets,
+            );
 
             arr.push({
               date: intervalItem,
               totalDebts: perIntervalDebts,
               totalAssets: perIntervalAssets,
-              totalTotals: perIntervalDebts + perIntervalAssets,
+              totalTotals: totalInterval,
               cumulative:
-                intervalItem <= monthUtils.currentDay()
-                  ? cumulativeDebts + cumulativeAssets
-                  : null,
+                intervalItem <= monthUtils.currentDay() ? cumulative : null,
             });
           }
 
@@ -320,12 +503,15 @@ export function createSpendingSpreadsheet({
           b.cumulative === null ? a : b,
         ).cumulative;
 
-        const totalDaily = data.reduce((a, v) => a + v.totalTotals, 0);
+        const totalDaily = safeSum(data.map(value => value.totalTotals));
+        if (totalDaily === null) {
+          totalsAreSafe = false;
+        }
 
         return {
           date: data[0].date,
           cumulative: maxCumulative,
-          daily: totalDaily,
+          daily: totalDaily ?? 0,
           month: month.month,
         };
       });
@@ -341,6 +527,12 @@ export function createSpendingSpreadsheet({
       };
     });
 
+    const totalTotals = safeSum([totalAssets, totalDebts]);
+    if (!totalsAreSafe || totalTotals === null) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     setData({
       intervalData,
       averageRange: resolvedAverageRange,
@@ -348,7 +540,8 @@ export function createSpendingSpreadsheet({
       endDate,
       totalDebts,
       totalAssets,
-      totalTotals: totalAssets + totalDebts,
+      totalTotals,
+      hasForeignCurrency,
     });
   };
 }
