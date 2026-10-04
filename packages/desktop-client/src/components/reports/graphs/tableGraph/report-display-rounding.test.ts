@@ -5,6 +5,10 @@ import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { CustomTooltip as BarGraphTooltip } from '#components/reports/graphs/BarGraph';
+import {
+  ActiveShapeDesktop,
+  ActiveShapeMobile,
+} from '#components/reports/graphs/DonutGraph';
 import { TestProviders } from '#mocks';
 
 import {
@@ -75,8 +79,49 @@ describe('createReportAmountFormatter', () => {
       ),
     );
 
-    expect(container.textContent).toContain(tableAmount);
-    expect(container.textContent).not.toContain('3');
+    expect(
+      Array.from(container.querySelectorAll('strong')).map(
+        amount => amount.textContent,
+      ),
+    ).toContain(tableAmount);
+  });
+
+  it('rounds mobile and desktop donut amounts on an even half tie', () => {
+    const format = createReportAmountFormatter(makeReportFormat(0));
+    const shapeProps = {
+      cx: 100,
+      cy: 100,
+      midAngle: 45,
+      innerRadius: 20,
+      outerRadius: 40,
+      startAngle: 0,
+      endAngle: 90,
+      fill: '#000',
+      payload: { name: 'Tie' },
+      percent: 0.5,
+      value: 250,
+      expandInward: false,
+      chartInnerRadius: 30,
+      chartMidRadius: 50,
+      chartOuterRadius: 70,
+      formatAmount: format,
+    };
+
+    for (const ActiveShape of [ActiveShapeMobile, ActiveShapeDesktop]) {
+      const { container } = render(
+        createElement(
+          TestProviders,
+          null,
+          createElement('svg', null, createElement(ActiveShape, shapeProps)),
+        ),
+      );
+
+      expect(
+        Array.from(container.querySelectorAll('text')).map(
+          text => text.textContent,
+        ),
+      ).toContain('2');
+    }
   });
 });
 

@@ -27,6 +27,8 @@ import { isTouchDevice } from '#util/isTouchDevice';
 import { adjustTextSize } from './adjustTextSize';
 import { renderCustomLabel } from './renderCustomLabel';
 import { showActivity } from './showActivity';
+import { createReportAmountFormatter } from './tableGraph/report-display-rounding';
+import type { ReportAmountFormatter } from './tableGraph/report-display-rounding';
 
 const RADIAN = Math.PI / 180;
 
@@ -140,9 +142,10 @@ type ActiveShapeProps = {
   chartInnerRadius: number;
   chartMidRadius: number;
   chartOuterRadius: number;
+  formatAmount: ReportAmountFormatter;
 };
 
-const ActiveShapeMobile = ({
+export const ActiveShapeMobile = ({
   cx,
   cy,
   innerRadius,
@@ -156,8 +159,8 @@ const ActiveShapeMobile = ({
   expandInward,
   chartInnerRadius,
   chartOuterRadius,
+  formatAmount,
 }: ActiveShapeProps) => {
-  const format = useFormat();
   // Fix 2: guard against undefined payload.name and payload.date
   const yAxis = payload.name ?? payload.date ?? '';
 
@@ -183,7 +186,7 @@ const ActiveShapeMobile = ({
           textAnchor="end"
           fill={fill}
         >
-          {format(value, 'financial')}
+          {formatAmount(value, 'financial')}
         </FinancialText>
         <text
           x={cx + chartOuterRadius * Math.cos(-RADIAN * 330) + 10}
@@ -216,7 +219,7 @@ const ActiveShapeMobile = ({
   );
 };
 
-const ActiveShapeDesktop = ({
+export const ActiveShapeDesktop = ({
   cx,
   cy,
   midAngle,
@@ -230,8 +233,8 @@ const ActiveShapeDesktop = ({
   value,
   expandInward,
   chartInnerRadius,
+  formatAmount,
 }: ActiveShapeProps) => {
-  const format = useFormat();
   // Fix 2: guard against undefined payload.name  and payload.date
   const yAxis = payload.name ?? payload.date ?? '';
   const sin = Math.sin(-RADIAN * midAngle);
@@ -291,7 +294,7 @@ const ActiveShapeDesktop = ({
           textAnchor={textAnchor}
           fill={fill}
         >
-          {format(value, 'financial')}
+          {formatAmount(value, 'financial')}
         </FinancialText>
         <text x={labelX} y={ey} dy={36} textAnchor={textAnchor} fill="#999">
           {`(${(percent * 100).toFixed(2)}%)`}
@@ -356,6 +359,7 @@ export function DonutGraph({
   showOffBudget,
   showTooltip = true,
 }: DonutGraphProps) {
+  const formatAmount = createReportAmountFormatter(useFormat());
   const animationProps = useRechartsAnimation({ animationDuration: 500 });
 
   const yAxis = groupBy === 'Interval' ? 'date' : 'name';
@@ -470,6 +474,7 @@ export function DonutGraph({
                             chartInnerRadius={chartInnerRadius}
                             chartMidRadius={chartMidRadius}
                             chartOuterRadius={chartOuterRadius}
+                            formatAmount={formatAmount}
                           />
                         ) : (
                           <ActiveShapeDesktop
@@ -479,6 +484,7 @@ export function DonutGraph({
                             chartInnerRadius={chartInnerRadius}
                             chartMidRadius={chartMidRadius}
                             chartOuterRadius={chartOuterRadius}
+                            formatAmount={formatAmount}
                           />
                         );
                       }
@@ -552,6 +558,7 @@ export function DonutGraph({
                             chartInnerRadius={chartInnerRadius}
                             chartMidRadius={chartMidRadius}
                             chartOuterRadius={chartOuterRadius}
+                            formatAmount={formatAmount}
                           />
                         ) : (
                           <ActiveShapeDesktop
@@ -561,6 +568,7 @@ export function DonutGraph({
                             chartInnerRadius={chartInnerRadius}
                             chartMidRadius={chartMidRadius}
                             chartOuterRadius={chartOuterRadius}
+                            formatAmount={formatAmount}
                           />
                         );
                       }
@@ -647,6 +655,7 @@ export function DonutGraph({
                           chartInnerRadius={chartInnerRadius}
                           chartMidRadius={chartMidRadius}
                           chartOuterRadius={chartOuterRadius}
+                          formatAmount={formatAmount}
                         />
                       ) : (
                         <ActiveShapeDesktop
@@ -656,6 +665,7 @@ export function DonutGraph({
                           chartInnerRadius={chartInnerRadius}
                           chartMidRadius={chartMidRadius}
                           chartOuterRadius={chartOuterRadius}
+                          formatAmount={formatAmount}
                         />
                       );
                     }
