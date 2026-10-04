@@ -63,6 +63,7 @@
     "#components/reports/getLiveRange": "./src/components/reports/getLiveRange.ts",
     "#components/reports/monthRange": "./src/components/reports/monthRange.ts",
     "#components/reports/graphs/showActivity": "./src/components/reports/graphs/showActivity.ts",
+    "#components/reports/graphs/tableGraph/report-display-rounding": "./src/components/reports/graphs/tableGraph/report-display-rounding.ts",
     "#components/reports/graphs/util/computePadding": "./src/components/reports/graphs/util/computePadding.ts",
     "#components/reports/graphs/util/monteCarloCashflowChart": "./src/components/reports/graphs/util/monteCarloCashflowChart.ts",
     "#components/reports/graphs/util/useMonteCarloTickFormatter": "./src/components/reports/graphs/util/useMonteCarloTickFormatter.ts",

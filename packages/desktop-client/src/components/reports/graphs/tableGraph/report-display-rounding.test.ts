@@ -2,9 +2,52 @@ import type { GroupedEntity } from '@actual-app/core/types/models';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createReportAmountFormatter,
   createReportDisplayAdjustment,
   createReportTableDisplayRows,
 } from './report-display-rounding';
+import type { ReportAmountFormat } from './report-display-rounding';
+
+function makeReportFormat(decimalPlaces: number): ReportAmountFormat {
+  const currency = { decimalPlaces };
+  const numberFormat = { hideFraction: false };
+  const format: ReportAmountFormat = Object.assign(
+    (value: unknown, type = 'financial') => {
+      const displayDecimalPlaces =
+        type === 'financial-no-decimals' || numberFormat.hideFraction
+          ? 0
+          : currency.decimalPlaces;
+
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: displayDecimalPlaces,
+        maximumFractionDigits: displayDecimalPlaces,
+      }).format((value as number) / 100);
+    },
+    { currency, numberFormat },
+  );
+
+  return format;
+}
+
+describe('createReportAmountFormatter', () => {
+  it('rounds a positive even half tie before formatting', () => {
+    const format = makeReportFormat(0);
+
+    expect(format(250, 'financial')).toBe('3');
+    expect(createReportAmountFormatter(format)(250)).toBe('2');
+  });
+
+  it('keeps chart tooltip values aligned with table amounts', () => {
+    const format = createReportAmountFormatter(makeReportFormat(0));
+    const tableAmount = format(250);
+    const tooltipAmount = format(250);
+
+    expect({ tableAmount, tooltipAmount }).toEqual({
+      tableAmount: '2',
+      tooltipAmount: '2',
+    });
+  });
+});
 
 function makeRow(total: number, children: number[]): GroupedEntity {
   return {

@@ -4,7 +4,6 @@ import type { CSSProperties, RefObject, UIEventHandler } from 'react';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
-import { roundToDisplayPrecision } from '@actual-app/core/shared/currency-aggregation';
 import type {
   balanceTypeOpType,
   GroupedEntity,
@@ -18,6 +17,8 @@ import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
+
+import { createReportAmountFormatter } from './report-display-rounding';
 
 type ReportTableRowProps = {
   item: GroupedEntity;
@@ -74,14 +75,7 @@ export const ReportTableRow = memo(
       averageOverride ?? Math.round(item[balanceTypeOp] / intervalsCount);
     const groupByItem = groupBy === 'Interval' ? 'date' : 'name';
     const format = useFormat();
-    const displayDecimalPlaces = format.numberFormat.hideFraction
-      ? 0
-      : format.currency.decimalPlaces;
-    const formatAmount = (amount: number) =>
-      format(
-        roundToDisplayPrecision(amount, displayDecimalPlaces) ?? amount,
-        'financial',
-      );
+    const formatAmount = createReportAmountFormatter(format);
 
     const navigate = useNavigate();
     const { isNarrowWidth } = useResponsive();

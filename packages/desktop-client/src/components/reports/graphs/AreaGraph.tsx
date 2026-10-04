@@ -24,11 +24,12 @@ import { FinancialText } from '#components/FinancialText';
 import { useRechartsAnimation } from '#components/reports/chart-theme';
 import { Container } from '#components/reports/Container';
 import { useFormat } from '#hooks/useFormat';
-import type { FormatType } from '#hooks/useFormat';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 
 import { adjustTextSize } from './adjustTextSize';
 import { renderCustomLabel } from './renderCustomLabel';
+import { createReportAmountFormatter } from './tableGraph/report-display-rounding';
+import type { ReportAmountFormatter } from './tableGraph/report-display-rounding';
 
 type PayloadItem = {
   payload: {
@@ -46,7 +47,7 @@ type CustomTooltipProps = {
   active?: boolean;
   payload?: PayloadItem[];
   balanceTypeOp: balanceTypeOpType;
-  format: (value: unknown, type: FormatType) => string;
+  format: ReportAmountFormatter;
 };
 
 const CustomTooltip = ({
@@ -154,7 +155,7 @@ const customLabel = ({
   props: LabelProps;
   width: number;
   end: number;
-  format: (value: unknown, type: FormatType) => string;
+  format: ReportAmountFormatter;
 }) => {
   //Add margin to first and last object
   const calcX =
@@ -192,6 +193,7 @@ export function AreaGraph({
   showTooltip = true,
 }: AreaGraphProps) {
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
   const animationProps = useRechartsAnimation({ animationDuration: 1000 });
 
   const privacyMode = usePrivacyMode();
@@ -217,7 +219,7 @@ export function AreaGraph({
   const lastLabel = data.intervalData.length - 1;
 
   const tickFormatter = (tick: number) => {
-    if (!privacyMode) return `${format(tick, 'financial-no-decimals')}`; // Formats the tick values as strings with commas
+    if (!privacyMode) return `${formatAmount(tick, 'financial-no-decimals')}`; // Formats the tick values as strings with commas
     return '...';
   };
 
@@ -286,7 +288,7 @@ export function AreaGraph({
                   content={
                     <CustomTooltip
                       balanceTypeOp={balanceTypeOp}
-                      format={format}
+                      format={formatAmount}
                     />
                   }
                   isAnimationActive={false}
@@ -349,7 +351,7 @@ export function AreaGraph({
                         props,
                         width,
                         end: lastLabel,
-                        format,
+                        format: formatAmount,
                       })
                     }
                   />

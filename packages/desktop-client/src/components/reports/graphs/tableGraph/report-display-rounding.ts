@@ -9,6 +9,36 @@ import type {
   IntervalEntity,
 } from '@actual-app/core/types/models';
 
+import type { FinancialFormatType } from '#hooks/useFormat';
+
+export type ReportAmountFormat = {
+  (value: unknown, type?: FinancialFormatType): string;
+  currency: { decimalPlaces: number };
+  numberFormat: { hideFraction: boolean };
+};
+
+export type ReportAmountFormatter = (
+  value: number,
+  type?: FinancialFormatType,
+) => string;
+
+export function createReportAmountFormatter(
+  format: ReportAmountFormat,
+): ReportAmountFormatter {
+  const displayDecimalPlaces = format.numberFormat.hideFraction
+    ? 0
+    : format.currency.decimalPlaces;
+
+  return (amount, type = 'financial') => {
+    const displayAmount =
+      roundToDisplayPrecision(
+        amount,
+        type === 'financial-no-decimals' ? 0 : displayDecimalPlaces,
+      ) ?? amount;
+    return format(displayAmount, type);
+  };
+}
+
 type ReportAmounts = Pick<
   GroupedEntity,
   | 'intervalData'

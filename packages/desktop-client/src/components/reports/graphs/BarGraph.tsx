@@ -34,13 +34,14 @@ import { numberFormatterTooltip } from '#components/reports/numberFormatter';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
-import type { FormatType } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 
 import { adjustTextSize } from './adjustTextSize';
 import { renderCustomLabel } from './renderCustomLabel';
 import { showActivity } from './showActivity';
+import { createReportAmountFormatter } from './tableGraph/report-display-rounding';
+import type { ReportAmountFormatter } from './tableGraph/report-display-rounding';
 
 type PayloadChild = {
   props: {
@@ -69,7 +70,7 @@ type CustomTooltipProps = {
   payload?: PayloadItem[];
   balanceTypeOp?: balanceTypeOpType;
   yAxis?: string;
-  format: (value: unknown, type: FormatType) => string;
+  format: ReportAmountFormatter;
 };
 
 const CustomTooltip = ({
@@ -224,6 +225,7 @@ export function BarGraph({
   const { data: accounts = [] } = useAccounts();
   const privacyMode = usePrivacyMode();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
 
   const [pointer, setPointer] = useState('');
 
@@ -281,7 +283,7 @@ export function BarGraph({
                     <CustomTooltip
                       balanceTypeOp={balanceTypeOp}
                       yAxis={yAxis}
-                      format={format}
+                      format={formatAmount}
                     />
                   }
                   formatter={numberFormatterTooltip}
@@ -302,7 +304,7 @@ export function BarGraph({
                 <YAxis
                   tickFormatter={value =>
                     getCustomTick(
-                      format(value, 'financial-no-decimals'),
+                      formatAmount(value, 'financial-no-decimals'),
                       privacyMode,
                     )
                   }
@@ -357,7 +359,7 @@ export function BarGraph({
                 {viewLabels && !compact && (
                   <LabelList
                     dataKey={val => getVal(val)}
-                    content={e => customLabel(e, balanceTypeOp, format)}
+                    content={e => customLabel(e, balanceTypeOp, formatAmount)}
                   />
                 )}
               </Bar>
