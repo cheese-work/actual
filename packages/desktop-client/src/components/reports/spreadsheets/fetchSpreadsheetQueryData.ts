@@ -95,14 +95,14 @@ export async function fetchSpreadsheetQueryData({
   ]);
 
   const valuationTime = Date.now();
-  const convertedAssets = convertReportQueryRows(
+  const convertedAssets = convertReportQueryRows<QueryDataEntity>(
     assets,
     accounts,
     prefs,
     showOffBudget,
     valuationTime,
   );
-  const convertedDebts = convertReportQueryRows(
+  const convertedDebts = convertReportQueryRows<QueryDataEntity>(
     debts,
     accounts,
     prefs,
