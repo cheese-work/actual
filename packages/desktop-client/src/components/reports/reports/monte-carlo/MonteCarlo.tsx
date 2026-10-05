@@ -40,8 +40,8 @@ import {
 } from '#components/reports/reports/monte-carlo/monteCarloSimulation';
 import type { MonteCarloConfig } from '#components/reports/reports/monte-carlo/monteCarloSimulation';
 import { GROUP_HEADING_STYLE } from '#components/reports/reports/monte-carlo/monteCarloStyles';
+import { MonteCarloUnavailableNotice } from '#components/reports/reports/monte-carlo/MonteCarloUnavailableNotice';
 import { useResolvedMonteCarloConfig } from '#components/reports/reports/monte-carlo/useResolvedMonteCarloConfig';
-import { MonteCarloCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
@@ -90,7 +90,11 @@ export function MonteCarlo() {
       ? selectedRun.index
       : null;
 
-  const resolvedConfig = useResolvedMonteCarloConfig(config);
+  // resolvedConfig keeps linked balances in their native account currency
+  // (the only shape that is edited and saved); the simulation and pot table
+  // read the Main-valued conversion instead
+  const { nativeConfig: resolvedConfig, main: mainConversion } =
+    useResolvedMonteCarloConfig(config);
 
   // reset when widget changes
   useEffect(() => {
@@ -168,16 +172,17 @@ export function MonteCarlo() {
   // inputs: view switches, run selection and other UI state must not
   // re-run it. Nothing runs until the saved config has been loaded
   const simulation = useMemo(() => {
-    if (!selectionsInitialized) {
+    const mainConfig = mainConversion.config;
+    if (!selectionsInitialized || mainConfig == null) {
       return null;
     }
     const params = {
-      ...resolvedConfig,
-      horizonYears: getMonteCarloHorizonYears(resolvedConfig),
+      ...mainConfig,
+      horizonYears: getMonteCarloHorizonYears(mainConfig),
       deflateToTodaysMoney: showTodaysMoney,
     };
     return { params, result: runMonteCarloSimulation(params) };
-  }, [resolvedConfig, showTodaysMoney, selectionsInitialized]);
+  }, [mainConversion, showTodaysMoney, selectionsInitialized]);
 
   // The worst-first ranking shared by the runs table and the cashflow
   // view's percentile picker, sorted once per simulation
@@ -221,25 +226,94 @@ export function MonteCarlo() {
     [simulation, detailRunIndex],
   );
 
-  if (
-    isLoading ||
-    !selectionsInitialized ||
-    simulation == null ||
-    rankedRunIndices == null
-  ) {
+  const pageHeader = isNarrowWidth ? (
+    <MobilePageHeader
+      title={title}
+      leftContent={<MobileBackButton onPress={() => navigate('/reports')} />}
+    />
+  ) : (
+    <PageHeader
+      title={
+        widget ? (
+          <EditablePageHeaderTitle title={title} onSave={onSaveWidgetName} />
+        ) : (
+          title
+        )
+      }
+    />
+  );
+
+  const configurationSection = (
+    <View style={{ flexShrink: 0 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 0',
+          flexShrink: 0,
+        }}
+      >
+        <Text
+          style={{
+            ...styles.mediumText,
+            fontWeight: 600,
+          }}
+        >
+          <Trans>Configuration</Trans>
+        </Text>
+        {widget && (
+          <Button variant="primary" onPress={onSaveWidget}>
+            <Trans>Save widget</Trans>
+          </Button>
+        )}
+      </View>
+      <MonteCarloConfiguration
+        config={resolvedConfig}
+        linkedMainBalances={mainConversion.linkedBalances}
+        onConfigChange={changes => setConfig(prev => ({ ...prev, ...changes }))}
+      />
+    </View>
+  );
+
+  if (isLoading || !selectionsInitialized) {
     return <LoadingIndicator />;
   }
 
-  const { result } = simulation;
+  if (mainConversion.status === 'unavailable') {
+    return (
+      <Page header={pageHeader} padding={0}>
+        <View
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            paddingLeft: !isNarrowWidth ? 20 : 10,
+            paddingRight: !isNarrowWidth ? 20 : 10,
+            paddingBottom: 20,
+            gap: 10,
+          }}
+        >
+          {configurationSection}
+          <MonteCarloUnavailableNotice />
+        </View>
+      </Page>
+    );
+  }
+
+  if (simulation == null || rankedRunIndices == null) {
+    return <LoadingIndicator />;
+  }
+
+  const { result, params: simulationParams } = simulation;
   // After a failure the capture continues with synthetic unfunded years
   // for the cashflow chart; the year-by-year table ends at the failure
   const fundedRunDetailRows =
     runDetailRows?.filter(row => !row.afterDepletion) ?? null;
   const cashflowGraphProps = {
-    pots: resolvedConfig.pots,
-    contributions: resolvedConfig.contributions,
-    incomeStreams: resolvedConfig.incomeStreams,
-    spendingPhases: resolvedConfig.spendingPhases,
+    pots: simulationParams.pots,
+    contributions: simulationParams.contributions,
+    incomeStreams: simulationParams.incomeStreams,
+    spendingPhases: simulationParams.spendingPhases,
     startAge: config.currentAge,
   };
 
@@ -261,32 +335,7 @@ export function MonteCarlo() {
         : theme.reportsNumberNegative;
 
   return (
-    <Page
-      header={
-        isNarrowWidth ? (
-          <MobilePageHeader
-            title={title}
-            leftContent={
-              <MobileBackButton onPress={() => navigate('/reports')} />
-            }
-          />
-        ) : (
-          <PageHeader
-            title={
-              widget ? (
-                <EditablePageHeaderTitle
-                  title={title}
-                  onSave={onSaveWidgetName}
-                />
-              ) : (
-                title
-              )
-            }
-          />
-        )
-      }
-      padding={0}
-    >
+    <Page header={pageHeader} padding={0}>
       <View
         style={{
           flex: 1,
@@ -297,44 +346,7 @@ export function MonteCarlo() {
           gap: 10,
         }}
       >
-        {/* Configuration */}
-        <View style={{ flexShrink: 0 }}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 0',
-              flexShrink: 0,
-            }}
-          >
-            <Text
-              style={{
-                ...styles.mediumText,
-                fontWeight: 600,
-              }}
-            >
-              <Trans>Configuration</Trans>
-            </Text>
-            {widget && (
-              <Button variant="primary" onPress={onSaveWidget}>
-                <Trans>Save widget</Trans>
-              </Button>
-            )}
-          </View>
-          <MonteCarloConfiguration
-            config={resolvedConfig}
-            onConfigChange={changes =>
-              setConfig(prev => ({ ...prev, ...changes }))
-            }
-          />
-        </View>
-
-        <MonteCarloCurrencyNotice
-          accountIds={config.pots.flatMap(pot =>
-            pot.accountId ? [pot.accountId] : [],
-          )}
-        />
+        {configurationSection}
 
         {/* Results */}
         <View
@@ -598,7 +610,7 @@ export function MonteCarlo() {
             fundedRunDetailRows != null ? (
             <MonteCarloRunDetailTable
               rows={fundedRunDetailRows}
-              pots={resolvedConfig.pots}
+              pots={simulationParams.pots}
               simulationIndex={selectedRunIndex}
               simulationCount={result.simulationCount}
               startAge={config.currentAge}
@@ -606,8 +618,8 @@ export function MonteCarlo() {
                 config.contributions.length > 0 ||
                 config.pots.some(pot => pot.isSurplus)
               }
-              incomeStreams={resolvedConfig.incomeStreams}
-              withdrawalRule={resolvedConfig.withdrawalRule}
+              incomeStreams={simulationParams.incomeStreams}
+              withdrawalRule={simulationParams.withdrawalRule}
               cashflowGraph={
                 <MonteCarloCashflowGraph
                   rows={runDetailRows}

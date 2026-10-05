@@ -47,6 +47,12 @@ type MonteCarloPotConfigurationProps = ComponentPropsWithoutRef<
   typeof GridListItem<MonteCarloPot>
 > & {
   pot: MonteCarloPot;
+  /**
+   * The balance to show when it differs from pot.startingBalance: a linked
+   * pot's native balance valued in Main, or null when it cannot be valued.
+   * Undefined shows pot.startingBalance as is.
+   */
+  displayBalance?: number | null;
   potLabel: string;
   canRemove: boolean;
   /** True when a historical return model is active */
@@ -59,6 +65,7 @@ type MonteCarloPotConfigurationProps = ComponentPropsWithoutRef<
 
 export function MonteCarloPotConfiguration({
   pot,
+  displayBalance,
   potLabel,
   canRemove,
   usesHistoricalReturns,
@@ -288,21 +295,27 @@ export function MonteCarloPotConfiguration({
           style={{ minWidth: POT_COLUMNS.startingBalance }}
           truncate={false}
         >
-          <FinancialInput
-            value={pot.startingBalance}
-            // Typing a different balance takes manual control: the pot
-            // unlinks from its account and keeps the typed value. The
-            // changed-check stops a mere tab-through from unlinking.
-            onUpdate={value => {
-              const newBalance = Math.min(MAX_AMOUNT, Math.max(0, value));
-              if (newBalance !== pot.startingBalance) {
-                onPotChange({
-                  startingBalance: newBalance,
-                  accountId: null,
-                });
-              }
-            }}
-          />
+          {displayBalance === null ? (
+            <Text style={{ color: theme.pageTextSubdued }}>
+              <Trans>Unavailable</Trans>
+            </Text>
+          ) : (
+            <FinancialInput
+              value={displayBalance ?? pot.startingBalance}
+              // Typing a different balance takes manual control: the pot
+              // unlinks from its account and keeps the typed value. The
+              // changed-check stops a mere tab-through from unlinking.
+              onUpdate={value => {
+                const newBalance = Math.min(MAX_AMOUNT, Math.max(0, value));
+                if (newBalance !== (displayBalance ?? pot.startingBalance)) {
+                  onPotChange({
+                    startingBalance: newBalance,
+                    accountId: null,
+                  });
+                }
+              }}
+            />
+          )}
         </Field>
 
         <Field
@@ -326,13 +339,28 @@ export function MonteCarloPotConfiguration({
               const shouldFillName =
                 newAccount != null &&
                 (pot.name === '' || pot.name === previousAccount?.name);
+              // A linked pot's stored balance is native, but a manual
+              // pot's is Main: unlinking carries the Main value over
+              // rather than reinterpreting the native amount as Main
+              const carriedBalance =
+                newAccountId === null && displayBalance != null
+                  ? Math.min(MAX_AMOUNT, displayBalance)
+                  : null;
               onPotChange({
                 accountId: newAccountId,
+                ...(carriedBalance !== null && {
+                  startingBalance: carriedBalance,
+                }),
                 ...(shouldFillName && { name: newAccount.name }),
               });
             }}
             options={[
-              ['', t('None')],
+              // With no Main value to carry over, unlinking would resume
+              // the simulation on a balance in the wrong units, so the pot
+              // must be relinked or removed instead
+              ...(displayBalance === null
+                ? []
+                : [['', t('None')] as [string, string]]),
               ...missingLinkedOptions,
               ...openAccounts.map(
                 account => [account.id, account.name] as [string, string],
