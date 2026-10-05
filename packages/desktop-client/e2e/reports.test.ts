@@ -117,12 +117,13 @@ test.describe('Reports', () => {
 
   test.describe('balance forecast', () => {
     test.beforeEach(async () => {
-      await configurationPage.initializeTestMainCurrency();
       const settingsPage = await navigation.goToSettingsPage();
       await settingsPage.enableExperimentalFeature('Balance Forecast Report');
 
       reportsPage = await navigation.goToReportsPage();
       await reportsPage.waitToLoad();
+      // After Settings: visiting it clears Main while the currency flag is off.
+      await configurationPage.initializeTestMainCurrency();
       await reportsPage.addWidget('Balance forecast');
       await reportsPage.goToBalanceForecastPage();
     });
@@ -151,6 +152,8 @@ test.describe('Reports', () => {
 
       reportsPage = await navigation.goToReportsPage();
       await reportsPage.waitToLoad();
+      // Settings (Tracking budget type) cleared Main again.
+      await configurationPage.initializeTestMainCurrency();
       await reportsPage.goToBalanceForecastPage();
       await reportsPage.selectForecastSource('Tracking budget');
 
