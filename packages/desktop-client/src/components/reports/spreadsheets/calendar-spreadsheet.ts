@@ -1,10 +1,13 @@
 import { send } from '@actual-app/core/platform/client/connection';
+import type { AccountEntity } from '@actual-app/core/types/models';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type { RuleConditionEntity } from '@actual-app/core/types/models';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import * as d from 'date-fns';
 
+import type { ReportDataStatus } from '#components/reports/spreadsheets/report-currency';
+import { convertReportQueryRows } from '#components/reports/spreadsheets/report-currency';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { aqlQuery } from '#queries/aqlQuery';
 
@@ -15,16 +18,9 @@ export type CalendarDataType = {
   incomeSize: number;
   expenseSize: number;
 };
-export function calendarSpreadsheet(
-  start: string,
-  end: string,
-  conditions: RuleConditionEntity[] = [],
-  conditionsOp: 'and' | 'or' = 'and',
-  firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'],
-) {
-  return async (
-    spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: {
+
+export type CalendarSpreadsheetResult =
+  | {
       calendarData: {
         start: Date;
         end: Date;
@@ -32,8 +28,39 @@ export function calendarSpreadsheet(
         totalExpense: number;
         totalIncome: number;
       }[];
-    }) => void,
+      hasForeignCurrency: boolean;
+    }
+  | ReportDataStatus;
+
+type CalendarQueryRow = {
+  account: string;
+  date: string;
+  amount: number;
+};
+
+export function calendarSpreadsheet(
+  start: string,
+  end: string,
+  conditions: RuleConditionEntity[] = [],
+  conditionsOp: 'and' | 'or' = 'and',
+  firstDayOfWeekIdx: SyncedPrefs['firstDayOfWeekIdx'],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  accountsReady: boolean,
+) {
+  return async (
+    spreadsheet: ReturnType<typeof useSpreadsheet>,
+    setData: (data: CalendarSpreadsheetResult) => void,
   ) => {
+    if (!accountsReady) {
+      setData({ status: 'loading' });
+      return;
+    }
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     let filters: unknown[];
 
     try {
@@ -46,7 +73,8 @@ export function calendarSpreadsheet(
       filters = filtersLocal;
     } catch (error) {
       console.error('Failed to make filters from conditions:', error);
-      filters = [];
+      setData({ status: 'unavailable' });
+      return;
     }
     const conditionsOpKey = conditionsOp === 'or' ? '$or' : '$and';
 
@@ -85,32 +113,70 @@ export function calendarSpreadsheet(
         .filter({
           [conditionsOpKey]: filters,
         })
-        .groupBy(['date'])
-        .select(['date', { amount: { $sum: '$amount' } }]);
+        .groupBy(['account', 'date'])
+        .select(['account', 'date', { amount: { $sum: '$amount' } }]);
 
-    let expenseData;
+    let expenseData: { data: CalendarQueryRow[] };
+    let incomeData: { data: CalendarQueryRow[] };
     try {
-      expenseData = await aqlQuery(
-        makeRootQuery().filter({
-          $and: { amount: { $lt: 0 } },
-        }),
-      );
+      [expenseData, incomeData] = await Promise.all([
+        aqlQuery(
+          makeRootQuery().filter({
+            $and: { amount: { $lt: 0 } },
+          }),
+        ),
+        aqlQuery(
+          makeRootQuery().filter({
+            $and: { amount: { $gt: 0 } },
+          }),
+        ),
+      ]);
     } catch (error) {
-      console.error('Failed to fetch expense data:', error);
-      expenseData = { data: [] };
+      console.error('Failed to fetch calendar data:', error);
+      setData({ status: 'unavailable' });
+      return;
     }
 
-    let incomeData;
-    try {
-      incomeData = await aqlQuery(
-        makeRootQuery().filter({
-          $and: { amount: { $gt: 0 } },
-        }),
+    const valuationTime = Date.now();
+    const accountsById = new Map(accounts.map(account => [account.id, account]));
+    const convertRows = (rows: CalendarQueryRow[]) =>
+      convertReportQueryRows(
+        rows.map(row => ({
+          ...row,
+          accountOffBudget: Boolean(accountsById.get(row.account)?.offbudget),
+        })),
+        accounts,
+        prefs,
+        true,
+        valuationTime,
       );
-    } catch (error) {
-      console.error('Failed to fetch income data:', error);
-      incomeData = { data: [] };
+    const convertedExpenseRows = convertRows(expenseData.data);
+    const convertedIncomeRows = convertRows(incomeData.data);
+    if (!Array.isArray(convertedExpenseRows)) {
+      setData(convertedExpenseRows);
+      return;
     }
+    if (!Array.isArray(convertedIncomeRows)) {
+      setData(convertedIncomeRows);
+      return;
+    }
+    const expenseByDate = sumRowsByDate(convertedExpenseRows);
+    const incomeByDate = sumRowsByDate(convertedIncomeRows);
+    if (!Array.isArray(expenseByDate)) {
+      setData(expenseByDate);
+      return;
+    }
+    if (!Array.isArray(incomeByDate)) {
+      setData(incomeByDate);
+      return;
+    }
+    const hasForeignCurrency = [
+      ...convertedExpenseRows,
+      ...convertedIncomeRows,
+    ].some(row => {
+      const currency = accountsById.get(row.account)?.currency;
+      return currency != null && currency !== prefs.defaultCurrencyCode;
+    });
 
     const getOneDatePerMonth = (start: Date, end: Date) => {
       const months = [];
@@ -127,14 +193,27 @@ export function calendarSpreadsheet(
 
     setData(
       recalculate(
-        incomeData.data,
-        expenseData.data,
+        incomeByDate,
+        expenseByDate,
         getOneDatePerMonth(startDay, endDay),
         start,
         firstDayOfWeekIdx,
+        hasForeignCurrency,
       ),
     );
   };
+}
+
+function sumRowsByDate(rows: Array<{ date: string; amount: number }>) {
+  const amounts = new Map<string, number>();
+  for (const row of rows) {
+    const amount = (amounts.get(row.date) ?? 0) + row.amount;
+    if (!Number.isSafeInteger(amount)) {
+      return { status: 'unavailable' } as const;
+    }
+    amounts.set(row.date, amount);
+  }
+  return Array.from(amounts, ([date, amount]) => ({ date, amount }));
 }
 
 function recalculate(
@@ -149,6 +228,7 @@ function recalculate(
   months: Date[],
   start: string,
   firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'],
+  hasForeignCurrency = false,
 ) {
   const incomeDataMap = new Map<string, number>();
   incomeData.forEach(item => {
@@ -256,6 +336,7 @@ function recalculate(
   };
 
   return {
+    hasForeignCurrency,
     calendarData: months.map(m => {
       return {
         ...getDaysArray(m),

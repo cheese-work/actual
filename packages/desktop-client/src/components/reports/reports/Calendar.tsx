@@ -53,7 +53,7 @@ import { useCategories } from '#hooks/useCategories';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { DisplayPayeeProvider } from '#hooks/useDisplayPayee';
-import { useFormat } from '#hooks/useFormat';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
 import type { FormatType } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useMergedRefs } from '#hooks/useMergedRefs';
@@ -64,6 +64,7 @@ import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { SelectedProviderWithItems } from '#hooks/useSelected';
 import { SplitsExpandedProvider } from '#hooks/useSplitsExpanded';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { useTransactions } from '#hooks/useTransactions';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
@@ -96,6 +97,16 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
   const locale = useLocale();
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
 
   const [start, setStart] = useState(
     monthUtils.dayFromDate(monthUtils.currentMonth()),
@@ -116,7 +127,11 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
     [transactionsGrouped],
   );
 
-  const { data: accounts = [] } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const { data: payees = [] } = usePayees();
   const { data: { grouped: categoryGroups } = { grouped: [] } } =
     useCategories();
@@ -184,8 +199,22 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
       conditions,
       conditionsOp,
       firstDayOfWeekIdx,
+      accounts,
+      prefs,
+      !accountsLoading && !accountsPlaceholderData,
     );
-  }, [start, end, conditions, conditionsOp, firstDayOfWeekIdx, dirty]);
+  }, [
+    start,
+    end,
+    conditions,
+    conditionsOp,
+    firstDayOfWeekIdx,
+    accounts,
+    prefs,
+    accountsLoading,
+    accountsPlaceholderData,
+    dirty,
+  ]);
 
   const [sortField, setSortField] = useState('');
   const [ascDesc, setAscDesc] = useState<'asc' | 'desc'>('desc');
@@ -238,7 +267,10 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
     scrollbarContainer,
   ) as Ref<HTMLDivElement>;
 
-  const data = useReport('calendar', params);
+  const reportData = useReport('calendar', params);
+  const data = reportData && 'calendarData' in reportData ? reportData : null;
+  const reportUnavailable =
+    !!reportData && 'status' in reportData && reportData.status === 'unavailable';
 
   const [allMonths, setAllMonths] = useState<
     Array<{
@@ -578,6 +610,14 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
             overflowY: 'auto',
           }}
         >
+          {data?.hasForeignCurrency && (
+            <View style={{ padding: '8px 20px' }}>
+              {t(
+                'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+                { currencyCode: prefs.defaultCurrencyCode },
+              )}
+            </View>
+          )}
           <View
             style={{
               flexDirection: isNarrowWidth ? 'column-reverse' : 'row',
@@ -588,7 +628,17 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
               marginBottom: 16,
             }}
           >
-            {data && (
+            {reportUnavailable ? (
+              <View
+                role="status"
+                aria-live="polite"
+                style={{ padding: 20 }}
+              >
+                {t(
+                  'Calendar is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+                )}
+              </View>
+            ) : data ? (
               <View
                 ref={mergedRef}
                 style={{
@@ -610,19 +660,21 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
                     firstDayOfWeekIdx={firstDayOfWeekIdx}
                     conditions={conditions}
                     conditionsOp={conditionsOp}
-                    format={format}
+                    format={formatMainCurrency}
                   />
                 ))}
+                <CalendarCardHeader
+                  start={start}
+                  end={end}
+                  totalExpense={totalExpense}
+                  totalIncome={totalIncome}
+                  isNarrowWidth={isNarrowWidth}
+                  format={formatMainCurrency}
+                />
               </View>
+            ) : (
+              <LoadingIndicator />
             )}
-            <CalendarCardHeader
-              start={start}
-              end={end}
-              totalExpense={totalExpense}
-              totalIncome={totalIncome}
-              isNarrowWidth={isNarrowWidth}
-              format={format}
-            />
           </View>
         </View>
         <SelectedProviderWithItems
@@ -932,6 +984,7 @@ function CalendarWithHeader({
             }
           }}
           firstDayOfWeekIdx={firstDayOfWeekIdx}
+          format={formatMainCurrency}
         />
       </View>
     </View>

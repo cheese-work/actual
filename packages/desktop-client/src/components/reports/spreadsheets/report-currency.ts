@@ -3,24 +3,28 @@ import { convert } from '@actual-app/core/shared/exchange-rates';
 import type { AccountEntity } from '@actual-app/core/types/models';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 
-import type { QueryDataEntity } from '#components/reports/ReportOptions';
-
 export type ReportDataStatus = { status: 'loading' | 'unavailable' };
 
-export function convertReportQueryRows(
-  rows: QueryDataEntity[],
+type ConvertibleReportRow = {
+  account: string;
+  accountOffBudget: boolean;
+  amount: number;
+};
+
+export function convertReportQueryRows<T extends ConvertibleReportRow>(
+  rows: T[],
   accounts: AccountEntity[],
   prefs: Readonly<SyncedPrefs>,
   showOffBudget: boolean,
   valuationTime: number,
-): QueryDataEntity[] | ReportDataStatus {
+): T[] | ReportDataStatus {
   const mainCurrency = prefs.defaultCurrencyCode;
   if (!mainCurrency) {
     return { status: 'unavailable' };
   }
 
   const accountsById = new Map(accounts.map(account => [account.id, account]));
-  const convertedRows: QueryDataEntity[] = [];
+  const convertedRows: T[] = [];
   let total = 0n;
 
   for (const row of rows) {
@@ -72,7 +76,7 @@ export function convertReportQueryRows(
       return { status: 'unavailable' };
     }
 
-    convertedRows.push({ ...row, amount });
+    convertedRows.push({ ...row, amount } as T);
   }
 
   return convertedRows;
