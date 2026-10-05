@@ -25,6 +25,9 @@ export type BatchResult = {
   present: number;
   errors: string[];
   complete: boolean;
+  // Vietnamese keys the gate validated (batch + shared keys, plural groups
+  // expanded to the Vietnamese plural forms); only set when complete.
+  keys: string[];
 };
 
 const keyList = (value: unknown): value is string[] =>
@@ -93,6 +96,7 @@ export function evaluateBatch(
     errors: string[],
     required = 0,
     present = 0,
+    keys: string[] = [],
   ): BatchResult => ({
     state,
     batch,
@@ -100,6 +104,7 @@ export function evaluateBatch(
     present,
     errors,
     complete: state === 'complete',
+    keys: state === 'complete' ? keys : [],
   });
 
   const parsed = parseManifest(manifest);
@@ -154,6 +159,7 @@ export function evaluateBatch(
     errors,
     requiredKeys.length,
     present,
+    requiredKeys,
   );
 }
 
@@ -202,6 +208,7 @@ function main(argv: string[]): number {
   const options = {
     ...defaults,
     english: '',
+    keysOut: '',
     catalogue: false,
     require: false,
   };
@@ -213,6 +220,8 @@ function main(argv: string[]): number {
       options.require = true;
     } else if (arg === '--manifest') {
       options.manifest = argv[++i];
+    } else if (arg === '--keys-out') {
+      options.keysOut = argv[++i];
     } else if (arg === '--english') {
       options.english = argv[++i];
     } else if (arg === '--vietnamese') {
@@ -244,6 +253,9 @@ function main(argv: string[]): number {
     return 0;
   }
 
+  if (options.keysOut) {
+    fs.rmSync(options.keysOut, { force: true });
+  }
   const manifest = readJson(options.manifest);
   // Catalogs are only needed (and extraction only run) once a batch is declared.
   const declared = parseManifest(manifest).batch !== null;
@@ -268,6 +280,10 @@ function main(argv: string[]): number {
     console.log(
       'No screen batch declared in locale-fork/batches.json: Vietnamese stays HIDDEN from Settings > Language and is NOT staged. This is not an acceptance of any translation.',
     );
+  }
+  if (options.keysOut && result.complete) {
+    // Consumed by bin/stage-vietnamese.mts: ship exactly these keys, no more.
+    fs.writeFileSync(options.keysOut, JSON.stringify(result.keys));
   }
   const code = exitCode(result, options.require);
   if (code !== 0) {

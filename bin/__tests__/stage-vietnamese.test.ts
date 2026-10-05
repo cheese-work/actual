@@ -19,6 +19,12 @@ const english: Record<string, string> = {
   'Open <0>account</0>': 'Open <0>account</0>',
   '{{count}} items_one': '{{count}} item',
   '{{count}} items_other': '{{count}} items',
+  // Screen B is unrelated to the declared batch.
+  Reports: 'Reports',
+  'Report {{name}}': 'Report {{name}}',
+  'Open <0>report</0>': 'Open <0>report</0>',
+  '{{count}} reports_one': '{{count}} report',
+  '{{count}} reports_other': '{{count}} reports',
 };
 const batchManifest = {
   version: 1,
@@ -43,19 +49,45 @@ describe('stageVietnamese', () => {
   // Same evaluation + exit mapping as `check-vietnamese-batch.mts --require-batch`.
   let manifest: unknown = batchManifest;
   let englishCatalog = english;
-  const gate = () =>
-    exitCode(
-      evaluateBatch(
-        manifest,
-        englishCatalog,
-        JSON.parse(fs.readFileSync(source, 'utf8')),
-      ),
-      true,
+  let validatedKeys: string[] = [];
+  const gate = () => {
+    const result = evaluateBatch(
+      manifest,
+      englishCatalog,
+      JSON.parse(fs.readFileSync(source, 'utf8')),
     );
+    validatedKeys = result.keys;
+    return exitCode(result, true);
+  };
   const stage = (catalog: Record<string, string>) => {
     fs.writeFileSync(source, JSON.stringify(catalog));
-    return stageVietnamese({ source, target, runGate: gate });
+    return stageVietnamese({
+      source,
+      target,
+      runGate: gate,
+      keys: () => validatedKeys,
+    });
   };
+  const staged = () =>
+    JSON.parse(fs.readFileSync(target, 'utf8')) as Record<string, string>;
+  const viPluralKeys = (base: string) =>
+    new Intl.PluralRules('vi')
+      .resolvedOptions()
+      .pluralCategories.map(category => `${base}_${category}`);
+  const validatedA = [
+    'Budget',
+    'Balance {{amount}}',
+    'Open <0>account</0>',
+    ...viPluralKeys('{{count}} items'),
+  ];
+  const screenB: Record<string, string> = {
+    Reports: 'Báo cáo',
+    'Report {{name}}': 'Báo cáo {{name}}',
+    'Open <0>report</0>': 'Mở <0>báo cáo</0>',
+    '{{count}} reports_other': '{{count}} báo cáo',
+  };
+  const sortedKeys = (value: Record<string, string>) =>
+    Object.keys(value).sort();
 
   beforeEach(() => {
     manifest = batchManifest;
@@ -67,16 +99,91 @@ describe('stageVietnamese', () => {
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  it('stages a complete, well-formed batch byte-for-byte', () => {
+  it('stages exactly the validated keys as deterministic 2-space JSON', () => {
     expect(stage(complete)).toEqual({ staged: true });
     expect(fs.readFileSync(target, 'utf8')).toBe(
-      fs.readFileSync(source, 'utf8'),
+      `${JSON.stringify(complete, null, 2)}\n`,
+    );
+    expect(sortedKeys(staged())).toEqual([...validatedA].sort());
+  });
+
+  it('F3: complete screen A stages only A while screen B is partial', () => {
+    const { Reports: _r, 'Report {{name}}': _n, ...partialB } = screenB;
+    expect(stage({ ...partialB, ...complete })).toEqual({ staged: true });
+    expect(sortedKeys(staged())).toEqual([...validatedA].sort());
+  });
+
+  it('F3: screen B entirely untranslated is not staged', () => {
+    expect(stage(complete)).toEqual({ staged: true });
+    expect(sortedKeys(staged())).toEqual([...validatedA].sort());
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ['empty translation', { ...screenB, Reports: ' ' }],
+    ['placeholder mismatch', { ...screenB, 'Report {{name}}': 'Báo cáo' }],
+    ['unclosed <Trans> tag', { ...screenB, 'Open <0>report</0>': 'Mở <0>báo' }],
+    [
+      'wrong plural form',
+      { ...screenB, '{{count}} reports_one': '{{count}} báo cáo' },
+    ],
+    ['extra key absent from English', { ...screenB, 'Not in English': 'x' }],
+  ])('F3: complete screen A stages only A while screen B has %s', (_n, b) => {
+    expect(stage({ ...b, ...complete })).toEqual({ staged: true });
+    expect(sortedKeys(staged())).toEqual([...validatedA].sort());
+    expect(fs.readFileSync(target, 'utf8')).not.toMatch(/báo|Not in English/);
+  });
+
+  it('keeps source key order and stages no non-validated plural variant', () => {
+    const interleaved = {
+      '{{count}} reports_other': '{{count}} báo cáo',
+      Reports: 'Báo cáo',
+      '{{count}} items_other': complete['{{count}} items_other'],
+      Budget: complete.Budget,
+      'Open <0>account</0>': complete['Open <0>account</0>'],
+      'Balance {{amount}}': complete['Balance {{amount}}'],
+    };
+    expect(stage(interleaved)).toEqual({ staged: true });
+    expect(Object.keys(staged())).toEqual([
+      '{{count}} items_other',
+      'Budget',
+      'Open <0>account</0>',
+      'Balance {{amount}}',
+    ]);
+    expect(Object.keys(staged())).toEqual(
+      expect.arrayContaining(viPluralKeys('{{count}} items')),
+    );
+    expect(Object.keys(staged()).filter(k => k.includes('reports'))).toEqual(
+      [],
     );
   });
 
-  it('stages a complete batch while an unrelated English key is untranslated', () => {
-    englishCatalog = { ...english, Reports: 'Reports' };
+  it('stages shared keys alongside batch keys', () => {
+    manifest = {
+      version: 1,
+      current: {
+        name: 'screen-a',
+        keys: ['Budget'],
+        sharedKeys: ['Balance {{amount}}', '{{count}} items'],
+      },
+    };
     expect(stage(complete)).toEqual({ staged: true });
+    expect(sortedKeys(staged())).toEqual(
+      [
+        'Budget',
+        'Balance {{amount}}',
+        ...viPluralKeys('{{count}} items'),
+      ].sort(),
+    );
+  });
+
+  it('does not loosen duplicate keys between keys and sharedKeys', () => {
+    manifest = {
+      version: 1,
+      current: { name: 'dup', keys: ['Budget'], sharedKeys: ['Budget'] },
+    };
+    fs.writeFileSync(target, '{"stale":"x"}');
+    expect(stage(complete)).toEqual({ staged: false });
+    expect(fs.existsSync(target)).toBe(false);
   });
 
   it.each<[string, unknown]>([
@@ -128,24 +235,41 @@ describe('stageVietnamese', () => {
     expect(fs.existsSync(target)).toBe(false);
   });
 
-  it('replaces a stale vi.json only with the gate-approved batch', () => {
+  it('replaces a stale vi.json only with the gate-approved keys', () => {
     fs.writeFileSync(target, '{"stale":"x"}');
-    expect(stage(complete)).toEqual({ staged: true });
-    expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toEqual(complete);
+    expect(stage({ ...screenB, ...complete })).toEqual({ staged: true });
+    expect(staged()).toEqual(complete);
+  });
+
+  it('removes a stale vi.json when a required in-batch key is omitted', () => {
+    fs.writeFileSync(target, '{"stale":"x"}');
+    const { 'Balance {{amount}}': _removed, ...omitted } = complete;
+    expect(stage({ ...screenB, ...omitted })).toEqual({ staged: false });
+    expect(fs.existsSync(target)).toBe(false);
   });
 
   it('withholds when the gate cannot run (non-zero status)', () => {
     fs.writeFileSync(source, JSON.stringify(complete));
-    expect(stageVietnamese({ source, target, runGate: () => 2 })).toEqual({
-      staged: false,
-    });
+    expect(
+      stageVietnamese({
+        source,
+        target,
+        runGate: () => 2,
+        keys: () => ['Budget'],
+      }),
+    ).toEqual({ staged: false });
     expect(fs.existsSync(target)).toBe(false);
   });
 
   it('withholds when the fork catalog is missing', () => {
-    expect(stageVietnamese({ source, target, runGate: () => 0 })).toEqual({
-      staged: false,
-    });
+    expect(
+      stageVietnamese({
+        source,
+        target,
+        runGate: () => 0,
+        keys: () => ['Budget'],
+      }),
+    ).toEqual({ staged: false });
     expect(fs.existsSync(target)).toBe(false);
   });
 });

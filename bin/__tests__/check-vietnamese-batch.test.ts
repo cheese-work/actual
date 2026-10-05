@@ -11,7 +11,10 @@ import {
   exitCode,
   parseManifest,
 } from '../check-vietnamese-batch.mts';
-import { checkVietnamese } from '../check-vietnamese.mts';
+import {
+  checkVietnamese,
+  requiredVietnameseKeys,
+} from '../check-vietnamese.mts';
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -279,6 +282,19 @@ describe('CLI (the exact command CI runs: yarn check:i18n)', () => {
     expect(out.stdout).toContain(
       'Vietnamese batch completeness: {"batch":"screen-a","required":4,"present":4,"errors":0,"complete":true}',
     );
+  });
+
+  it('--keys-out writes exactly the validated Vietnamese keys only on a complete batch', () => {
+    const keysOut = path.join(dir, 'keys.json');
+    expect(run(manifest(), viA, ['--keys-out', keysOut]).status).toBe(0);
+    expect(JSON.parse(fs.readFileSync(keysOut, 'utf8')).sort()).toEqual(
+      requiredVietnameseKeys(screenA).sort(),
+    );
+    fs.rmSync(keysOut);
+    expect(
+      run(manifest(), without(viA, 'Budget'), ['--keys-out', keysOut]).status,
+    ).toBe(1);
+    expect(fs.existsSync(keysOut)).toBe(false);
   });
 
   it('exits 1 naming the missing in-batch key', () => {
