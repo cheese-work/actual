@@ -109,10 +109,10 @@ export async function fetchSpreadsheetQueryData({
     showOffBudget,
     valuationTime,
   );
-  if (!Array.isArray(convertedAssets)) {
+  if ('status' in convertedAssets) {
     return convertedAssets;
   }
-  if (!Array.isArray(convertedDebts)) {
+  if ('status' in convertedDebts) {
     return convertedDebts;
   }
 

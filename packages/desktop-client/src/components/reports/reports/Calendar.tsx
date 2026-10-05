@@ -984,7 +984,7 @@ function CalendarWithHeader({
             }
           }}
           firstDayOfWeekIdx={firstDayOfWeekIdx}
-          format={formatMainCurrency}
+          format={format}
         />
       </View>
     </View>
