@@ -76,7 +76,7 @@ runs:
       run: packages/desktop-client/bin/remove-untranslated-languages
       shell: bash
       if: ${{ inputs.download-translations == 'true' && !env.ACT }}
-    - name: Overlay fork-owned Vietnamese translation
-      run: cp packages/desktop-client/locale-fork/vi.json packages/desktop-client/locale/vi.json
+    - name: Stage Vietnamese only when the CHE-831 gate passes
+      run: node --experimental-strip-types bin/stage-vietnamese.mts
       shell: bash
       if: ${{ inputs.download-translations == 'true' && !env.ACT }}

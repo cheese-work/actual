@@ -39,7 +39,7 @@ You can define your own unit (for example reward points) with a code that starts
 - Historical exchange rates.
 
 :::note
-The Vietnamese translation of these screens is shown only once the whole translation batch is complete.
+The Vietnamese translation of these screens is hidden from _Settings → Language_ by default. The browser and Electron packaging scripts and the CI setup step copy `locale-fork/vi.json` into the build only through `bin/stage-vietnamese.mts`, and that script stages it only when the Vietnamese batch gate (`yarn check:i18n`, `bin/check-vietnamese.mts`) passes: every key and plural form present, no empty translations, and matching `{{placeholders}}` and `<Trans>` tags. A partial or unaccepted batch is withheld from the language picker and from browser and Electron bundles. Passing the gate is a technical check only; accepting a complete screen batch is a separate decision.
 :::
 
 ## Legacy method: converting transactions with rule templates

@@ -47,7 +47,10 @@ if [ $SKIP_TRANSLATIONS == false ]; then
   git pull
   popd > /dev/null
   packages/desktop-client/bin/remove-untranslated-languages
-  cp packages/desktop-client/locale-fork/vi.json packages/desktop-client/locale/vi.json
+  # Vietnamese is staged only when the CHE-831 gate (yarn check:i18n) passes.
+  node --experimental-strip-types bin/stage-vietnamese.mts
+else
+  rm -f packages/desktop-client/locale/vi.json
 fi
 
 export NODE_OPTIONS="--max-old-space-size=4096"
