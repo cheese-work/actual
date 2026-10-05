@@ -3,102 +3,40 @@ import path from 'node:path';
 
 import type { Page } from '@playwright/test';
 
+import {
+  EURO_NATIVE,
+  EVIDENCE_DIR,
+  MONTH,
+  NOTE,
+  POINTS_NATIVE,
+  RATE_HOSTS,
+  SERVER_URL,
+  USD,
+  appReady,
+  connect,
+  createFixture,
+  derive,
+  grab,
+  open,
+  pageText,
+  round2,
+  savePrefs,
+  send,
+  shoot,
+  sidebarOf,
+  sync,
+  usd,
+} from './currency-sync-helpers';
+import type { Json, Rates, TestWindow } from './currency-sync-helpers';
 import { expect, test } from './fixtures';
 import { BudgetPage } from './page-models/budget-page';
 import { ConfigurationPage } from './page-models/configuration-page';
 
-// Two isolated browser clients against a disposable local sync server:
-//   E2E_SYNC_SERVER_URL=http://127.0.0.1:5106 (a fresh ACTUAL_DATA_DIR)
-//   E2E_EVIDENCE_DIR=<dir>  optional: screenshots and observed values
+// Two isolated browser clients against a disposable local sync server (see
+// currency-sync-helpers.ts for E2E_SYNC_SERVER_URL / E2E_EVIDENCE_DIR).
 // Without E2E_SYNC_SERVER_URL the suite is skipped (CI does not run it); it
 // never touches a real server.
-const SERVER_URL = process.env.E2E_SYNC_SERVER_URL;
-const EVIDENCE_DIR = process.env.E2E_EVIDENCE_DIR;
-const PASSWORD = 'che-1024-disposable';
-const RATE_HOSTS = /frankfurter|coingecko/;
-
-// Test mode pins the app clock: every date below is January 2017.
-const MONTH = '2017-01';
-const EURO_NATIVE = 80; // 100.00 EUR deposit, 20.00 EUR expense
-const POINTS_NATIVE = 1000; // 1,000 pt, a decimals-0 custom unit
-
-type TestWindow = Window & {
-  $send: (method: string, args?: Record<string, unknown>) => Promise<unknown>;
-  $query: (query: unknown) => Promise<{ data: unknown[] }>;
-  $q: (table: string) => {
-    select: (fields: string[]) => unknown;
-  };
-  __navigate: (url: string) => void;
-  __actionsForMenu: {
-    saveSyncedPrefs: (payload: {
-      prefs: Record<string, string>;
-    }) => Promise<unknown>;
-    downloadBudget: (payload: { cloudFileId: string }) => Promise<unknown>;
-  };
-};
-
-type Json = Record<string, unknown>;
 const observed: Record<string, unknown> = {};
-
-// The dev server may reload every open page once when a lazily imported
-// dependency is first optimised; wait for the app globals to come back.
-async function appReady(page: Page) {
-  await page.waitForFunction(
-    () =>
-      typeof (window as TestWindow).$q === 'function' &&
-      typeof (window as TestWindow).__navigate === 'function',
-    undefined,
-    { timeout: 30_000 },
-  );
-}
-
-async function send<T = unknown>(
-  page: Page,
-  method: string,
-  args?: Record<string, unknown>,
-) {
-  await appReady(page);
-  return page.evaluate(
-    ([name, params]) =>
-      (window as TestWindow).$send(name, params as Record<string, unknown>),
-    [method, args] as const,
-  ) as Promise<T>;
-}
-
-async function savePrefs(page: Page, prefs: Record<string, string>) {
-  await page.evaluate(async values => {
-    await (window as TestWindow).__actionsForMenu.saveSyncedPrefs({
-      prefs: values,
-    });
-  }, prefs);
-}
-
-async function connect(page: Page) {
-  await send(page, 'set-server-url', { url: SERVER_URL });
-  // Already bootstrapped by the first client: that error is expected.
-  await send(page, 'subscribe-bootstrap', { password: PASSWORD });
-  const signIn = await send<{ error?: string }>(page, 'subscribe-sign-in', {
-    password: PASSWORD,
-  });
-  expect(signIn.error).toBeUndefined();
-}
-
-// Pushes this client's changes and pulls the other client's. fullSync is
-// single-flight: a call made while an automatic sync runs joins it and may
-// miss the newest change, so the second call guarantees one full round trip.
-async function sync(page: Page) {
-  for (let round = 0; round < 2; round++) {
-    const result = await send<{ error?: unknown } | undefined>(page, 'sync');
-    expect(result?.error).toBeUndefined();
-  }
-}
-
-async function shoot(page: Page, name: string) {
-  if (EVIDENCE_DIR) {
-    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
-    await page.screenshot({ path: path.join(EVIDENCE_DIR, `${name}.png`) });
-  }
-}
 
 // ---------------------------------------------------------------- budget math
 
@@ -186,80 +124,6 @@ async function expectBudgetMath(
 }
 
 // ------------------------------------------------------------ surface reading
-
-const BIDI = /[‪-‮⁦-⁩]/g;
-
-// Rendered text of the whole app, one ' | ' per line break, without the
-// bidi marks the currency formatter wraps amounts in.
-async function pageText(page: Page) {
-  const raw = await page
-    .evaluate(() => document.body.innerText)
-    // A page that is reloading has no text yet: the poll tries again.
-    .catch(() => '');
-  return raw
-    .replace(BIDI, '')
-    .replace(/[\u00a0\u202f]/g, ' ')
-    .replace(/\s*\n+\s*/g, ' | ');
-}
-
-// Right after a prefs sync the router can briefly drop flag-gated routes and
-// bounce to /budget, so navigate until the app stays on the requested route.
-async function open(page: Page, route: string) {
-  await expect
-    .poll(
-      async () => {
-        await appReady(page);
-        const path = await page.evaluate(() => window.location.pathname);
-        if (path !== route) {
-          await page.evaluate(
-            url => (window as TestWindow).__navigate(url),
-            route,
-          );
-          await page.waitForTimeout(250);
-        }
-        return page.evaluate(() => window.location.pathname);
-      },
-      { message: `open ${route}`, timeout: 30_000 },
-    )
-    .toBe(route);
-}
-
-function grab(t: string, re: RegExp): string[] | { unmatched: string } {
-  const match = re.exec(t);
-  if (match) {
-    return match.slice(1);
-  }
-  const start = t.indexOf(' | Help | ');
-  return { unmatched: t.slice(start < 0 ? 0 : start + 10, start + 600) };
-}
-
-const sidebarOf = (t: string) =>
-  t.slice(t.indexOf('All accounts'), t.indexOf(' | Add account'));
-
-const USD = '(-?\\+?\\$[\\d,]+\\.\\d\\d)';
-const NOTE =
-  'Values in USD\\. Foreign-currency history is an estimate at current rates\\.';
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
-const usd = (n: number) =>
-  `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
-type Rates = { eur: number; points: number };
-
-// Everything a rate pair implies, in Main (USD). On-budget Checking is 500.00
-// income and a 150.00 Rent expense; the foreign accounts are off budget.
-function derive({ eur, points }: Rates) {
-  const euroNet = round2(EURO_NATIVE * eur);
-  const euroDeposit = round2(100 * eur);
-  const euroPayment = round2(-20 * eur);
-  const pointsNet = round2(POINTS_NATIVE * points);
-  const off = round2(euroNet + pointsNet);
-  const all = round2(350 + off);
-  return { euroNet, euroDeposit, euroPayment, pointsNet, off, all };
-}
 
 type Surface = {
   name: string;
@@ -661,56 +525,7 @@ test.describe('multi-currency persistence across two clients', () => {
         'flags.budgetAnalysisReport': 'true',
       });
 
-      const fixture = await clientA.evaluate(async m => {
-        const w = window as TestWindow;
-        const euro = (await w.$send('account-create', {
-          name: 'Euro savings',
-          balance: 100,
-          offBudget: true,
-          currency: 'EUR',
-        })) as string;
-        const points = (await w.$send('account-create', {
-          name: 'Loyalty points',
-          balance: 1000,
-          offBudget: true,
-          currency: 'X-POINTS',
-        })) as string;
-        const checking = (await w.$send('account-create', {
-          name: 'Checking',
-          balance: 500,
-          offBudget: false,
-          currency: 'USD',
-        })) as string;
-        const groupId = await w.$send('category-group-create', {
-          name: 'Bills',
-        });
-        const categoryId = (await w.$send('category-create', {
-          name: 'Rent',
-          groupId,
-        })) as string;
-        const date = `${m}-01`;
-        await w.$send('transactions-batch-update', {
-          added: [
-            // Aligned with the budget month: spent -150.00 of 200.00.
-            {
-              id: crypto.randomUUID(),
-              account: checking,
-              date,
-              amount: -15000,
-              category: categoryId,
-            },
-            { id: crypto.randomUUID(), account: euro, date, amount: -2000 },
-          ],
-        });
-        await w.$send('budget/budget-amount', {
-          month: m,
-          category: categoryId,
-          amount: 20000,
-        });
-        const pages = (await w.$query(w.$q('dashboard_pages').select(['id'])))
-          .data as Array<{ id: string }>;
-        return { euro, points, checking, categoryId, dashboardId: pages[0].id };
-      }, MONTH);
+      const fixture = await createFixture(clientA);
       const { categoryId, dashboardId } = fixture;
       const accountIds = [fixture.checking, fixture.euro, fixture.points];
 
