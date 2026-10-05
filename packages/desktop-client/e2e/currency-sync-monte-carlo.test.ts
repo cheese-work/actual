@@ -29,7 +29,7 @@ import { BudgetPage } from './page-models/budget-page';
 const observed: Record<string, unknown> = {};
 
 const UNAVAILABLE =
-  'Unavailable: a linked account balance cannot be converted to USD. Add an exchange rate in Settings or unlink the pot.';
+  'Unavailable: a linked account balance cannot be converted to USD. Add an exchange rate in Settings, link the pot to another account or remove the pot.';
 const BASE = {
   currentAge: 60,
   targetAge: 70,
