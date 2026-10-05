@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { checkVietnamese } from '../check-vietnamese.mts';
+import { evaluateBatch, exitCode } from '../check-vietnamese-batch.mts';
 import { stageVietnamese } from '../stage-vietnamese.mts';
 
 const root = path.resolve(
@@ -20,6 +20,14 @@ const english: Record<string, string> = {
   '{{count}} items_one': '{{count}} item',
   '{{count}} items_other': '{{count}} items',
 };
+const batchManifest = {
+  version: 1,
+  current: {
+    name: 'screen-a',
+    keys: ['Budget', 'Balance {{amount}}', 'Open <0>account</0>'],
+    sharedKeys: ['{{count}} items'],
+  },
+};
 const complete: Record<string, string> = {
   Budget: 'Ngân sách',
   'Balance {{amount}}': 'Số dư {{amount}}',
@@ -32,19 +40,26 @@ describe('stageVietnamese', () => {
   let source: string;
   let target: string;
 
-  // Runs the real CHE-831 gate function (checkVietnamese) against the catalog
-  // that is about to be staged, as bin/check-vietnamese.mts does for the tree.
+  // Same evaluation + exit mapping as `check-vietnamese-batch.mts --require-batch`.
+  let manifest: unknown = batchManifest;
+  let englishCatalog = english;
   const gate = () =>
-    checkVietnamese(english, JSON.parse(fs.readFileSync(source, 'utf8')))
-      .length === 0
-      ? 0
-      : 1;
+    exitCode(
+      evaluateBatch(
+        manifest,
+        englishCatalog,
+        JSON.parse(fs.readFileSync(source, 'utf8')),
+      ),
+      true,
+    );
   const stage = (catalog: Record<string, string>) => {
     fs.writeFileSync(source, JSON.stringify(catalog));
     return stageVietnamese({ source, target, runGate: gate });
   };
 
   beforeEach(() => {
+    manifest = batchManifest;
+    englishCatalog = english;
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-vi-'));
     source = path.join(dir, 'locale-fork-vi.json');
     target = path.join(dir, 'locale', 'vi.json');
@@ -57,6 +72,21 @@ describe('stageVietnamese', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe(
       fs.readFileSync(source, 'utf8'),
     );
+  });
+
+  it('stages a complete batch while an unrelated English key is untranslated', () => {
+    englishCatalog = { ...english, Reports: 'Reports' };
+    expect(stage(complete)).toEqual({ staged: true });
+  });
+
+  it.each<[string, unknown]>([
+    ['no declared batch', { version: 1, current: null }],
+    ['an invalid manifest', { version: 7, current: null }],
+  ])('withholds and removes a stale vi.json with %s', (_name, value) => {
+    manifest = value;
+    fs.writeFileSync(target, '{"stale":"x"}');
+    expect(stage(complete)).toEqual({ staged: false });
+    expect(fs.existsSync(target)).toBe(false);
   });
 
   it('withholds a partial batch (missing key)', () => {

@@ -6,13 +6,15 @@ import { fileURLToPath } from 'node:url';
 type StageOptions = {
   source: string;
   target: string;
-  // Exit status of the CHE-831 gate; 0 means the current batch is complete.
+  // Exit status of the batch gate run with --require-batch; 0 means a declared
+  // current screen batch is complete.
   runGate: () => number;
 };
 
 // Vietnamese is hidden by default: drop any earlier copy, then stage the
-// fork-owned catalog only when the CHE-831 gate (bin/check-vietnamese.mts,
-// `yarn check:i18n`) passes for this source tree.
+// fork-owned catalog only when a declared current screen batch
+// (locale-fork/batches.json) is complete per bin/check-vietnamese-batch.mts.
+// No declared batch, an invalid manifest or an incomplete batch all withhold.
 export function stageVietnamese({ source, target, runGate }: StageOptions): {
   staged: boolean;
 } {
@@ -20,7 +22,7 @@ export function stageVietnamese({ source, target, runGate }: StageOptions): {
   const status = runGate();
   if (status !== 0) {
     console.error(
-      `Vietnamese WITHHELD: CHE-831 gate failed (exit ${status}); vi is not staged and stays out of Settings > Language.`,
+      `Vietnamese WITHHELD: no complete declared screen batch (gate exit ${status}); vi is not staged and stays out of Settings > Language.`,
     );
     return { staged: false };
   }
@@ -29,7 +31,9 @@ export function stageVietnamese({ source, target, runGate }: StageOptions): {
     return { staged: false };
   }
   fs.copyFileSync(source, target);
-  console.log(`Vietnamese staged: CHE-831 gate passed; copied to ${target}.`);
+  console.log(
+    `Vietnamese staged: declared screen batch complete; copied to ${target}.`,
+  );
   return { staged: true };
 }
 
@@ -43,7 +47,8 @@ function main() {
         process.execPath,
         [
           '--experimental-strip-types',
-          path.join(root, 'bin/check-vietnamese.mts'),
+          path.join(root, 'bin/check-vietnamese-batch.mts'),
+          '--require-batch',
         ],
         { cwd: root, stdio: 'inherit' },
       ).status ?? 1,

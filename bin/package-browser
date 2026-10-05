@@ -28,7 +28,7 @@ if [ "$SKIP_TRANSLATIONS" = false ]; then
   git pull
   popd > /dev/null
   packages/desktop-client/bin/remove-untranslated-languages
-  # Vietnamese is staged only when the CHE-831 gate (yarn check:i18n) passes.
+  # Vietnamese is staged only when a complete declared screen batch (yarn check:i18n) passes.
   node --experimental-strip-types bin/stage-vietnamese.mts
 else
   rm -f packages/desktop-client/locale/vi.json

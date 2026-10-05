@@ -47,7 +47,7 @@ if [ $SKIP_TRANSLATIONS == false ]; then
   git pull
   popd > /dev/null
   packages/desktop-client/bin/remove-untranslated-languages
-  # Vietnamese is staged only when the CHE-831 gate (yarn check:i18n) passes.
+  # Vietnamese is staged only when a complete declared screen batch (yarn check:i18n) passes.
   node --experimental-strip-types bin/stage-vietnamese.mts
 else
   rm -f packages/desktop-client/locale/vi.json
@@ -61,7 +61,13 @@ yarn workspace @actual-app/core build:node
 yarn workspace @actual-app/web build --mode=desktop # electron specific build
 
 # required for running the sync-server server
-yarn build:browser
+# Forward --skip-translations so the nested browser build does not re-stage
+# Vietnamese (or update translations) behind the flag.
+BROWSER_ARGS=()
+if [ $SKIP_TRANSLATIONS == true ]; then
+  BROWSER_ARGS+=(--skip-translations)
+fi
+yarn build:browser "${BROWSER_ARGS[@]}"
 yarn workspace @actual-app/sync-server build
 
 # Emit @actual-app/core declarations so desktop-electron (which includes typings/window.ts) can build
