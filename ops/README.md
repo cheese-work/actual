@@ -1,0 +1,133 @@
+# CHE-828 private Actual staging
+
+`actual-staging.py` is a C00-only deployment helper. Build and test the image
+on X99; C00 only pulls the published `master` digest. The helper never uses
+production credentials, integrations, Docker sockets inside the staging
+container, or the live-directory tar archive as a restore source.
+
+## Safety model
+
+- The normal staging action lock is `ROOT/.actual-staging.lock`; it never
+  locks the production directory or requires a change to the existing
+  read-only tar cron. Before copying, the helper waits for the exact
+  production sync-server container to exit, so all account, group, and SQLite
+  sidecar files are quiescent. Concurrent tar reads are safe; deadline
+  pressure aborts capture and starts the exact original container rather than
+  accepting a partial snapshot.
+- Snapshots send production `SIGTERM` only, wait no longer than 20 seconds
+  for capture, and never use Docker's kill-on-timeout stop path. The helper
+  validates its manifest-authentication key before signalling. A durable
+  original-ID/image/start record is retained until the exact production
+  container has a new start; transient and boot recovery retry failures and
+  alert rather than treating an old still-running process as recovered.
+- Snapshot manifests audit every file and every SQLite database. Restore fails
+  on a changed archive, unsupported account schema, copied sessions, auth,
+  OpenID state, integration secrets, source config, or unpinned image. The
+  manifest HMAC and data audit run after copying into private `ROOT/generations`;
+  SQLite shared-memory sidecars are discarded there before validation. The
+  HMAC protects against writers of the backup store, not the `congvc` user
+  that owns both `ROOT` and `BACKUPS`.
+- A candidate runs only on `actual-staging-isolated` and
+  `127.0.0.1:15009`. The bridge must disable masquerading and have an exact
+  position-one `FORWARD -> ACTUAL_STAGING_FORWARD` hook, plus verified
+  `DOCKER-USER` DROP rules for both its gateway and every production container
+  IP. Promotion recreates `actual-staging` on `127.0.0.1:15008`; replacement
+  and state commits roll back together.
+- Promotion requires a private, authorized encrypted-budget verifier and a
+  locally recorded tailnet ACL approval. Funnel is rejected. No generic CI
+  runner or production bot has access.
+
+## C00 rehearsal prerequisites
+
+These are deliberate external gates; do not substitute the existing tar
+archive or a production credential.
+
+1. Create `actual-staging-isolated` as an internal Docker bridge with
+   `com.docker.network.bridge.enable_ip_masquerade=false` and a stable bridge
+   name. Add `INPUT -> ACTUAL_STAGING_INPUT` and
+   position-one `FORWARD -> ACTUAL_STAGING_FORWARD`, `INPUT ->
+ACTUAL_STAGING_INPUT`, and `DOCKER-USER -> ACTUAL_STAGING_FORWARD` hooks
+   for that bridge. The `FORWARD` hook must precede `ts-forward`; the helper
+   fails closed if it is missing or displaced. Earlier
+   rules may only be unrelated-interface traffic or scoped
+   `ESTABLISHED,RELATED` replies; no earlier jump, goto, RETURN, or NEW
+   accept is allowed. Each hook must match only the bridge interface, and each
+   required DROP must match only the staging subnet and exact gateway or
+   production IP: no protocol, port, source-host, destination-host, or
+   connection-state predicate. Create
+   `ROOT/password.hash` mode `0600` from a staging-only password through the
+   image's Argon2 implementation.
+2. Keep the existing Tailscale Serve `:443` route unchanged. Configure a
+   distinct private Serve port `:15018` to the staging origin at
+   `127.0.0.1:15008`, apply a tailnet ACL limited to authorized users, verify
+   Funnel is disabled, then write private `ROOT/tailnet-authorized.json`:
+
+   ```json
+   { "host": "staging-hostname.tailnet.ts.net", "funnel": false }
+   ```
+
+3. Install private executable `ROOT/verify-encrypted-budget`. It receives the
+   snapshot name, pinned image digest, and candidate identity, performs the
+   authorized login and decrypt check without printing a secret, and exits
+   nonzero on failure. Also create
+   `~/.config/actual-staging/alert.env` mode `0600` with exactly
+   `ACTUAL_ALERT_TARGET=CHE-828` and `ACTUAL_ALERT_WEBHOOK_URL=<webhook url>`,
+   the https webhook of the alert autopilot. The URL token is the credential: copy it from
+   `multica autopilot get <id> --show-secrets` straight into that file, never
+   into a comment, journal, or unit file. Alerts contain only fixed,
+   non-financial status messages. The helper POSTs one JSON event to that URL
+   and counts the alert delivered only when the webhook answers `accepted` (or
+   `duplicate` for a repeat inside the same minute); the autopilot's agent run
+   then posts the CHE-828 comment as an agent. No unit holds a Multica login or
+   loads `alert.env` into its environment, so nothing posts as the host's member
+   account. A rotated or disabled webhook fails closed in the journal. Create
+   `ROOT/snapshot-auth.key` mode `0600` with at least 32 random bytes; it
+   signs each manifest into private `ROOT/snapshot-signatures/`, outside the
+   writable archive store. This boundary excludes backup-store writers only;
+   it does not authenticate data against the owner of both directories.
+
+## Rehearsal sequence
+
+Run only under the recorded 30-second interruption approval. The transient
+watchdog fires after 20 seconds with timer accuracy forced to 1 microsecond;
+if arming fails, snapshot capture does not start. Preserve command output,
+container IDs, image digests, alert receipt, and cleanup evidence.
+
+1. `python3 ops/actual-staging.py install-units`
+2. `python3 ops/actual-staging.py alert-test`, then confirm the agent-authored
+   CHE-828 comment from the autopilot run (`multica autopilot runs <id>`)
+3. `python3 ops/actual-staging.py refresh`
+4. Confirm the authorized encrypted-budget verifier, staging version, source
+   count, tailnet-only access, prior-generation rollback, and production
+   container identity.
+5. `python3 ops/actual-staging.py enable-units`
+
+The daily refresh is `03:45`; a five-minute image-sync timer pulls published
+`master` and promotes it from the latest approved snapshot only, without a
+second production interruption or freshness reset. The freshness timer fails
+after 26 hours or any recorded refresh failure and runs retention even when a
+refresh failed. Like the watchdog units, scheduled units recover or fail and alert through
+the same webhook. Completed snapshots are retained for 14 days; failed spools,
+partial archives, and expired unreferenced generations are removed.
+
+The X99 offline suite is:
+
+```bash
+python3 -m unittest discover -s ops -p 'test_actual_staging.py' -v
+python3 -m unittest discover -s ops -p 'test_c00_firewall_repair.py' -v  # needs Docker
+```
+
+## Firewall repair after a reboot or firewall reload
+
+The staging rules are not persistent. When they vanish, the helper fails
+closed. `c00-firewall-repair.sh` is the reviewed one-shot repair. It adopts the
+existing empty `actual-staging-isolated` network (exact ID, never created or
+removed) and checks the production identity and the current `FORWARD` baseline.
+It then restores only the `act-stg0` IPv4 hooks and chains plus the IPv6
+denials, and installs `/etc/sudoers.d/che-828-staging-firewall-readonly`. That
+file grants `congvc` only the exact `iptables`/`ip6tables -w -S <chain>` reads
+the helper performs, with no password. Any mismatch removes exactly this run's
+changes. Run it as root on C00 only after an independent review of its exact
+bytes, then run `python3 ops/actual-staging.py firewall-check` as `congvc` for
+the live helper readback. A rerun on a repaired host refuses and changes
+nothing.
