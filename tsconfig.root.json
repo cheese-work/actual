@@ -1,5 +1,9 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // bin/*.mts import each other with the extension Node's type stripping needs.
+    "allowImportingTsExtensions": true
+  },
   "include": ["bin/*.mts"],
   "exclude": ["node_modules"]
 }

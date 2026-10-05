@@ -47,6 +47,7 @@
     "build:storybook": "yarn workspace @actual-app/components build:storybook",
     "deploy:docs": "yarn workspace docs deploy",
     "generate:i18n": "yarn workspace @actual-app/web generate:i18n",
+    "check:i18n": "node --experimental-strip-types bin/check-vietnamese-batch.mts",
     "generate:release-notes": "node ./bin/release-note-generator.mts",
     "generate:news-feed": "yarn workspace @actual-app/ci-actions tsx bin/generate-news-feed.ts",
     "test": "lage test --continue",

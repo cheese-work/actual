@@ -1,0 +1,33 @@
+name: Vietnamese coverage
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  vietnamese-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Test Vietnamese gate and packaging
+        run: yarn vitest run --project bin
+      # Required check: exits non-zero when a declared screen batch (or the
+      # manifest) is invalid or incomplete. An empty manifest passes loudly.
+      - name: Require the declared Vietnamese screen batch to be complete
+        run: yarn check:i18n
