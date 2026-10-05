@@ -1,12 +1,50 @@
 # Multi-Currency
 
-The Actual Budget software is currency agnostic and does not support multi-currency. People are working on implementing currency support, but it will take time.
-For the current status visit:
-https://github.com/tlesicka/actual-budget-multicurrency-todo
+Actual keeps one budget in one **Main currency**. Accounts can hold another currency, and reports and the sidebar show those balances as an **estimate in the Main currency**. Nothing you enter is converted or rewritten: every transaction and balance stays stored in its own account's currency.
 
-## Method to Implement Multi-Currency Using Rule Templates
+## Main currency
 
-Until multi-currency is supported natively by Actual Budget, you can use the method described in this document to achieve similar results.
+1. Open _Settings → Currency_ and choose a **Default Currency**. This is your Main currency, and there is only one.
+2. For each account in another currency, set the account's currency when you create or edit it.
+
+The Main currency, exchange rates and custom units are synced preferences. Every device that opens the budget sees the same values after it syncs.
+
+## Exchange rates
+
+Under _Settings → Currency → Exchange rates_, choose for each foreign currency:
+
+- **Manual**: you type the rate (1 unit of the foreign currency = _N_ Main currency). You can edit or remove it at any time. A manual rate in either direction is used, and it always wins over an automatic rate.
+- **Automatic**: Actual refreshes a cached rate about once a day, and you can refresh it on demand. Reports and the sidebar read the cached rate. They never fetch a rate while drawing, and an older cached rate stays in use until the next refresh succeeds.
+
+Changing or removing a rate refreshes the visible totals right away. Rates are never chained through a third currency.
+
+### Custom units
+
+You can define your own unit (for example reward points) with a code that starts with `X-`, a name, a symbol and 0 to 2 display decimals. Custom units always use manual rates.
+
+## What the numbers mean
+
+- **Current-rate estimate.** A converted value is the amount at the rate in effect now, applied to the whole date range of the report. Actual does not keep historical rates, so a past month is not what that money was worth then. Reports say so in a note.
+- **Missing rate.** If a foreign account has no usable rate, its row shows `no rate` and a total that needs it shows as unavailable. Actual does not show a partial total or add amounts of different currencies together.
+- **Rounding.** Each converted balance is rounded once. When fewer decimals make a subtotal differ from its rows by a cent, a separate **Rounding adjustment** line shows the difference.
+- **Off-budget foreign accounts.** Foreign-currency accounts are tracked off budget. They appear in the sidebar and in reports that include off-budget accounts, and they do not feed budget categories.
+- **Budget math is unchanged.** Category budgets, balances and carryover are computed from the Main currency amounts you enter. Conversion is display-only.
+- **Formulas.** Formula results are not converted. A formula that combines foreign-currency account amounts is unsupported and may mix currencies.
+
+## Not supported
+
+- Cryptocurrency accounts and rates.
+- Arbitrary rate formulas. A rate is a plain positive decimal.
+- A separate display or budget currency per report.
+- Historical exchange rates.
+
+:::note
+The Vietnamese translation of these screens is shown only once the whole translation batch is complete.
+:::
+
+## Legacy method: converting transactions with rule templates
+
+This older workaround is not needed for the Main currency view above. It **rewrites the stored amount** of each converted transaction into your budget currency, so use it only if you want the converted amount recorded in the transaction itself.
 
 :::warning
 This uses an _experimental feature_, so we're still working on finishing it. There may be bugs, missing functionality, or incomplete documentation, and we may decide to remove the feature in a future release. If you have any feedback, please [open an issue](https://github.com/actualbudget/actual/issues) or post a message in Discord.
