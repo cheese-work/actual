@@ -10,6 +10,7 @@ import type {
 import { FormulaResult } from '#components/reports/FormulaResult';
 import { ReportCard } from '#components/reports/ReportCard';
 import { ReportCardName } from '#components/reports/ReportCardName';
+import { FormulaCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 import { useAccounts } from '#hooks/useAccounts';
 import { useFormulaExecution } from '#hooks/useFormulaExecution';
 import { useThemeColors } from '#hooks/useThemeColors';
@@ -145,6 +146,7 @@ export function FormulaCard({
             containerRef={containerRef}
           />
         </View>
+        <FormulaCurrencyNotice />
       </View>
     </ReportCard>
   );

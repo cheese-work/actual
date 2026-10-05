@@ -22,10 +22,13 @@ import { calculateTimeRange } from '#components/reports/reportRanges';
 import { defaultTimeFrame } from '#components/reports/reports/Crossover';
 import { createCrossoverSpreadsheet } from '#components/reports/spreadsheets/crossover-spreadsheet';
 import type { CrossoverData } from '#components/reports/spreadsheets/crossover-spreadsheet';
+import type { ReportDataStatus } from '#components/reports/spreadsheets/report-currency';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 type CrossoverCardProps = {
   widgetId: string;
@@ -46,6 +49,11 @@ export function CrossoverCard({
   const { t } = useTranslation();
   const { data: categories = { grouped: [], list: [] } } = useCategories();
   const { isNarrowWidth } = useResponsive();
+  const {
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const [prefs] = useSyncedPrefs();
 
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
 
@@ -167,6 +175,9 @@ export function CrossoverCard({
         expectedContribution,
         projectionType,
         expenseAdjustmentFactor,
+        accounts,
+        prefs,
+        accountsReady: !accountsLoading && !accountsPlaceholderData,
       }),
     [
       start,
@@ -178,10 +189,22 @@ export function CrossoverCard({
       expectedContribution,
       projectionType,
       expenseAdjustmentFactor,
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
     ],
   );
 
-  const data = useReport<CrossoverData>('crossover', params);
+  const reportData = useReport<CrossoverData | ReportDataStatus>(
+    'crossover',
+    params,
+  );
+  const data = reportData && 'graphData' in reportData ? reportData : null;
+  const reportUnavailable =
+    !!reportData &&
+    'status' in reportData &&
+    reportData.status === 'unavailable';
 
   // Get years to retire from spreadsheet data
   const yearsToRetire = data?.yearsToRetire ?? null;
@@ -244,7 +267,22 @@ export function CrossoverCard({
           )}
         </View>
 
-        {data ? (
+        {data?.hasForeignCurrency && (
+          <Block style={{ padding: '0 20px 8px' }}>
+            {t(
+              'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+              { currencyCode: prefs.defaultCurrencyCode },
+            )}
+          </Block>
+        )}
+
+        {reportUnavailable ? (
+          <View role="status" aria-live="polite" style={{ padding: 20 }}>
+            {t(
+              'Crossover point is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+            )}
+          </View>
+        ) : data ? (
           <CrossoverGraph
             graphData={data.graphData}
             compact

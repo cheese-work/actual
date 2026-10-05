@@ -122,6 +122,8 @@ test.describe('Reports', () => {
 
       reportsPage = await navigation.goToReportsPage();
       await reportsPage.waitToLoad();
+      // After Settings: visiting it clears Main while the currency flag is off.
+      await configurationPage.initializeTestMainCurrency();
       await reportsPage.addWidget('Balance forecast');
       await reportsPage.goToBalanceForecastPage();
     });
@@ -150,6 +152,8 @@ test.describe('Reports', () => {
 
       reportsPage = await navigation.goToReportsPage();
       await reportsPage.waitToLoad();
+      // Settings (Tracking budget type) cleared Main again.
+      await configurationPage.initializeTestMainCurrency();
       await reportsPage.goToBalanceForecastPage();
       await reportsPage.selectForecastSource('Tracking budget');
 

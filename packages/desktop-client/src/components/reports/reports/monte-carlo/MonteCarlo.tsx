@@ -41,6 +41,7 @@ import {
 import type { MonteCarloConfig } from '#components/reports/reports/monte-carlo/monteCarloSimulation';
 import { GROUP_HEADING_STYLE } from '#components/reports/reports/monte-carlo/monteCarloStyles';
 import { useResolvedMonteCarloConfig } from '#components/reports/reports/monte-carlo/useResolvedMonteCarloConfig';
+import { MonteCarloCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
@@ -328,6 +329,12 @@ export function MonteCarlo() {
             }
           />
         </View>
+
+        <MonteCarloCurrencyNotice
+          accountIds={config.pots.flatMap(pot =>
+            pot.accountId ? [pot.accountId] : [],
+          )}
+        />
 
         {/* Results */}
         <View

@@ -26,9 +26,10 @@ import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { ReportCard } from '#components/reports/ReportCard';
 import { ReportCardName } from '#components/reports/ReportCardName';
 import { calculateTimeRange } from '#components/reports/reportRanges';
-import { useBalanceForecast } from '#hooks/useBalanceForecast';
 import { useFormat } from '#hooks/useFormat';
+import { useMainBalanceForecast } from '#hooks/useMainBalanceForecast';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 import {
   buildBalanceForecastChartData,
@@ -54,6 +55,7 @@ export function BalanceForecastCard({
 }: BalanceForecastCardProps) {
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
   const [budgetTypePref] = useSyncedPref('budgetType');
   const budgetType = budgetTypePref === 'tracking' ? 'tracking' : 'envelope';
   const source =
@@ -89,7 +91,9 @@ export function BalanceForecastCard({
     isFetching,
     isPlaceholderData,
     isPending: isLoading,
-  } = useBalanceForecast({
+    unavailable,
+    hasForeignCurrency,
+  } = useMainBalanceForecast({
     accountIds: isTrackingBudgetForecast ? undefined : selectedAccountIds,
     conditions: isTrackingBudgetForecast ? undefined : meta?.conditions,
     conditionsOp: isTrackingBudgetForecast ? undefined : meta?.conditionsOp,
@@ -100,8 +104,11 @@ export function BalanceForecastCard({
       : meta?.accounts === undefined,
     source,
   });
-  const errorMessage =
-    error instanceof Error
+  const errorMessage = unavailable
+    ? t(
+        'Balance forecast is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+      )
+    : error instanceof Error
       ? error.message
       : error
         ? t('Failed to load forecast')
@@ -217,7 +224,16 @@ export function BalanceForecastCard({
           )}
         </View>
 
-        {isLoading && !normalizedForecastData ? (
+        {hasForeignCurrency && (
+          <Block style={{ padding: '0 20px 8px' }}>
+            {t(
+              'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+              { currencyCode: prefs.defaultCurrencyCode },
+            )}
+          </Block>
+        )}
+
+        {isLoading && !normalizedForecastData && !unavailable ? (
           <LoadingIndicator />
         ) : errorMessage ? (
           <View style={{ height: 120, padding: 20 }}>

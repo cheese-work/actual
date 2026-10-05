@@ -1,10 +1,14 @@
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type { AccountEntity } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import * as d from 'date-fns';
 
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { aqlQuery } from '#queries/aqlQuery';
+
+import { convertAccountAmount, sumConvertedLeaves } from './report-currency';
+import type { ReportDataStatus } from './report-currency';
 
 type MonthlyAgg = { date: string; amount: number };
 
@@ -63,6 +67,7 @@ export type CrossoverData = {
     end: string;
     crossoverXLabel: string | null;
   };
+  hasForeignCurrency: boolean;
   lastKnownBalance: number;
   lastKnownMonthlyIncome: number;
   lastKnownMonthlyExpenses: number;
@@ -82,7 +87,50 @@ export type CrossoverParams = {
   expectedContribution?: number | null; // optional monthly contribution to project future balances
   projectionType: 'hampel' | 'median' | 'mean'; // expense projection method
   expenseAdjustmentFactor?: number; // multiplier for expenses (default 1.0)
+  accounts: AccountEntity[];
+  prefs: Readonly<SyncedPrefs>;
+  accountsReady: boolean;
 };
+
+type HistoricalAccount = {
+  accountId: string;
+  starting: number;
+  balances: MonthlyAgg[];
+};
+
+/**
+ * Month-end balance per selected account, converted to Main once per
+ * (account, month) leaf and then safe-summed. Null when any leaf is
+ * unavailable.
+ */
+function sumHistoricalBalancesInMain(
+  months: string[],
+  historicalAccounts: HistoricalAccount[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): number[] | null {
+  const accountsById = new Map(accounts.map(a => [a.id, a]));
+  const totals = months.map(() => 0);
+
+  for (const acct of historicalAccounts) {
+    const account = accountsById.get(acct.accountId);
+    const byMonth = new Map(acct.balances.map(b => [b.date, b.amount]));
+    let runningBalance = acct.starting;
+    for (let i = 0; i < months.length; i++) {
+      runningBalance += byMonth.get(months[i]) ?? 0;
+      const converted = sumConvertedLeaves([
+        totals[i],
+        convertAccountAmount(runningBalance, account, prefs, valuationTime),
+      ]);
+      if (converted === null) {
+        return null;
+      }
+      totals[i] = converted;
+    }
+  }
+  return totals;
+}
 
 export function createCrossoverSpreadsheet({
   start,
@@ -94,11 +142,23 @@ export function createCrossoverSpreadsheet({
   expectedContribution,
   projectionType,
   expenseAdjustmentFactor,
+  accounts,
+  prefs,
+  accountsReady,
 }: CrossoverParams) {
   return async (
     _spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: ReturnType<typeof recalculate>) => void,
+    setData: (data: CrossoverData | ReportDataStatus) => void,
   ) => {
+    // Missing Main is unavailable even for empty input; unfinished input loads.
+    if (!prefs.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    if (!accountsReady) {
+      setData({ status: 'loading' });
+      return;
+    }
     if (!start || !end || incomeAccountIds.length === 0) {
       setData({
         graphData: {
@@ -107,6 +167,7 @@ export function createCrossoverSpreadsheet({
           end: end || '',
           crossoverXLabel: null,
         },
+        hasForeignCurrency: false,
         lastKnownBalance: 0,
         lastKnownMonthlyIncome: 0,
         lastKnownMonthlyExpenses: 0,
@@ -191,8 +252,26 @@ export function createCrossoverSpreadsheet({
       historicalBalancesPromise,
     ]);
 
-    setData(
-      recalculate(
+    const valuationTime = Date.now();
+    const historicalBalancesInMain = sumHistoricalBalancesInMain(
+      monthUtils.rangeInclusive(start, end),
+      historicalBalances,
+      accounts,
+      prefs,
+      valuationTime,
+    );
+    if (historicalBalancesInMain === null) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    const accountsById = new Map(accounts.map(a => [a.id, a]));
+    const hasForeignCurrency = incomeAccountIds.some(id => {
+      const currency = accountsById.get(id)?.currency;
+      return currency != null && currency !== prefs.defaultCurrencyCode;
+    });
+
+    setData({
+      ...recalculate(
         {
           start,
           end,
@@ -205,9 +284,10 @@ export function createCrossoverSpreadsheet({
           expenseAdjustmentFactor,
         },
         expenses,
-        historicalBalances,
+        historicalBalancesInMain,
       ),
-    );
+      hasForeignCurrency,
+    });
   };
 }
 
@@ -225,11 +305,7 @@ function recalculate(
     | 'expenseAdjustmentFactor'
   >,
   expenses: MonthlyAgg[],
-  historicalAccounts: Array<{
-    accountId: string;
-    starting: number;
-    balances: MonthlyAgg[];
-  }>,
+  historicalBalances: number[],
 ) {
   const months = monthUtils.rangeInclusive(params.start, params.end);
 
@@ -238,27 +314,6 @@ function recalculate(
   for (const e of expenses) {
     // amounts for expenses are negative; flip sign to positive monthly spend
     expenseMap.set(e.date, (expenseMap.get(e.date) || 0) + -e.amount);
-  }
-
-  // Build total balances across selected accounts per month for CAGR calculation (historical returns)
-  const historicalBalances: number[] = months.map(() => 0);
-
-  for (const acct of historicalAccounts) {
-    // Calculate running balance for each month
-    // Start with the account's starting balance (balance at the end of the first month)
-    let runningBalance = acct.starting;
-
-    // Process each month in order
-    const byMonth = new Map(acct.balances.map(b => [b.date, b.amount]));
-    for (let i = 0; i < months.length; i++) {
-      const month = months[i];
-      const delta = byMonth.get(month) ?? 0;
-
-      runningBalance += delta;
-
-      // Add this account's balance to the total for this month
-      historicalBalances[i] += runningBalance;
-    }
   }
 
   // Determine historical monthly investment income using safe withdrawal rate: annual rate -> monthly

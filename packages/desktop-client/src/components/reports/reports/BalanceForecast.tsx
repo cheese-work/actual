@@ -36,13 +36,14 @@ import { computePadding } from '#components/reports/graphs/util/computePadding';
 import { Header } from '#components/reports/Header';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { useAccounts } from '#hooks/useAccounts';
-import { useBalanceForecast } from '#hooks/useBalanceForecast';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
+import { useMainBalanceForecast } from '#hooks/useMainBalanceForecast';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 
@@ -76,6 +77,7 @@ type BalanceForecastInnerProps = {
 function BalanceForecastInner({ widget }: BalanceForecastInnerProps) {
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
   const privacyMode = usePrivacyMode();
   const locale = useLocale();
   const dispatch = useDispatch();
@@ -142,7 +144,9 @@ function BalanceForecastInner({ widget }: BalanceForecastInnerProps) {
     isFetching,
     isPlaceholderData,
     isPending: isLoading,
-  } = useBalanceForecast({
+    unavailable,
+    hasForeignCurrency,
+  } = useMainBalanceForecast({
     accountIds: isTrackingBudgetForecast
       ? undefined
       : widget
@@ -158,8 +162,11 @@ function BalanceForecastInner({ widget }: BalanceForecastInnerProps) {
     source,
     enabled: hasMonthOptions,
   });
-  const errorMessage =
-    error instanceof Error
+  const errorMessage = unavailable
+    ? t(
+        'Balance forecast is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+      )
+    : error instanceof Error
       ? error.message
       : error
         ? t('Failed to load forecast')
@@ -319,7 +326,7 @@ function BalanceForecastInner({ widget }: BalanceForecastInnerProps) {
     return <LoadingIndicator />;
   }
 
-  if (isLoading && !normalizedForecastData) {
+  if (isLoading && !normalizedForecastData && !unavailable) {
     return <LoadingIndicator />;
   }
 
@@ -424,6 +431,14 @@ function BalanceForecastInner({ widget }: BalanceForecastInnerProps) {
           overflowY: 'auto',
         }}
       >
+        {hasForeignCurrency && (
+          <View style={{ paddingTop: 10 }}>
+            {t(
+              'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+              { currencyCode: prefs.defaultCurrencyCode },
+            )}
+          </View>
+        )}
         {errorMessage ? (
           <div style={{ color: theme.errorText, marginBottom: 20 }}>
             {errorMessage}

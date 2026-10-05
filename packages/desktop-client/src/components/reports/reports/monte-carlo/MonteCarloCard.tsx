@@ -19,6 +19,7 @@ import {
   runMonteCarloSimulation,
 } from '#components/reports/reports/monte-carlo/monteCarloSimulation';
 import { useResolvedMonteCarloConfig } from '#components/reports/reports/monte-carlo/useResolvedMonteCarloConfig';
+import { MonteCarloCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 
 // Stable default so an unsaved widget doesn't bust the simulation's
 // memoization on every re-render (e.g. hover state changes)
@@ -110,6 +111,12 @@ export function MonteCarloCard({
             </Block>
           </View>
         </View>
+
+        <MonteCarloCurrencyNotice
+          accountIds={config.pots.flatMap(pot =>
+            pot.accountId ? [pot.accountId] : [],
+          )}
+        />
 
         <MonteCarloGraph
           percentileBands={result.percentileBands}
