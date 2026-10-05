@@ -63,11 +63,18 @@ const PLAN_GROUP_FIELDS_STYLE = {
 
 type MonteCarloConfigurationProps = {
   config: MonteCarloConfig;
+  /**
+   * Main-valued balance of each account-linked pot by pot id (null = cannot
+   * be converted). `config` stays native; pots absent here show their own
+   * balance, which is already in Main.
+   */
+  linkedMainBalances?: Record<string, number | null>;
   onConfigChange: (changes: Partial<MonteCarloConfig>) => void;
 };
 
 export function MonteCarloConfiguration({
   config,
+  linkedMainBalances,
   onConfigChange,
 }: MonteCarloConfigurationProps) {
   const { t } = useTranslation();
@@ -581,13 +588,14 @@ export function MonteCarloConfiguration({
                 // jumping out of the list (default ARIA grid behavior)
                 keyboardNavigationBehavior="tab"
                 items={config.pots}
-                dependencies={[config, onConfigChange]}
+                dependencies={[config, linkedMainBalances, onConfigChange]}
                 dragAndDropHooks={dragAndDropHooks}
               >
                 {pot => (
                   <MonteCarloPotConfiguration
                     key={pot.id}
                     pot={pot}
+                    displayBalance={linkedMainBalances?.[pot.id]}
                     potLabel={getMonteCarloPotLabel(
                       config.pots,
                       config.pots.indexOf(pot),

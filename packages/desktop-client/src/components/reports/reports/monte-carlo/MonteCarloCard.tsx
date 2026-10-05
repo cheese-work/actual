@@ -11,6 +11,7 @@ import type { MonteCarloWidget } from '@actual-app/core/types/models';
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
 import { MonteCarloGraph } from '#components/reports/graphs/MonteCarloGraph';
+import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { ReportCard } from '#components/reports/ReportCard';
 import { ReportCardName } from '#components/reports/ReportCardName';
 import {
@@ -18,8 +19,8 @@ import {
   monteCarloConfigFromMeta,
   runMonteCarloSimulation,
 } from '#components/reports/reports/monte-carlo/monteCarloSimulation';
+import { MonteCarloUnavailableNotice } from '#components/reports/reports/monte-carlo/MonteCarloUnavailableNotice';
 import { useResolvedMonteCarloConfig } from '#components/reports/reports/monte-carlo/useResolvedMonteCarloConfig';
-import { MonteCarloCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 
 // Stable default so an unsaved widget doesn't bust the simulation's
 // memoization on every re-render (e.g. hover state changes)
@@ -47,19 +48,23 @@ export function MonteCarloCard({
   // Memoised by hand so hovering the card (which toggles state) doesn't
   // re-run thousands of simulations
   const config = useMemo(() => monteCarloConfigFromMeta(meta), [meta]);
-  const resolvedConfig = useResolvedMonteCarloConfig(config);
-  const result = useMemo(
-    () =>
-      runMonteCarloSimulation({
-        ...resolvedConfig,
-        horizonYears: getMonteCarloHorizonYears(resolvedConfig),
-        deflateToTodaysMoney: true,
-      }),
-    [resolvedConfig],
-  );
+  const { main: mainConversion } = useResolvedMonteCarloConfig(config);
+  // Null until linked balances are valued in Main (or when they cannot be)
+  const result = useMemo(() => {
+    const mainConfig = mainConversion.config;
+    return mainConfig == null
+      ? null
+      : runMonteCarloSimulation({
+          ...mainConfig,
+          horizonYears: getMonteCarloHorizonYears(mainConfig),
+          deflateToTodaysMoney: true,
+        });
+  }, [mainConversion]);
 
-  const endAge = config.currentAge + result.horizonYears;
-  const successPercent = Math.round(result.successRate * 1000) / 10;
+  const endAge = result ? config.currentAge + result.horizonYears : null;
+  const successPercent = result
+    ? Math.round(result.successRate * 1000) / 10
+    : null;
 
   return (
     <ReportCard
@@ -89,42 +94,44 @@ export function MonteCarloCard({
               onClose={() => setNameMenuOpen(false)}
             />
           </View>
-          <View style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-            <Block
-              style={{
-                ...styles.mediumText,
-                fontWeight: 500,
-                marginBottom: 5,
-              }}
-            >
-              <PrivacyFilter activationFilters={[!isCardHovered]}>
-                <FinancialText>{`${successPercent}%`}</FinancialText>
-              </PrivacyFilter>
-            </Block>
-            <Block
-              style={{
-                fontSize: 12,
-                color: theme.pageTextSubdued,
-              }}
-            >
-              <Trans>Success rate to age {{ age: endAge }}</Trans>
-            </Block>
-          </View>
+          {result && (
+            <View style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+              <Block
+                style={{
+                  ...styles.mediumText,
+                  fontWeight: 500,
+                  marginBottom: 5,
+                }}
+              >
+                <PrivacyFilter activationFilters={[!isCardHovered]}>
+                  <FinancialText>{`${successPercent}%`}</FinancialText>
+                </PrivacyFilter>
+              </Block>
+              <Block
+                style={{
+                  fontSize: 12,
+                  color: theme.pageTextSubdued,
+                }}
+              >
+                <Trans>Success rate to age {{ age: endAge }}</Trans>
+              </Block>
+            </View>
+          )}
         </View>
 
-        <MonteCarloCurrencyNotice
-          accountIds={config.pots.flatMap(pot =>
-            pot.accountId ? [pot.accountId] : [],
-          )}
-        />
-
-        <MonteCarloGraph
-          percentileBands={result.percentileBands}
-          startAge={config.currentAge}
-          compact
-          showTooltip={!isEditing && !isNarrowWidth}
-          style={{ height: 'auto', flex: 1 }}
-        />
+        {result ? (
+          <MonteCarloGraph
+            percentileBands={result.percentileBands}
+            startAge={config.currentAge}
+            compact
+            showTooltip={!isEditing && !isNarrowWidth}
+            style={{ height: 'auto', flex: 1 }}
+          />
+        ) : mainConversion.status === 'unavailable' ? (
+          <MonteCarloUnavailableNotice compact />
+        ) : (
+          <LoadingIndicator />
+        )}
       </View>
     </ReportCard>
   );
