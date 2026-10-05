@@ -32,6 +32,10 @@ export function RenderTableRow({
       ? child
       : (parent.categories && parent.categories[index]) ||
         ({} as GroupedEntity);
+  const average =
+    'displayAverage' in item && typeof item.displayAverage === 'number'
+      ? item.displayAverage
+      : undefined;
 
   return (
     <View>
@@ -39,6 +43,7 @@ export function RenderTableRow({
         item,
         mode,
         style,
+        average,
       })}
     </View>
   );

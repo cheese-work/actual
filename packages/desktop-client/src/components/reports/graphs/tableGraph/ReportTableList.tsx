@@ -8,6 +8,7 @@ import type { DataEntity, GroupedEntity } from '@actual-app/core/types/models';
 import { Row } from '#components/table';
 
 import { RenderTableRow } from './RenderTableRow';
+import type { ReportDisplayRow } from './report-display-rounding';
 import type { renderRowProps } from './ReportTable';
 
 type ReportTableListProps = {
@@ -15,6 +16,7 @@ type ReportTableListProps = {
   mode: string;
   groupBy: string;
   renderRow: (arg: renderRowProps) => ReactNode;
+  totalAdjustment: ReportDisplayRow | null;
   style?: CSSProperties;
 };
 
@@ -23,6 +25,7 @@ export function ReportTableList({
   mode,
   groupBy,
   renderRow,
+  totalAdjustment,
   style,
 }: ReportTableListProps) {
   const metadata: GroupedEntity[] | undefined =
@@ -92,6 +95,16 @@ export function ReportTableList({
               </View>
             );
           })}
+          {totalAdjustment && (
+            <View>
+              {renderRow({
+                item: totalAdjustment,
+                mode,
+                style,
+                average: totalAdjustment.displayAverage,
+              })}
+            </View>
+          )}
         </View>
       ) : (
         <View width="flex" />

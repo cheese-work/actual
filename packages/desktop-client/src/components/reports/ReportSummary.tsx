@@ -13,6 +13,7 @@ import type {
 
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { createReportAmountFormatter } from '#components/reports/graphs/tableGraph/report-display-rounding';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
@@ -39,6 +40,7 @@ export function ReportSummary({
   const locale = useLocale();
   const { t } = useTranslation();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const intervalFormat = getIntervalFormat(interval, dateFormat);
 
@@ -113,9 +115,7 @@ export function ReportSummary({
             fontWeight: 800,
           }}
         >
-          <PrivacyFilter>
-            {format(data[balanceTypeOp], 'financial')}
-          </PrivacyFilter>
+          <PrivacyFilter>{formatAmount(data[balanceTypeOp])}</PrivacyFilter>
         </FinancialText>
         <Text style={{ fontWeight: 600 }}>
           <Trans>For this time period</Trans>
@@ -155,7 +155,7 @@ export function ReportSummary({
           }}
         >
           <PrivacyFilter>
-            {!isNaN(average) && format(average, 'financial')}
+            {!isNaN(average) && formatAmount(average)}
           </PrivacyFilter>
         </FinancialText>
         <Text style={{ fontWeight: 600 }}>

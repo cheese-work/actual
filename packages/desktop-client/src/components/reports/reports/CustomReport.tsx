@@ -39,6 +39,7 @@ import {
   disabledList,
 } from '#components/reports/disabledList';
 import { getLiveRange } from '#components/reports/getLiveRange';
+import { createReportAmountFormatter } from '#components/reports/graphs/tableGraph/report-display-rounding';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { ReportLegend } from '#components/reports/ReportLegend';
 import {
@@ -149,6 +150,7 @@ function CustomReportInner({
   const locale = useLocale();
   const { t } = useTranslation();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
 
   const { data: categories = { grouped: [], list: [] } } = useCategories();
@@ -1055,7 +1057,7 @@ function CustomReportInner({
                       right={
                         <FinancialText>
                           <PrivacyFilter>
-                            {format(data[balanceTypeOp], 'financial')}
+                            {formatAmount(data[balanceTypeOp])}
                           </PrivacyFilter>
                         </FinancialText>
                       }

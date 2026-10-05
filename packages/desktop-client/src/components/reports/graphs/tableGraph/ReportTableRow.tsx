@@ -18,8 +18,11 @@ import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
 
+import { createReportAmountFormatter } from './report-display-rounding';
+
 type ReportTableRowProps = {
   item: GroupedEntity;
+  averageOverride?: number;
   balanceTypeOp: balanceTypeOpType;
   groupBy: string;
   mode: string;
@@ -48,6 +51,7 @@ const getAmountColor = (amount: number) => {
 export const ReportTableRow = memo(
   ({
     item,
+    averageOverride,
     balanceTypeOp,
     groupBy,
     mode,
@@ -67,9 +71,11 @@ export const ReportTableRow = memo(
     interval,
     colorized,
   }: ReportTableRowProps) => {
-    const average = Math.round(item[balanceTypeOp] / intervalsCount);
+    const average =
+      averageOverride ?? Math.round(item[balanceTypeOp] / intervalsCount);
     const groupByItem = groupBy === 'Interval' ? 'date' : 'name';
     const format = useFormat();
+    const formatAmount = createReportAmountFormatter(format);
 
     const navigate = useNavigate();
     const { isNarrowWidth } = useResponsive();
@@ -81,7 +87,10 @@ export const ReportTableRow = memo(
       categories.grouped.some(g => g.id === item.id);
     const drilldownField = isGroupRow ? 'group' : groupBy.toLowerCase();
     const canShowActivity =
-      !isNarrowWidth && groupBy !== 'Interval' && !compact;
+      item.id !== 'rounding-adjustment' &&
+      !isNarrowWidth &&
+      groupBy !== 'Interval' &&
+      !compact;
 
     const pointer = canShowActivity ? 'pointer' : 'inherit';
 
@@ -151,10 +160,10 @@ export const ReportTableRow = memo(
                       </FinancialText>
                     )}
                     valueStyle={compactStyle}
-                    value={format(intervalItem[balanceTypeOp], 'financial')}
+                    value={formatAmount(intervalItem[balanceTypeOp])}
                     title={
                       Math.abs(intervalItem[balanceTypeOp]) > 100000
-                        ? format(intervalItem[balanceTypeOp], 'financial')
+                        ? formatAmount(intervalItem[balanceTypeOp])
                         : undefined
                     }
                     onClick={() =>
@@ -184,10 +193,10 @@ export const ReportTableRow = memo(
             : ['totalTotals', 'totalBudgeted'].includes(balanceTypeOp) && (
                 <>
                   <Cell
-                    value={format(item.totalAssets, 'financial')}
+                    value={formatAmount(item.totalAssets)}
                     title={
                       Math.abs(item.totalAssets) > 100000
-                        ? format(item.totalAssets, 'financial')
+                        ? formatAmount(item.totalAssets)
                         : undefined
                     }
                     textAlign="right"
@@ -232,10 +241,10 @@ export const ReportTableRow = memo(
                     }
                   />
                   <Cell
-                    value={format(item.totalDebts, 'financial')}
+                    value={formatAmount(item.totalDebts)}
                     title={
                       Math.abs(item.totalDebts) > 100000
-                        ? format(item.totalDebts, 'financial')
+                        ? formatAmount(item.totalDebts)
                         : undefined
                     }
                     textAlign="right"
@@ -282,10 +291,10 @@ export const ReportTableRow = memo(
                 </>
               )}
           <Cell
-            value={format(item[balanceTypeOp], 'financial')}
+            value={formatAmount(item[balanceTypeOp])}
             title={
               Math.abs(item[balanceTypeOp]) > 100000
-                ? format(item[balanceTypeOp], 'financial')
+                ? formatAmount(item[balanceTypeOp])
                 : undefined
             }
             textAlign="right"
@@ -329,10 +338,10 @@ export const ReportTableRow = memo(
             privacyFilter
           />
           <Cell
-            value={format(average, 'financial')}
+            value={formatAmount(average)}
             title={
               Math.abs(average / 100) > 100000
-                ? format(average, 'financial')
+                ? formatAmount(average)
                 : undefined
             }
             textAlign="right"

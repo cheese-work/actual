@@ -30,12 +30,13 @@ import { numberFormatterTooltip } from '#components/reports/numberFormatter';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
-import type { FormatType } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 
 import { renderCustomLabel } from './renderCustomLabel';
 import { showActivity } from './showActivity';
+import { createReportAmountFormatter } from './tableGraph/report-display-rounding';
+import type { ReportAmountFormatter } from './tableGraph/report-display-rounding';
 
 type PayloadItem = {
   name: string;
@@ -54,7 +55,7 @@ type CustomTooltipProps = {
   active?: boolean;
   payload?: PayloadItem[];
   label?: string;
-  format: (value: unknown, type: FormatType) => string;
+  format: ReportAmountFormatter;
 };
 
 const CustomTooltip = ({
@@ -212,8 +213,10 @@ export function StackedBarGraph({
   const { data: accounts = [] } = useAccounts();
   const privacyMode = usePrivacyMode();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
 
-  const customLabelWithFormat = props => customLabel({ ...props, format });
+  const customLabelWithFormat = props =>
+    customLabel({ ...props, format: formatAmount });
 
   const [pointer, setPointer] = useState('');
   const [tooltip, setTooltip] = useState('');
@@ -250,7 +253,7 @@ export function StackedBarGraph({
                       compact={compact}
                       tooltip={tooltip}
                       legend={data.legend}
-                      format={format}
+                      format={formatAmount}
                     />
                   }
                   formatter={numberFormatterTooltip}
@@ -268,7 +271,7 @@ export function StackedBarGraph({
                 <YAxis
                   tickFormatter={value =>
                     getCustomTick(
-                      format(value, 'financial-no-decimals'),
+                      formatAmount(value, 'financial-no-decimals'),
                       privacyMode,
                     )
                   }

@@ -30,11 +30,12 @@ import { numberFormatterTooltip } from '#components/reports/numberFormatter';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
-import type { FormatType } from '#hooks/useFormat';
 import { useNavigate } from '#hooks/useNavigate';
 import { usePrivacyMode } from '#hooks/usePrivacyMode';
 
 import { showActivity } from './showActivity';
+import { createReportAmountFormatter } from './tableGraph/report-display-rounding';
+import type { ReportAmountFormatter } from './tableGraph/report-display-rounding';
 import { computeTrendLines } from './util/computeTrendLines';
 
 type PayloadItem = {
@@ -53,7 +54,7 @@ type CustomTooltipProps = {
   legend: LegendEntity[];
   active?: boolean;
   payload?: PayloadItem[];
-  format: (value: unknown, type: FormatType) => string;
+  format: ReportAmountFormatter;
 };
 
 const CustomTooltip = ({
@@ -175,6 +176,7 @@ export function LineGraph({
   const { data: accounts = [] } = useAccounts();
   const privacyMode = usePrivacyMode();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
 
   const [pointer, setPointer] = useState('');
   const [tooltip, setTooltip] = useState('');
@@ -234,7 +236,7 @@ export function LineGraph({
                       compact={compact}
                       tooltip={tooltip}
                       legend={data.legend}
-                      format={format}
+                      format={formatAmount}
                     />
                   }
                   formatter={numberFormatterTooltip}
@@ -253,7 +255,7 @@ export function LineGraph({
                 <YAxis
                   tickFormatter={value =>
                     getCustomTick(
-                      format(value, 'financial-no-decimals'),
+                      formatAmount(value, 'financial-no-decimals'),
                       privacyMode,
                     )
                   }
