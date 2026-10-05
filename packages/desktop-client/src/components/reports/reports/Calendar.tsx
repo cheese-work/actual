@@ -843,7 +843,7 @@ type CalendarWithHeaderProps = {
   firstDayOfWeekIdx: string;
   conditions: RuleConditionEntity[];
   conditionsOp: 'and' | 'or';
-  format: (value: unknown, type: FormatType) => string;
+  format: (value: unknown, type?: FormatType) => string;
 };
 
 function CalendarWithHeader({
