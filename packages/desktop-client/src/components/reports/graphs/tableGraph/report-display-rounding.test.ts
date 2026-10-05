@@ -47,6 +47,16 @@ describe('createReportAmountFormatter', () => {
     expect(createReportAmountFormatter(format)(250)).toBe('2');
   });
 
+  it.each(['financial', 'financial-no-decimals'] as const)(
+    'formats fractional and infinite values with %s without throwing',
+    type => {
+      const formatAmount = createReportAmountFormatter(makeReportFormat(0));
+
+      expect(typeof formatAmount(0.25, type)).toBe('string');
+      expect(typeof formatAmount(Infinity, type)).toBe('string');
+    },
+  );
+
   it('keeps chart tooltip values aligned with table amounts', () => {
     const format = makeReportFormat(0);
     const tableAmount = createReportAmountFormatter(format)(250);

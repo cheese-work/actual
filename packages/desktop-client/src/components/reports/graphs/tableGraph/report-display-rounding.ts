@@ -30,11 +30,12 @@ export function createReportAmountFormatter(
     : format.currency.decimalPlaces;
 
   return (amount, type = 'financial') => {
-    const displayAmount =
-      roundToDisplayPrecision(
-        amount,
-        type === 'financial-no-decimals' ? 0 : displayDecimalPlaces,
-      ) ?? amount;
+    const displayAmount = Number.isInteger(amount)
+      ? (roundToDisplayPrecision(
+          amount,
+          type === 'financial-no-decimals' ? 0 : displayDecimalPlaces,
+        ) ?? amount)
+      : amount;
     return format(displayAmount, type);
   };
 }
