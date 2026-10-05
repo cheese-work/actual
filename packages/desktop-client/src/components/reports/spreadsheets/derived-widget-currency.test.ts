@@ -195,48 +195,74 @@ describe('crossover currency conversion', () => {
 });
 
 describe('balance forecast currency conversion', () => {
+  const point = (date: string, accountId: string, balance: number) => ({
+    date,
+    balance,
+    accountId,
+    accountName: accountId,
+    transactions: [],
+  });
+  // Production shape (forecast-projection.ts): the lowest balance is the
+  // combined total with accountId ''.
   const forecast: ForecastResult = {
     dataPoints: [
-      {
-        date: '2026-01-31',
-        balance: 100_000,
-        accountId: 'usd',
-        accountName: 'usd',
-        transactions: [],
-      },
-      {
-        date: '2026-01-31',
-        balance: 1_000_000,
-        accountId: 'jpy',
-        accountName: 'jpy',
-        transactions: [],
-      },
-      {
-        date: '2026-01-31',
-        balance: 2_500,
-        accountId: '__unassigned_schedule__',
-        accountName: '',
-        transactions: [],
-      },
+      point('2026-01-31', 'usd', 100_000),
+      point('2026-01-31', 'jpy', 1_000_000),
+      point('2026-01-31', '__unassigned_schedule__', 2_500),
+      point('2026-02-28', 'usd', 50_000),
+      point('2026-02-28', 'jpy', 500_000),
+      point('2026-02-28', '__unassigned_schedule__', 0),
     ],
     lowestBalance: {
-      date: '2026-01-31',
-      balance: 1_000_000,
-      accountId: 'jpy',
-      accountName: 'jpy',
+      date: '2026-02-28',
+      balance: 550_000,
+      accountId: '',
+      accountName: '',
     },
     forecastStartDate: '2026-01-01',
-    forecastEndDate: '2026-01-31',
+    forecastEndDate: '2026-02-28',
   };
   const accounts = [createAccount('usd', 'USD'), createAccount('jpy', 'JPY')];
 
   it('converts each account balance and keeps accountless schedules in Main', () => {
     const converted = convertForecastToMain(forecast, accounts, prefs, 0);
 
-    expect(converted?.dataPoints.map(point => point.balance)).toEqual([
-      100_000, 6_700, 2_500,
+    expect(converted?.dataPoints.map(p => p.balance)).toEqual([
+      100_000, 6_700, 2_500, 50_000, 3_350, 0,
     ]);
-    expect(converted?.lowestBalance.balance).toBe(6_700);
+  });
+
+  it('recomputes the lowest combined balance from converted leaves', () => {
+    const converted = convertForecastToMain(forecast, accounts, prefs, 0);
+
+    // Jan: 100_000 + 6_700 + 2_500; Feb: 50_000 + 3_350 (lowest)
+    expect(converted?.lowestBalance).toEqual({
+      date: '2026-02-28',
+      balance: 53_350,
+      accountId: '',
+      accountName: '',
+    });
+  });
+
+  it('keeps the tracking-budget series in Main without an account lookup', () => {
+    const tracking: ForecastResult = {
+      dataPoints: [
+        point('2026-01-31', 'tracking-budget', 40_000),
+        point('2026-02-28', 'tracking-budget', 25_000),
+      ],
+      lowestBalance: {
+        date: '2026-02-28',
+        balance: 25_000,
+        accountId: 'tracking-budget',
+        accountName: 'tracking-budget',
+      },
+      forecastStartDate: '2026-01-01',
+      forecastEndDate: '2026-02-28',
+    };
+
+    expect(
+      convertForecastToMain(tracking, [], { defaultCurrencyCode: 'USD' }, 0),
+    ).toEqual(tracking);
   });
 
   it('is unavailable when any included account lacks a rate or is unknown', () => {
