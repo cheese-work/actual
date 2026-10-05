@@ -661,17 +661,19 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
                     format={formatMainCurrency}
                   />
                 ))}
-                <CalendarCardHeader
-                  start={start}
-                  end={end}
-                  totalExpense={totalExpense}
-                  totalIncome={totalIncome}
-                  isNarrowWidth={isNarrowWidth}
-                  format={formatMainCurrency}
-                />
               </View>
             ) : (
               <LoadingIndicator />
+            )}
+            {data && (
+              <CalendarCardHeader
+                start={start}
+                end={end}
+                totalExpense={totalExpense}
+                totalIncome={totalIncome}
+                isNarrowWidth={isNarrowWidth}
+                format={formatMainCurrency}
+              />
             )}
           </View>
         </View>
