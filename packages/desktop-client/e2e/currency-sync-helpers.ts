@@ -336,5 +336,3 @@ export function writeObserved(file: string, value: unknown) {
     );
   }
 }
-
-process.stderr.write(`[step ${new Date().toISOString()}] ${m}\n`);

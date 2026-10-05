@@ -2,13 +2,13 @@ import type { Page } from '@playwright/test';
 
 import {
   BIDI,
-  SERVER_URL,
   bootTwoClients,
   open,
   pageText,
   runSelfDescription,
   savePrefs,
   send,
+  SERVER_URL,
   shoot,
   sync,
   writeObserved,

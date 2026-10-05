@@ -4,7 +4,6 @@ import type { Page } from '@playwright/test';
 
 import {
   BIDI,
-  SERVER_URL,
   bootTwoClients,
   derive,
   open,
@@ -12,6 +11,7 @@ import {
   runSelfDescription,
   savePrefs,
   send,
+  SERVER_URL,
   shoot,
   sync,
   usd,
