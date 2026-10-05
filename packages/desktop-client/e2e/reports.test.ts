@@ -117,6 +117,7 @@ test.describe('Reports', () => {
 
   test.describe('balance forecast', () => {
     test.beforeEach(async () => {
+      await configurationPage.initializeTestMainCurrency();
       const settingsPage = await navigation.goToSettingsPage();
       await settingsPage.enableExperimentalFeature('Balance Forecast Report');
 
