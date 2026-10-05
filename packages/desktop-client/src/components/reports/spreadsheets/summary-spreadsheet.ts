@@ -1,15 +1,142 @@
 import { send } from '@actual-app/core/platform/client/connection';
+import { getEffectiveAccountCurrency } from '@actual-app/core/shared/currency-setup';
+import { convert } from '@actual-app/core/shared/exchange-rates';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type {
+  AccountEntity,
   RuleConditionEntity,
   SummaryContent,
 } from '@actual-app/core/types/models';
+import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import * as d from 'date-fns';
 import type { Locale } from 'date-fns';
 
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { aqlQuery } from '#queries/aqlQuery';
+
+type SummaryQueryRow = {
+  account: string | null;
+  amount: number;
+  count: number;
+};
+
+type ConvertedSummaryRow = {
+  account: string;
+  amount: number;
+  count: number;
+};
+
+type SummaryData = {
+  total: number;
+  divisor: number;
+  dividend: number;
+  fromRange: string;
+  toRange: string;
+  hasForeignCurrency: boolean;
+};
+
+type SummaryResult = SummaryData | { status: 'unavailable' };
+
+function safeNumberFromBigInt(value: bigint): number | null {
+  const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+  return value >= -maximum && value <= maximum ? Number(value) : null;
+}
+
+function safeSum(values: readonly number[]): number | null {
+  let sum = 0n;
+  for (const value of values) {
+    if (!Number.isSafeInteger(value)) {
+      return null;
+    }
+    sum += BigInt(value);
+  }
+  return safeNumberFromBigInt(sum);
+}
+
+function convertSummaryRows(
+  rows: SummaryQueryRow[],
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): { rows: ConvertedSummaryRow[]; hasForeignCurrency: boolean } | null {
+  const mainCurrency = prefs.defaultCurrencyCode;
+  if (!mainCurrency) {
+    return null;
+  }
+
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const amountsByAccount = new Map<string, bigint>();
+  const countsByAccount = new Map<string, bigint>();
+
+  for (const row of rows) {
+    if (
+      !row.account ||
+      !Number.isSafeInteger(row.amount) ||
+      !Number.isSafeInteger(row.count) ||
+      row.count < 0 ||
+      !accountsById.has(row.account)
+    ) {
+      return null;
+    }
+
+    amountsByAccount.set(
+      row.account,
+      (amountsByAccount.get(row.account) ?? 0n) + BigInt(row.amount),
+    );
+    countsByAccount.set(
+      row.account,
+      (countsByAccount.get(row.account) ?? 0n) + BigInt(row.count),
+    );
+  }
+
+  const convertedRows: ConvertedSummaryRow[] = [];
+  let hasForeignCurrency = false;
+  for (const [accountId, nativeAmount] of amountsByAccount) {
+    const amount = safeNumberFromBigInt(nativeAmount);
+    const count = safeNumberFromBigInt(countsByAccount.get(accountId) ?? 0n);
+    const account = accountsById.get(accountId);
+    if (amount === null || count === null || !account) {
+      return null;
+    }
+
+    const accountCurrency = getEffectiveAccountCurrency(
+      account.currency,
+      prefs,
+    );
+    if (!accountCurrency) {
+      return null;
+    }
+
+    let mainAmount: number | null;
+    try {
+      mainAmount = convert(
+        amount,
+        accountCurrency,
+        mainCurrency,
+        prefs,
+        valuationTime,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+        return null;
+      }
+      throw error;
+    }
+    if (mainAmount === null || !Number.isSafeInteger(mainAmount)) {
+      return null;
+    }
+
+    hasForeignCurrency ||= accountCurrency !== mainCurrency;
+    convertedRows.push({ account: accountId, amount: mainAmount, count });
+  }
+
+  return { rows: convertedRows, hasForeignCurrency };
+}
+
+function sumSummaryAmounts(rows: ConvertedSummaryRow[]): number | null {
+  return safeSum(rows.map(row => row.amount));
+}
 
 export function summarySpreadsheet(
   start: string,
@@ -18,17 +145,23 @@ export function summarySpreadsheet(
   conditionsOp: 'and' | 'or' = 'and',
   summaryContent: SummaryContent,
   locale: Locale,
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  accountsReady: boolean,
 ) {
   return async (
     spreadsheet: ReturnType<typeof useSpreadsheet>,
-    setData: (data: {
-      total: number;
-      divisor: number;
-      dividend: number;
-      fromRange: string;
-      toRange: string;
-    }) => void,
+    setData: (data: SummaryResult) => void,
   ) => {
+    const prefsSnapshot: Readonly<SyncedPrefs> = { ...prefs };
+    if (!prefsSnapshot.defaultCurrencyCode) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    if (!accountsReady) {
+      return;
+    }
+
     let filters: unknown[] = [];
     try {
       const response = await send('make-filters-from-conditions', {
@@ -102,24 +235,16 @@ export function summarySpreadsheet(
         .filter({
           [conditionsOpKey]: filters,
         })
+        .groupBy('account')
         .select([
-          'date',
+          'account',
           { amount: { $sum: '$amount' } },
           { count: { $count: '*' } },
         ]);
 
-    let query = makeRootQuery();
-
-    if (
-      summaryContent.type === 'avgPerMonth' ||
-      summaryContent.type === 'avgPerYear'
-    ) {
-      query = query.groupBy(['date']);
-    }
-
     let data;
     try {
-      data = await aqlQuery(query);
+      data = await aqlQuery(makeRootQuery());
     } catch (error) {
       console.error('Error executing query:', error);
       return;
@@ -130,53 +255,101 @@ export function summarySpreadsheet(
       toRange: d.format(endDay, 'MMM yy', { locale }),
     };
 
+    const valuationTime = Date.now();
+    const converted = convertSummaryRows(
+      data.data,
+      accounts,
+      prefsSnapshot,
+      valuationTime,
+    );
+    if (!converted) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+    const totalAmount = sumSummaryAmounts(converted.rows);
+    if (totalAmount === null) {
+      setData({ status: 'unavailable' });
+      return;
+    }
+
     switch (summaryContent.type) {
       case 'sum':
         setData({
           ...dateRanges,
-          total: data.data[0]?.amount ?? 0,
-          dividend: data.data[0]?.amount ?? 0,
+          total: totalAmount,
+          dividend: totalAmount,
           divisor: 0,
+          hasForeignCurrency: converted.hasForeignCurrency,
         });
         break;
 
-      case 'avgPerTransact':
+      case 'avgPerTransact': {
+        const transactionCount = safeSum(converted.rows.map(row => row.count));
+        if (transactionCount === null) {
+          setData({ status: 'unavailable' });
+          return;
+        }
         setData({
           ...dateRanges,
-          total:
-            (data.data[0]?.count ?? 0)
-              ? (data.data[0]?.amount ?? 0) / data.data[0].count
-              : 0,
-          dividend: data.data[0]?.amount ?? 0,
-          divisor: data.data[0].count,
+          total: transactionCount ? totalAmount / transactionCount : 0,
+          dividend: totalAmount,
+          divisor: transactionCount,
+          hasForeignCurrency: converted.hasForeignCurrency,
         });
         break;
+      }
 
       case 'avgPerMonth': {
         const months = getOneDatePerMonth(startDay, endDay);
-        setData({ ...dateRanges, ...calculatePerMonth(data.data, months) });
+        const average = calculatePerMonth(converted.rows, months);
+        if (!average) {
+          setData({ status: 'unavailable' });
+          return;
+        }
+        setData({
+          ...dateRanges,
+          ...average,
+          hasForeignCurrency: converted.hasForeignCurrency,
+        });
         break;
       }
 
       case 'avgPerYear': {
+        const average = calculatePerYear(converted.rows, startDay, endDay);
+        if (!average) {
+          setData({ status: 'unavailable' });
+          return;
+        }
         setData({
           ...dateRanges,
-          ...calculatePerYear(data.data, startDay, endDay),
+          ...average,
+          hasForeignCurrency: converted.hasForeignCurrency,
         });
         break;
       }
 
-      case 'percentage':
+      case 'percentage': {
+        const percentage = await calculatePercentage(
+          converted.rows,
+          summaryContent,
+          startDay,
+          endDay,
+          accounts,
+          prefsSnapshot,
+          valuationTime,
+        );
+        if ('status' in percentage) {
+          setData({ status: 'unavailable' });
+          return;
+        }
         setData({
           ...dateRanges,
-          ...(await calculatePercentage(
-            data.data,
-            summaryContent,
-            startDay,
-            endDay,
-          )),
+          ...percentage,
+          hasForeignCurrency:
+            converted.hasForeignCurrency || percentage.hasForeignCurrency,
         });
         break;
+      }
 
       default:
         throw new Error(`Unsupported summary type`);
@@ -185,39 +358,22 @@ export function summarySpreadsheet(
 }
 
 function calculatePerMonth(
-  data: Array<{
-    date: string;
-    amount: number;
-    count: number;
-  }>,
+  data: ConvertedSummaryRow[],
   months: Date[],
-) {
+): Pick<SummaryData, 'total' | 'dividend' | 'divisor'> | null {
   if (!data.length || !months.length) {
     return { total: 0, dividend: 0, divisor: 0 };
   }
-
-  const monthlyData = data.reduce(
-    (acc, day) => {
-      const monthKey = d.format(
-        d.parse(day.date, 'yyyy-MM-dd', new Date()),
-        'yyyy-MM',
-      );
-      acc[monthKey] = (acc[monthKey] || 0) + day.amount;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
-
-  const monthsSum = months.map(m => ({
-    amount: monthlyData[d.format(m, 'yyyy-MM')] || 0,
-  }));
 
   const lastMonth = months.at(-1)!;
   const dayOfMonth = lastMonth.getDate();
   const daysInMonth = monthUtils.getDay(monthUtils.lastDayOfMonth(lastMonth));
   const numMonths = months.length - 1 + dayOfMonth / daysInMonth;
 
-  const totalAmount = monthsSum.reduce((sum, month) => sum + month.amount, 0);
+  const totalAmount = sumSummaryAmounts(data);
+  if (totalAmount === null) {
+    return null;
+  }
   const averageAmountPerMonth = totalAmount / numMonths;
 
   return {
@@ -228,19 +384,18 @@ function calculatePerMonth(
 }
 
 function calculatePerYear(
-  data: Array<{
-    date: string;
-    amount: number;
-    count: number;
-  }>,
+  data: ConvertedSummaryRow[],
   startDate: Date,
   endDate: Date,
-) {
+): Pick<SummaryData, 'total' | 'dividend' | 'divisor'> | null {
   if (!data.length) {
     return { total: 0, dividend: 0, divisor: 0 };
   }
 
-  const totalAmount = data.reduce((sum, day) => sum + day.amount, 0);
+  const totalAmount = sumSummaryAmounts(data);
+  if (totalAmount === null) {
+    return null;
+  }
   const totalDays = d.differenceInDays(endDate, startDate) + 1;
   const numYears = totalDays / 365.25;
 
@@ -254,21 +409,14 @@ function calculatePerYear(
 }
 
 async function calculatePercentage(
-  data: Array<{
-    amount: number;
-  }>,
-  summaryContent: SummaryContent,
+  data: ConvertedSummaryRow[],
+  summaryContent: Extract<SummaryContent, { type: 'percentage' }>,
   startDay: Date,
   endDay: Date,
+  accounts: AccountEntity[],
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
 ) {
-  if (summaryContent.type !== 'percentage') {
-    return {
-      total: 0,
-      dividend: 0,
-      divisor: 0,
-    };
-  }
-
   const conditionsOpKey =
     summaryContent.divisorConditionsOp === 'or' ? '$or' : '$and';
   let filters = [];
@@ -285,6 +433,7 @@ async function calculatePercentage(
       total: 0,
       dividend: 0,
       divisor: 0,
+      hasForeignCurrency: false,
     };
   }
 
@@ -293,7 +442,12 @@ async function calculatePercentage(
       .filter({
         [conditionsOpKey]: filters,
       })
-      .select([{ amount: { $sum: '$amount' } }]);
+      .groupBy('account')
+      .select([
+        'account',
+        { amount: { $sum: '$amount' } },
+        { count: { $count: '*' } },
+      ]);
 
   let query = makeDivisorQuery();
 
@@ -316,22 +470,38 @@ async function calculatePercentage(
 
   let divisorData;
   try {
-    divisorData = (await aqlQuery(query)) as { data: { amount: number }[] };
+    divisorData = (await aqlQuery(query)) as { data: SummaryQueryRow[] };
   } catch (error) {
     console.error('Error executing divisor query:', error);
     return {
       total: 0,
       dividend: 0,
       divisor: 0,
+      hasForeignCurrency: false,
     };
   }
 
-  const divisorValue = divisorData?.data?.[0]?.amount ?? 0;
-
-  const dividend = data.reduce((prev, ac) => prev + (ac?.amount ?? 0), 0);
+  const convertedDivisor = convertSummaryRows(
+    divisorData?.data ?? [],
+    accounts,
+    prefs,
+    valuationTime,
+  );
+  if (!convertedDivisor) {
+    return { status: 'unavailable' as const };
+  }
+  const divisorValue = sumSummaryAmounts(convertedDivisor.rows);
+  const dividend = sumSummaryAmounts(data);
+  if (divisorValue === null || dividend === null) {
+    return { status: 'unavailable' as const };
+  }
   return {
-    total: Math.round(((dividend ?? 0) / (divisorValue ?? 1)) * 10000) / 100,
-    divisor: divisorValue ?? 0,
-    dividend: dividend ?? 0,
+    total:
+      divisorValue === 0
+        ? 0
+        : Math.round((dividend / divisorValue) * 10000) / 100,
+    divisor: divisorValue,
+    dividend,
+    hasForeignCurrency: convertedDivisor.hasForeignCurrency,
   };
 }
