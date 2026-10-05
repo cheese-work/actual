@@ -339,13 +339,28 @@ export function MonteCarloPotConfiguration({
               const shouldFillName =
                 newAccount != null &&
                 (pot.name === '' || pot.name === previousAccount?.name);
+              // A linked pot's stored balance is native, but a manual
+              // pot's is Main: unlinking carries the Main value over
+              // rather than reinterpreting the native amount as Main
+              const carriedBalance =
+                newAccountId === null && displayBalance != null
+                  ? Math.min(MAX_AMOUNT, displayBalance)
+                  : null;
               onPotChange({
                 accountId: newAccountId,
+                ...(carriedBalance !== null && {
+                  startingBalance: carriedBalance,
+                }),
                 ...(shouldFillName && { name: newAccount.name }),
               });
             }}
             options={[
-              ['', t('None')],
+              // With no Main value to carry over, unlinking would resume
+              // the simulation on a balance in the wrong units, so the pot
+              // must be relinked or removed instead
+              ...(displayBalance === null
+                ? []
+                : [['', t('None')] as [string, string]]),
               ...missingLinkedOptions,
               ...openAccounts.map(
                 account => [account.id, account.name] as [string, string],

@@ -26,7 +26,7 @@ export function MonteCarloUnavailableNotice({
       }}
     >
       {t(
-        'Unavailable: a linked account balance cannot be converted to {{currencyCode}}. Add an exchange rate in Settings or unlink the pot.',
+        'Unavailable: a linked account balance cannot be converted to {{currencyCode}}. Add an exchange rate in Settings, link the pot to another account or remove the pot.',
         { currencyCode: prefs.defaultCurrencyCode },
       )}
     </Block>
