@@ -75,7 +75,13 @@ async function donutLabels(page: Page) {
   const sectors = page.locator('.recharts-sector');
   const labels: string[] = [];
   for (let i = 0; i < (await sectors.count()); i++) {
-    await sectors.nth(i).hover({ force: true });
+    // The donut animates in: a slice that is not hoverable yet is skipped and
+    // the caller's poll tries again.
+    try {
+      await sectors.nth(i).hover({ force: true, timeout: 5_000 });
+    } catch {
+      continue;
+    }
     labels.push(
       unbidi(
         await page.evaluate(() =>
