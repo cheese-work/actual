@@ -19,7 +19,7 @@ import {
 
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
-import { useFormat } from '#hooks/useFormat';
+import type { FormatType } from '#hooks/useFormat';
 import { useResizeObserver } from '#hooks/useResizeObserver';
 
 type CalendarGraphProps = {
@@ -34,6 +34,7 @@ type CalendarGraphProps = {
   firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'];
   isEditing?: boolean;
   onDayClick: (date: Date | null) => void;
+  format: (value: unknown, type?: FormatType) => string;
 };
 export function CalendarGraph({
   data,
@@ -41,9 +42,8 @@ export function CalendarGraph({
   firstDayOfWeekIdx,
   isEditing,
   onDayClick,
+  format,
 }: CalendarGraphProps) {
-  const format = useFormat();
-
   const startingDate = startOfWeek(new Date(), {
     weekStartsOn:
       firstDayOfWeekIdx !== undefined &&

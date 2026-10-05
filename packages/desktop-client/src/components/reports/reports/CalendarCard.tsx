@@ -37,11 +37,13 @@ import { calculateTimeRange } from '#components/reports/reportRanges';
 import { calendarSpreadsheet } from '#components/reports/spreadsheets/calendar-spreadsheet';
 import type { CalendarDataType } from '#components/reports/spreadsheets/calendar-spreadsheet';
 import { useReport } from '#components/reports/useReport';
-import { useFormat } from '#hooks/useFormat';
+import { useAccounts } from '#hooks/useAccounts';
+import { isFinancialFormatType, useFormat } from '#hooks/useFormat';
 import type { FormatType } from '#hooks/useFormat';
 import { useMergedRefs } from '#hooks/useMergedRefs';
 import { useNavigate } from '#hooks/useNavigate';
 import { useResizeObserver } from '#hooks/useResizeObserver';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 type CalendarCardProps = {
   widgetId: string;
@@ -60,6 +62,21 @@ export function CalendarCard({
 }: CalendarCardProps) {
   const { t } = useTranslation();
   const format = useFormat();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const formatMainCurrency = useCallback(
+    (value: unknown, type?: FormatType) =>
+      typeof value === 'number' &&
+      prefs.defaultCurrencyCode &&
+      isFinancialFormatType(type)
+        ? format.forCurrency(value, prefs.defaultCurrencyCode, type)
+        : format(value, type),
+    [format, prefs.defaultCurrencyCode],
+  );
 
   const [latestTransaction, setLatestTransaction] = useState<string>('');
 
@@ -90,8 +107,21 @@ export function CalendarCard({
         meta?.conditions,
         meta?.conditionsOp,
         firstDayOfWeekIdx,
+        accounts,
+        prefs,
+        !accountsLoading && !accountsPlaceholderData,
       ),
-    [start, end, meta?.conditions, meta?.conditionsOp, firstDayOfWeekIdx],
+    [
+      start,
+      end,
+      meta?.conditions,
+      meta?.conditionsOp,
+      firstDayOfWeekIdx,
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
+    ],
   );
 
   const [cardOrientation, setCardOrientation] = useState<'row' | 'column'>(
@@ -107,7 +137,12 @@ export function CalendarCard({
     }
   });
 
-  const data = useReport('calendar', params);
+  const reportData = useReport('calendar', params);
+  const data = reportData && 'calendarData' in reportData ? reportData : null;
+  const reportUnavailable =
+    !!reportData &&
+    'status' in reportData &&
+    reportData.status === 'unavailable';
 
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
 
@@ -220,7 +255,7 @@ export function CalendarCard({
                             {totalIncome !== 0 ? (
                               <PrivacyFilter>
                                 <FinancialText>
-                                  {format(totalIncome, 'financial')}
+                                  {formatMainCurrency(totalIncome, 'financial')}
                                 </FinancialText>
                               </PrivacyFilter>
                             ) : (
@@ -243,7 +278,10 @@ export function CalendarCard({
                             {totalExpense !== 0 ? (
                               <PrivacyFilter>
                                 <FinancialText>
-                                  {format(totalExpense, 'financial')}
+                                  {formatMainCurrency(
+                                    totalExpense,
+                                    'financial',
+                                  )}
                                 </FinancialText>
                               </PrivacyFilter>
                             ) : (
@@ -261,6 +299,14 @@ export function CalendarCard({
             </Block>
           </View>
         </View>
+        {data?.hasForeignCurrency && (
+          <Block style={{ padding: '0 20px 8px' }}>
+            {t(
+              'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+              { currencyCode: prefs.defaultCurrencyCode },
+            )}
+          </Block>
+        )}
         <View
           style={{
             height: '100%',
@@ -294,7 +340,13 @@ export function CalendarCard({
                   : 'auto',
             }}
           >
-            {data ? (
+            {reportUnavailable ? (
+              <View role="status" aria-live="polite" style={{ padding: 20 }}>
+                {t(
+                  'Calendar is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
+                )}
+              </View>
+            ) : data ? (
               data.calendarData.map((calendar, index) => (
                 <CalendarCardInner
                   key={index}
@@ -305,7 +357,7 @@ export function CalendarCard({
                   index={index}
                   widgetId={widgetId}
                   isEditing={isEditing}
-                  format={format}
+                  format={formatMainCurrency}
                 />
               ))
             ) : (
@@ -332,7 +384,7 @@ type CalendarCardInnerProps = {
   index: number;
   widgetId: string;
   isEditing?: boolean;
-  format: (value: unknown, type: FormatType) => string;
+  format: (value: unknown, type?: FormatType) => string;
 };
 function CalendarCardInner({
   calendar,
@@ -529,6 +581,7 @@ function CalendarCardInner({
         start={calendar.start}
         firstDayOfWeekIdx={firstDayOfWeekIdx}
         isEditing={isEditing}
+        format={format}
         onDayClick={date => {
           if (date) {
             void navigate(
