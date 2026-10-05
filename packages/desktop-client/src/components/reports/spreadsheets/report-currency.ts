@@ -81,3 +81,61 @@ export function convertReportQueryRows<T extends ConvertibleReportRow>(
 
   return convertedRows;
 }
+
+/**
+ * Converts one native account amount to Main. Null when Main is unset, the
+ * account is unknown, no rate exists, or the amount is not a safe integer.
+ */
+export function convertAccountAmount(
+  amount: number,
+  account: Pick<AccountEntity, 'currency'> | undefined,
+  prefs: Readonly<SyncedPrefs>,
+  valuationTime: number,
+): number | null {
+  const mainCurrency = prefs.defaultCurrencyCode;
+  if (!mainCurrency || !account || !Number.isSafeInteger(amount)) {
+    return null;
+  }
+  try {
+    return convert(
+      amount,
+      getEffectiveAccountCurrency(account.currency, prefs),
+      mainCurrency,
+      prefs,
+      valuationTime,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('safeNumber:')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Safe-sums converted leaves; null when any leaf is unavailable or the sum is unsafe. */
+export function sumConvertedLeaves(
+  leaves: Array<number | null>,
+): number | null {
+  let total = 0;
+  for (const leaf of leaves) {
+    if (leaf === null) {
+      return null;
+    }
+    total += leaf;
+    if (!Number.isSafeInteger(total)) {
+      return null;
+    }
+  }
+  return total;
+}
+
+export function hasForeignAccount(
+  accounts: Array<Pick<AccountEntity, 'currency'>>,
+  prefs: Readonly<SyncedPrefs>,
+): boolean {
+  return accounts.some(
+    account =>
+      getEffectiveAccountCurrency(account.currency, prefs) !==
+      prefs.defaultCurrencyCode,
+  );
+}

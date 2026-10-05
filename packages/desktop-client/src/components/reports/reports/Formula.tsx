@@ -19,6 +19,7 @@ import { MobileBackButton } from '#components/mobile/MobileBackButton';
 import { MobilePageHeader, Page, PageHeader } from '#components/Page';
 import { FormulaResult } from '#components/reports/FormulaResult';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
+import { FormulaCurrencyNotice } from '#components/reports/UnconvertedCurrencyNotice';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
@@ -352,6 +353,7 @@ function FormulaInner({ widget }: FormulaInnerProps) {
                 customColor={customColor}
               />
             </View>
+            <FormulaCurrencyNotice />
           </View>
           <View
             style={{

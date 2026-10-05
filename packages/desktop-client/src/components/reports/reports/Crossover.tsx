@@ -37,6 +37,7 @@ import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { calculateTimeRange } from '#components/reports/reportRanges';
 import { createCrossoverSpreadsheet } from '#components/reports/spreadsheets/crossover-spreadsheet';
 import type { CrossoverData } from '#components/reports/spreadsheets/crossover-spreadsheet';
+import type { ReportDataStatus } from '#components/reports/spreadsheets/report-currency';
 import { useReport } from '#components/reports/useReport';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
@@ -45,6 +46,7 @@ import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import type { useSpreadsheet } from '#hooks/useSpreadsheet';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -75,7 +77,12 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
   const locale = useLocale();
   const { t } = useTranslation();
   const dispatch = useDispatch();
-  const { data: accounts = [] } = useAccounts();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
+  const [prefs] = useSyncedPrefs();
   const {
     data: categories = { grouped: [], list: [] },
     isPending: isCategoriesLoading,
@@ -331,7 +338,7 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
   const params = useCallback(
     async (
       spreadsheet: ReturnType<typeof useSpreadsheet>,
-      setData: (data: CrossoverData) => void,
+      setData: (data: CrossoverData | ReportDataStatus) => void,
     ) => {
       // Don't run if dates are not yet initialized
       if (!start || !end) {
@@ -350,6 +357,9 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
           : null,
         projectionType,
         expenseAdjustmentFactor,
+        accounts,
+        prefs,
+        accountsReady: !accountsLoading && !accountsPlaceholderData,
       });
       await crossoverSpreadsheet(spreadsheet, setData);
     },
@@ -364,10 +374,22 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
       expenseAdjustmentFactor,
       expenseCategoryIds,
       selectedIncomeAccountIds,
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
     ],
   );
 
-  const data = useReport<CrossoverData>('crossover', params);
+  const reportData = useReport<CrossoverData | ReportDataStatus>(
+    'crossover',
+    params,
+  );
+  const data = reportData && 'graphData' in reportData ? reportData : null;
+  const reportUnavailable =
+    !!reportData &&
+    'status' in reportData &&
+    reportData.status === 'unavailable';
   const [previousData, setPreviousData] = useState<CrossoverData | null>(null);
 
   useEffect(() => {
@@ -376,7 +398,9 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
     }
   }, [data]);
 
-  const displayData = data ?? previousData;
+  // Never keep showing a stale (possibly mixed-denomination) result once the
+  // current calculation is unavailable.
+  const displayData = reportUnavailable ? null : (data ?? previousData);
 
   // Get the default estimated return from the spreadsheet data
   const historicalReturn = displayData?.historicalReturn ?? null;
@@ -418,6 +442,19 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
       },
     });
   };
+
+  if (reportUnavailable) {
+    return (
+      <Page header={<PageHeader title={title} />}>
+        <View role="status" aria-live="polite" style={{ padding: 20 }}>
+          <Trans>
+            Crossover point is unavailable. Check that a Main currency is set
+            and every included account has a valid exchange rate.
+          </Trans>
+        </View>
+      </Page>
+    );
+  }
 
   if (!allMonths || !displayData || !start || !end || isCategoriesLoading) {
     return <LoadingIndicator />;
@@ -1036,6 +1073,14 @@ function CrossoverInner({ widget }: CrossoverInnerProps) {
             flex: 1,
           }}
         >
+          {displayData.hasForeignCurrency && (
+            <View style={{ padding: '0 20px 8px' }}>
+              {t(
+                'Values in {{currencyCode}}. Foreign-currency history is an estimate at current rates.',
+                { currencyCode: prefs.defaultCurrencyCode },
+              )}
+            </View>
+          )}
           {/* Header stats */}
           <View
             style={{
