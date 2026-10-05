@@ -207,12 +207,17 @@ function main(argv: string[]): number {
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--catalogue') options.catalogue = true;
-    else if (arg === '--require-batch') options.require = true;
-    else if (arg === '--manifest') options.manifest = argv[++i];
-    else if (arg === '--english') options.english = argv[++i];
-    else if (arg === '--vietnamese') options.vietnamese = argv[++i];
-    else {
+    if (arg === '--catalogue') {
+      options.catalogue = true;
+    } else if (arg === '--require-batch') {
+      options.require = true;
+    } else if (arg === '--manifest') {
+      options.manifest = argv[++i];
+    } else if (arg === '--english') {
+      options.english = argv[++i];
+    } else if (arg === '--vietnamese') {
+      options.vietnamese = argv[++i];
+    } else {
       console.error(`Unknown argument: ${arg}`);
       return 2;
     }

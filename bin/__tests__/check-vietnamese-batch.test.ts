@@ -343,6 +343,6 @@ describe('required CI enforcement', () => {
   it('Electron forwards --skip-translations to the nested browser build', () => {
     const script = read('bin/package-electron');
     expect(script).toContain('BROWSER_ARGS+=(--skip-translations)');
-    expect(script).toContain('yarn build:browser "${BROWSER_ARGS[@]}"');
+    expect(script).toContain('yarn build:browser "$' + '{BROWSER_ARGS[@]}"');
   });
 });
