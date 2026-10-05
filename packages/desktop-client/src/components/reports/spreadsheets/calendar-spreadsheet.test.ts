@@ -87,7 +87,7 @@ async function runCalendar({
     accounts,
     prefs,
     accountsReady,
-  )(undefined as ReturnType<typeof useSpreadsheet>, data => {
+  )(undefined as unknown as ReturnType<typeof useSpreadsheet>, data => {
     result = data;
   });
   return { result, queries };
@@ -100,9 +100,12 @@ async function runResult<T>(
   ) => Promise<void>,
 ) {
   let result: T | undefined;
-  await factory(undefined as ReturnType<typeof useSpreadsheet>, data => {
-    result = data;
-  });
+  await factory(
+    undefined as unknown as ReturnType<typeof useSpreadsheet>,
+    data => {
+      result = data;
+    },
+  );
   return result;
 }
 
@@ -138,9 +141,9 @@ describe('calendar spreadsheet currency conversion', () => {
       hasForeignCurrency: true,
     });
     expect(
-      queries.map(query => query.groupExpressions).every(group =>
-        group.includes('account'),
-      ),
+      queries
+        .map(query => query.groupExpressions)
+        .every(group => group.includes('account')),
     ).toBe(true);
 
     if (!result || 'status' in result) {
@@ -156,7 +159,10 @@ describe('calendar spreadsheet currency conversion', () => {
       day => formatDate(day.date, 'yyyy-MM-dd') === '2026-02-02',
     );
 
-    expect(januaryExpense).toMatchObject({ expenseValue: 711, expenseSize: 100 });
+    expect(januaryExpense).toMatchObject({
+      expenseValue: 711,
+      expenseSize: 100,
+    });
     expect(februaryIncome?.incomeValue).toBe(711);
     expect(februaryNextIncome?.incomeValue).toBe(670);
     expect(februaryIncome?.incomeSize).toBeCloseTo((711 / 1381) * 100);

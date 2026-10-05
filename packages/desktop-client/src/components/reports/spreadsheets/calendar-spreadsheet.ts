@@ -1,7 +1,7 @@
 import { send } from '@actual-app/core/platform/client/connection';
-import type { AccountEntity } from '@actual-app/core/types/models';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
+import type { AccountEntity } from '@actual-app/core/types/models';
 import type { RuleConditionEntity } from '@actual-app/core/types/models';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 import * as d from 'date-fns';
@@ -138,7 +138,9 @@ export function calendarSpreadsheet(
     }
 
     const valuationTime = Date.now();
-    const accountsById = new Map(accounts.map(account => [account.id, account]));
+    const accountsById = new Map(
+      accounts.map(account => [account.id, account]),
+    );
     const convertRows = (rows: CalendarQueryRow[]) =>
       convertReportQueryRows(
         rows.map(row => ({

@@ -270,7 +270,9 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
   const reportData = useReport('calendar', params);
   const data = reportData && 'calendarData' in reportData ? reportData : null;
   const reportUnavailable =
-    !!reportData && 'status' in reportData && reportData.status === 'unavailable';
+    !!reportData &&
+    'status' in reportData &&
+    reportData.status === 'unavailable';
 
   const [allMonths, setAllMonths] = useState<
     Array<{
@@ -629,11 +631,7 @@ function CalendarInner({ widget, parameters }: CalendarInnerProps) {
             }}
           >
             {reportUnavailable ? (
-              <View
-                role="status"
-                aria-live="polite"
-                style={{ padding: 20 }}
-              >
+              <View role="status" aria-live="polite" style={{ padding: 20 }}>
                 {t(
                   'Calendar is unavailable. Check that a Main currency is set and every included account has a valid exchange rate.',
                 )}

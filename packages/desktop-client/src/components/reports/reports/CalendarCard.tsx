@@ -140,7 +140,9 @@ export function CalendarCard({
   const reportData = useReport('calendar', params);
   const data = reportData && 'calendarData' in reportData ? reportData : null;
   const reportUnavailable =
-    !!reportData && 'status' in reportData && reportData.status === 'unavailable';
+    !!reportData &&
+    'status' in reportData &&
+    reportData.status === 'unavailable';
 
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
 
@@ -276,7 +278,10 @@ export function CalendarCard({
                             {totalExpense !== 0 ? (
                               <PrivacyFilter>
                                 <FinancialText>
-                                  {formatMainCurrency(totalExpense, 'financial')}
+                                  {formatMainCurrency(
+                                    totalExpense,
+                                    'financial',
+                                  )}
                                 </FinancialText>
                               </PrivacyFilter>
                             ) : (
