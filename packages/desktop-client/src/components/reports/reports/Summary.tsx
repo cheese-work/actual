@@ -31,6 +31,7 @@ import { Checkbox } from '#components/forms';
 import { MobileBackButton } from '#components/mobile/MobileBackButton';
 import { MobilePageHeader, Page, PageHeader } from '#components/Page';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { createReportAmountFormatter } from '#components/reports/graphs/tableGraph/report-display-rounding';
 import { Header } from '#components/reports/Header';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { calculateTimeRange } from '#components/reports/reportRanges';
@@ -38,12 +39,14 @@ import { summarySpreadsheet } from '#components/reports/spreadsheets/summary-spr
 import { useReport } from '#components/reports/useReport';
 import { fromDateRepr } from '#components/reports/util';
 import { FieldSelect } from '#components/rules/RuleEditor';
+import { useAccounts } from '#hooks/useAccounts';
 import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch } from '#redux';
 import { useUpdateDashboardWidgetMutation } from '#reports/mutations';
@@ -72,6 +75,13 @@ function SummaryInner({ widget }: SummaryInnerProps) {
   const locale = useLocale();
   const { t } = useTranslation();
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
 
   const [start, setStart] = useState(
     monthUtils.dayFromDate(monthUtils.currentMonth()),
@@ -122,6 +132,9 @@ function SummaryInner({ widget }: SummaryInnerProps) {
         dividendFilters.conditionsOp,
         content,
         locale,
+        accounts,
+        prefs,
+        !accountsLoading && !accountsPlaceholderData,
       ),
     [
       start,
@@ -130,10 +143,16 @@ function SummaryInner({ widget }: SummaryInnerProps) {
       dividendFilters.conditionsOp,
       content,
       locale,
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
     ],
   );
 
-  const data = useReport('summary', params);
+  const reportData = useReport('summary', params);
+  const data = reportData && !('status' in reportData) ? reportData : null;
+  const reportUnavailable = reportData !== null && 'status' in reportData;
 
   useEffect(() => {
     setContent(prev => ({
@@ -316,7 +335,7 @@ function SummaryInner({ widget }: SummaryInnerProps) {
     } else if (contentType === 'avgPerTransact') {
       return format(value, 'number');
     }
-    return format(Math.round(value), 'financial');
+    return formatAmount(Math.round(value));
   };
 
   const fractionNumberStyle = {
@@ -443,87 +462,106 @@ function SummaryInner({ widget }: SummaryInnerProps) {
           flexGrow: 1,
         }}
       >
-        <View
-          style={{
-            flexDirection: isNarrowWidth ? 'column' : 'row',
-            justifyContent: 'center',
-            width: '100%',
-            alignItems: 'center',
-            gap: isNarrowWidth ? 24 : 0,
-          }}
-        >
-          <Operator
-            type={content.type}
-            dividendFilterObject={dividendFilters}
-            divisorFilterObject={divisorFilters}
-            showDivisorDateRange={
-              content.type === 'percentage'
-                ? !(content.divisorAllTimeDateRange ?? false)
-                : false
-            }
-            fromRange={data?.fromRange ?? ''}
-            toRange={data?.toRange ?? ''}
-          />
-          {content.type !== 'sum' && (
-            <>
-              {!isNarrowWidth && (
-                <SvgEquals width={50} style={{ marginLeft: 56 }} />
+        {reportUnavailable ? (
+          <Text style={{ textAlign: 'center', padding: 20 }}>
+            <Trans>
+              Summary values are unavailable. Check that a Main currency is set
+              and every included account has a valid exchange rate.
+            </Trans>
+          </Text>
+        ) : (
+          <>
+            <View
+              style={{
+                flexDirection: isNarrowWidth ? 'column' : 'row',
+                justifyContent: 'center',
+                width: '100%',
+                alignItems: 'center',
+                gap: isNarrowWidth ? 24 : 0,
+              }}
+            >
+              <Operator
+                type={content.type}
+                dividendFilterObject={dividendFilters}
+                divisorFilterObject={divisorFilters}
+                showDivisorDateRange={
+                  content.type === 'percentage'
+                    ? !(content.divisorAllTimeDateRange ?? false)
+                    : false
+                }
+                fromRange={data?.fromRange ?? ''}
+                toRange={data?.toRange ?? ''}
+              />
+              {content.type !== 'sum' && (
+                <>
+                  {!isNarrowWidth && (
+                    <SvgEquals width={50} style={{ marginLeft: 56 }} />
+                  )}
+                  <View style={{ padding: 16 }}>
+                    <Text style={fractionNumberStyle}>
+                      <PrivacyFilter>
+                        <FinancialText>
+                          {formatAmount(data?.dividend ?? 0)}
+                        </FinancialText>
+                      </PrivacyFilter>
+                    </Text>
+                    <div
+                      style={{
+                        width: '100%',
+                        marginTop: fractionRuleMargin,
+                        marginBottom: fractionRuleMargin,
+                        borderTop: '2px solid',
+                        borderBottom: '2px solid',
+                      }}
+                    />
+                    <Text style={fractionNumberStyle}>
+                      <PrivacyFilter>
+                        {getDivisorFormatted(content.type, data?.divisor ?? 0)}
+                      </PrivacyFilter>
+                    </Text>
+                  </View>
+                </>
               )}
-              <View style={{ padding: 16 }}>
-                <Text style={fractionNumberStyle}>
-                  <PrivacyFilter>
-                    <FinancialText>
-                      {format(data?.dividend ?? 0, 'financial')}
-                    </FinancialText>
-                  </PrivacyFilter>
-                </Text>
-                <div
-                  style={{
-                    width: '100%',
-                    marginTop: fractionRuleMargin,
-                    marginBottom: fractionRuleMargin,
-                    borderTop: '2px solid',
-                    borderBottom: '2px solid',
-                  }}
-                />
-                <Text style={fractionNumberStyle}>
-                  <PrivacyFilter>
-                    {getDivisorFormatted(content.type, data?.divisor ?? 0)}
-                  </PrivacyFilter>
-                </Text>
+              {!isNarrowWidth && (
+                <SvgEquals width={50} style={{ marginLeft: 16 }} />
+              )}
+              <View
+                style={{
+                  flexGrow: isNarrowWidth ? 0 : 1,
+                  textAlign: 'center',
+                  width: totalWidth,
+                  maxWidth: totalWidth,
+                  justifyItems: 'center',
+                  alignItems: 'center',
+                  marginLeft: isNarrowWidth ? 0 : 16,
+                  fontSize: isNarrowWidth ? '40px' : '50px',
+                  justifyContent: 'center',
+                  color:
+                    (data?.total ?? 0) === 0
+                      ? theme.reportsNumberNeutral
+                      : (data?.total ?? 0) < 0
+                        ? theme.reportsNumberNegative
+                        : theme.reportsNumberPositive,
+                }}
+              >
+                <PrivacyFilter>
+                  {content.type === 'percentage'
+                    ? format(Math.abs(data?.total ?? 0), 'number')
+                    : formatAmount(Math.abs(Math.round(data?.total ?? 0)))}
+                  {content.type === 'percentage' ? '%' : ''}
+                </PrivacyFilter>
               </View>
-            </>
-          )}
-          {!isNarrowWidth && (
-            <SvgEquals width={50} style={{ marginLeft: 16 }} />
-          )}
-          <View
-            style={{
-              flexGrow: isNarrowWidth ? 0 : 1,
-              textAlign: 'center',
-              width: totalWidth,
-              maxWidth: totalWidth,
-              justifyItems: 'center',
-              alignItems: 'center',
-              marginLeft: isNarrowWidth ? 0 : 16,
-              fontSize: isNarrowWidth ? '40px' : '50px',
-              justifyContent: 'center',
-              color:
-                (data?.total ?? 0) === 0
-                  ? theme.reportsNumberNeutral
-                  : (data?.total ?? 0) < 0
-                    ? theme.reportsNumberNegative
-                    : theme.reportsNumberPositive,
-            }}
-          >
-            <PrivacyFilter>
-              {content.type === 'percentage'
-                ? format(Math.abs(data?.total ?? 0), 'number')
-                : format(Math.abs(Math.round(data?.total ?? 0)), 'financial')}
-              {content.type === 'percentage' ? '%' : ''}
-            </PrivacyFilter>
-          </View>
-        </View>
+            </View>
+            {data?.hasForeignCurrency && (
+              <Text style={{ textAlign: 'center' }}>
+                <Trans
+                  i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+                  values={{ currency: prefs.defaultCurrencyCode }}
+                />
+              </Text>
+            )}
+          </>
+        )}
       </View>
     </Page>
   );

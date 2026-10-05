@@ -8,6 +8,7 @@ import { debounce } from 'es-toolkit/compat';
 
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { createReportAmountFormatter } from '#components/reports/graphs/tableGraph/report-display-rounding';
 import { useFormat } from '#hooks/useFormat';
 import { useMergedRefs } from '#hooks/useMergedRefs';
 import { useResizeObserver } from '#hooks/useResizeObserver';
@@ -41,12 +42,13 @@ export function SummaryNumber({
   const [hasSized, setHasSized] = useState(false);
   const refDiv = useRef<HTMLDivElement>(null);
   const format = useFormat();
+  const formatAmount = createReportAmountFormatter(format);
   const isNumericValue = Number.isFinite(value);
 
   let displayAmount =
     contentType === 'percentage'
       ? format(Math.abs(value), 'number')
-      : format(Math.abs(Math.round(value)), 'financial');
+      : formatAmount(Math.abs(Math.round(value)));
 
   displayAmount += suffix;
 

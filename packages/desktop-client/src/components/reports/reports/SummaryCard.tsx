@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
+import { Text } from '@actual-app/components/text';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
@@ -17,7 +18,9 @@ import { calculateTimeRange } from '#components/reports/reportRanges';
 import { summarySpreadsheet } from '#components/reports/spreadsheets/summary-spreadsheet';
 import { SummaryNumber } from '#components/reports/SummaryNumber';
 import { useReport } from '#components/reports/useReport';
+import { useAccounts } from '#hooks/useAccounts';
 import { useLocale } from '#hooks/useLocale';
+import { useSyncedPrefs } from '#hooks/useSyncedPrefs';
 
 type SummaryCardProps = {
   widgetId: string;
@@ -34,6 +37,12 @@ export function SummaryCard({
 }: SummaryCardProps) {
   const locale = useLocale();
   const { t } = useTranslation();
+  const [prefs] = useSyncedPrefs();
+  const {
+    data: accounts = [],
+    isLoading: accountsLoading,
+    isPlaceholderData: accountsPlaceholderData,
+  } = useAccounts();
   const [latestTransaction, setLatestTransaction] = useState<string>('');
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
 
@@ -81,11 +90,27 @@ export function SummaryCard({
         meta?.conditionsOp,
         content,
         locale,
+        accounts,
+        prefs,
+        !accountsLoading && !accountsPlaceholderData,
       ),
-    [start, end, meta?.conditions, meta?.conditionsOp, content, locale],
+    [
+      start,
+      end,
+      meta?.conditions,
+      meta?.conditionsOp,
+      content,
+      locale,
+      accounts,
+      prefs,
+      accountsLoading,
+      accountsPlaceholderData,
+    ],
   );
 
-  const data = useReport('summary', params);
+  const reportData = useReport('summary', params);
+  const data = reportData && !('status' in reportData) ? reportData : null;
+  const reportUnavailable = reportData !== null && 'status' in reportData;
 
   return (
     <ReportCard
@@ -122,15 +147,30 @@ export function SummaryCard({
         >
           {data ? (
             <SummaryNumber
-              value={data?.total ?? 0}
+              value={data.total}
               contentType={content.type}
               suffix={content.type === 'percentage' ? '%' : ''}
-              loading={!data}
+              loading={false}
               initialFontSize={content.fontSize}
               animate={isEditing ?? false}
             />
+          ) : reportUnavailable ? (
+            <Text style={{ textAlign: 'center' }}>
+              <Trans>
+                Summary values are unavailable. Check that a Main currency is
+                set and every included account has a valid exchange rate.
+              </Trans>
+            </Text>
           ) : (
             <ReportCardValueSkeleton />
+          )}
+          {data?.hasForeignCurrency && (
+            <Text style={{ textAlign: 'center' }}>
+              <Trans
+                i18nKey="Values in {{currency}}. Foreign-currency history is an estimate at current rates."
+                values={{ currency: prefs.defaultCurrencyCode }}
+              />
+            </Text>
           )}
         </View>
       </View>
