@@ -53,7 +53,7 @@ export function TemplateSentence({
       const type = template.type;
       return (
         <Trans>
-          Unsupported template type: {{ type } satisfies TransObjectLiteral}
+          Unsupported template type: {{ type } as TransObjectLiteral}
         </Trans>
       );
     }
