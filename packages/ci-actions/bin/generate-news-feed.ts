@@ -4,9 +4,10 @@
 // flag from the release tooling; other posts opt in by hand).
 //
 // The file is committed so it can be reviewed in the PR that adds a post;
-// autofix.ci regenerates and commits it on every PR, and the "News feed check"
-// workflow fails a PR whose committed copy is stale. The app fetches it from
-// the `master` branch on GitHub, the same way as the custom theme catalog.
+// the "News feed check" workflow regenerates it and fails a PR whose committed
+// copy is stale (it does not commit a refresh; run the command below and
+// commit the result). The app fetches it from the `master` branch on GitHub,
+// the same way as the custom theme catalog.
 //
 // Run from the repo root: `yarn generate:news-feed`.
 

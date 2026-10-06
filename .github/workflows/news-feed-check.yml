@@ -1,9 +1,10 @@
 name: News feed check
 
 # The in-app notifications feed (packages/desktop-client/src/data/news.json) is
-# generated from the blog and committed so it can be reviewed. autofix.ci
-# regenerates it on every PR; this check fails the PR if the committed copy is
-# still out of date (for example if autofix was skipped).
+# generated from the blog and committed so it can be reviewed. This check
+# regenerates it from the committed blog posts (no network) and fails the PR if
+# the committed copy is out of date. It validates only: it does not commit a
+# refreshed feed, so run `yarn generate:news-feed` and commit the result.
 
 on:
   pull_request:
@@ -40,7 +41,7 @@ jobs:
 
           if ! git diff --quiet -- packages/desktop-client/src/data/news.json; then
             git --no-pager diff -- packages/desktop-client/src/data/news.json
-            echo "::error file=packages/desktop-client/src/data/news.json::news.json is out of date. Run \`yarn generate:news-feed\` and commit the result (autofix.ci normally does this for you)."
+            echo "::error file=packages/desktop-client/src/data/news.json::news.json is out of date. Run \`yarn generate:news-feed\` and commit the result (this check does not commit it for you)."
             exit 1
           fi
 
