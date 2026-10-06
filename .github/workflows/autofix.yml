@@ -22,10 +22,40 @@ jobs:
         uses: ./.github/actions/setup
         with:
           download-translations: 'false'
-      # Regenerates packages/desktop-client/src/data/news.json from the blog so
-      # the reviewed file is always current; autofix.ci commits any change.
-      - name: Generate news feed
-        run: yarn generate:news-feed
-      - name: Format code
+      # Native replacement for the autofix-ci/action app: it is not installed on
+      # this fork (every run failed with "autofix.ci app is not installed"), and
+      # the app only pushed commits, it never blocked. This gate keeps the
+      # format/type-aware-lint enforcement without any app, token or write
+      # permission: apply the fixes, fail if they changed anything, publish the
+      # patch. It does not commit; apply the patch (or run `yarn lint:fix`).
+      #
+      # Deliberately not run here: `yarn generate:news-feed`. It needs network
+      # and drifts independently of the PR, so it must not gate unrelated PRs;
+      # packages/desktop-client/src/data/news.json is reviewed/refreshed
+      # separately (see news-feed-check.yml).
+      - name: Apply format and lint fixes
         run: yarn lint:fix
-      - uses: autofix-ci/action@7a166d7532b277f34e16238930461bf77f9d7ed8 # v1.3.3
+      - name: Fail if fixes were needed
+        env:
+          PATCH_PATH: ${{ runner.temp }}/autofix/autofix.patch
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No format or lint fixes needed."
+            exit 0
+          fi
+          mkdir -p "$(dirname "$PATCH_PATH")"
+          git status --short
+          # --intent-to-add so brand-new (untracked) files appear in the patch
+          git add --intent-to-add .
+          git diff > "$PATCH_PATH"
+          git diff --stat
+          echo "::error title=Format/lint fixes needed::'yarn lint:fix' changed files. Run 'yarn lint:fix' locally and commit the result, or apply the 'autofix-patch' artifact with 'git apply autofix.patch'."
+          exit 1
+      - name: Upload autofix patch
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: autofix-patch
+          path: ${{ runner.temp }}/autofix/autofix.patch
+          if-no-files-found: ignore
+          retention-days: 7
