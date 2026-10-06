@@ -40,9 +40,11 @@ jobs:
       # Deliberately not run here: `yarn generate:news-feed`. It reads the
       # committed blog posts (no network), but it is only relevant to PRs that
       # touch the blog, feed or generator, so it stays in the path-filtered
-      # news-feed-check.yml, which validates the committed packages/
-      # desktop-client/src/data/news.json but does not regenerate or commit it:
-      # run `yarn generate:news-feed` and commit the result.
+      # news-feed-check.yml. That check regenerates the feed in its own
+      # ephemeral CI checkout and fails if the result differs from the
+      # committed packages/desktop-client/src/data/news.json; it never commits
+      # or pushes a refreshed file: run `yarn generate:news-feed` and commit
+      # the result.
       - name: Apply format and lint fixes
         id: fix
         run: yarn lint:fix
